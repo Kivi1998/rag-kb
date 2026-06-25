@@ -1,0 +1,53 @@
+# ===== Java / Spring Boot =====
+target/
+build/
+*.class
+*.jar
+*.war
+!**/src/**/*.jar
+.gradle/
+out/
+
+# ===== Maven =====
+.mvn/timing.properties
+.mvn/wrapper/maven-wrapper.jar
+
+# ===== IDE =====
+.idea/
+*.iml
+*.iws
+*.ipr
+.vscode/
+.settings/
+.project
+.classpath
+
+# ===== 环境与密钥（严禁提交）=====
+.env
+.env.*
+!.env.example
+*.local
+application-local.yml
+application-secret.yml
+*.pem
+*.key
+
+# ===== 日志 / 临时 =====
+*.log
+logs/
+tmp/
+temp/
+
+# ===== 操作系统 =====
+.DS_Store
+Thumbs.db
+
+# ===== 前端（如后续加入）=====
+node_modules/
+dist/
+.pnpm-store/
+
+# ===== 数据 / 上传文件 =====
+uploads/
+data/
+*.db

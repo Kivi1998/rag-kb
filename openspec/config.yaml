@@ -1,0 +1,39 @@
+schema: spec-driven
+
+# Project context — 生成规格工件时自动注入给 AI 的项目背景
+context: |
+  产品：rag-kb，toB 企业级文档知识库（RAG），面向团队，目标支持百人级协作。
+  成员上传各类文档（PDF/Word/PPT/网页/公众号）→ 解析→切块→向量化→高精度检索问答。
+
+  技术选型：
+  - 编排后端：Spring Boot（认证/RBAC/多租户/审计/调用编排），统一响应格式与 RESTful 风格
+  - RAG 引擎：RAGFlow（外部，DeepDoc 解析 + 检索 + rerank + 引用溯源），后端用 REST/Feign 调用，不自写 RAG 内核
+  - 模型服务：Xinference 托管 bge-m3(embedding) + bge-reranker-large(rerank) + 可选本地 LLM
+  - LLM：DeepSeek-V3/R1（云）或本地 vLLM
+  - 文档解析：MinerU / RAGFlow DeepDoc
+  - 业务存储：PostgreSQL + Redis；摄取流水线挂消息队列（Kafka/RabbitMQ/Redis Stream）削峰
+
+  企业级硬约束（toB 必备）：
+  - 多租户：组织→团队→成员，知识库级权限（RBAC），租户间数据绝不串（最高优先级红线）
+  - 认证：SSO/OIDC
+  - 异步摄取：队列削峰 + 处理进度可见
+  - 可观测：查询溯源、token 计量、延迟监控
+  - 配额限流：按租户计量与限流
+  - 审计：操作可追溯
+
+  编码约定：
+  - 所有注释/文档/commit message 用中文，代码标识符用英文
+  - 密钥放 .env / application-secret，禁止硬编码与提交
+  - 多租户隔离必须在每个查询路径强制校验，安全测试覆盖跨租户访问
+
+# Per-artifact rules — 各工件的额外约束
+rules:
+  proposal:
+    - 必须包含 "Non-goals（非目标）" 一节，明确这次不做什么
+    - 控制在 500 字以内，聚焦"为什么做"和"边界"
+  specs:
+    - 每个场景用 WHEN/THEN 形式写清楚，覆盖正常路径 + 关键失败/边界场景
+    - toB 功能必须包含"跨租户隔离/越权访问被拒"的安全场景
+  tasks:
+    - 拆成可执行小任务，每个任务粒度不超过 2 小时
+    - 涉及多租户/权限的任务必须配套安全测试
