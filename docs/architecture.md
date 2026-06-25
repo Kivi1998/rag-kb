@@ -24,7 +24,7 @@
          ▼
 ┌─ 模型服务 Xinference ──────────────────────────────┐
 │  Embedding: bge-m3   Rerank: bge-reranker-large      │
-│  LLM: DeepSeek-V3/R1（云）或本地 vLLM                 │
+│  LLM: 小米 MiMo（优先，本地 vLLM）/ DeepSeek（备选，云）│
 └───────────────────────────────────────────────────┘
 
 摄取流水线：上传 → 解析(MinerU/DeepDoc) → 切块 → embed → 入库

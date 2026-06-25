@@ -8,8 +8,8 @@ context: |
   技术选型：
   - 编排后端：Spring Boot（认证/RBAC/多租户/审计/调用编排），统一响应格式与 RESTful 风格
   - RAG 引擎：RAGFlow（外部，DeepDoc 解析 + 检索 + rerank + 引用溯源），后端用 REST/Feign 调用，不自写 RAG 内核
-  - 模型服务：Xinference 托管 bge-m3(embedding) + bge-reranker-large(rerank) + 可选本地 LLM
-  - LLM：DeepSeek-V3/R1（云）或本地 vLLM
+  - 模型服务：Xinference 托管 bge-m3(embedding) + bge-reranker-large(rerank) + 小米 MiMo(本地 LLM)
+  - LLM：小米 MiMo（优先，开源权重经 Xinference/vLLM 本地托管）；备选 DeepSeek-V3/R1（云端 API）
   - 文档解析：MinerU / RAGFlow DeepDoc
   - 业务存储：PostgreSQL + Redis；摄取流水线挂消息队列（Kafka/RabbitMQ/Redis Stream）削峰
 

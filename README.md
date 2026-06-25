@@ -16,8 +16,8 @@
 |----|------|------|
 | 编排后端 | **Spring Boot** | 认证/RBAC/多租户/审计/调用编排，对齐企业生态 |
 | RAG 引擎 | **RAGFlow** | 外部引擎，DeepDoc 文档解析 + 检索 + rerank + 引用，REST 调用 |
-| 模型服务 | **Xinference** | 统一托管 bge-m3（embedding）+ bge-reranker-large（rerank）+ 可选本地 LLM |
-| LLM | **DeepSeek-V3 / R1** | 云端 API；或本地 vLLM |
+| 模型服务 | **Xinference** | 统一托管 bge-m3（embedding）+ bge-reranker-large（rerank）+ 小米 MiMo（本地 LLM） |
+| LLM | **小米 MiMo**（优先） | 开源权重，经 Xinference / 本地 vLLM 托管；备选 DeepSeek-V3/R1（云端 API） |
 | 文档解析 | **MinerU / DeepDoc** | PDF→结构化文本 |
 | 业务存储 | **PostgreSQL + Redis** | 业务数据 + 缓存 |
 | 摄取流水线 | **消息队列**（Kafka / RabbitMQ / Redis Stream） | 百人级并发上传削峰 |
