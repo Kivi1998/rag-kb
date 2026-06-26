@@ -16,13 +16,11 @@
 1. **建分支**:从最新 `main` 切出,命名 `<type>/<简述>`,type ∈ `feat` / `fix` / `docs` / `chore` / `refactor`
    - 一个 OpenSpec change 对应一个分支,如 `feat/tenant-kb-foundation`
 2. **在分支上实现**:完成功能并跑通测试(多租户/权限改动必须含安全测试)
-3. **合并回 main**:验证通过后切回 `main`,`git merge --ff-only <分支>`(优先 fast-forward)
-4. **清理**:删除已合并分支 `git branch -d <分支>`
-5. **提交规范**:
-   - 仅在用户明确要求时 commit / push
-   - commit message 用中文,遵循 `<type>: <简述>` + 必要正文
-   - 结尾附 `Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>`
-6. **推送**:远程为 GitHub HTTPS(`gh` 已配为凭证助手),`git push origin main` 即可
+3. **评审门**:通过 `/review` + `/codex` + `/cso` 三轮评审,修复所有 CRITICAL/HIGH 发现
+4. **提交 + 推送分支**:commit message 用中文 `<type>: <简述>`,结尾附 `Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>`,`git push -u origin <分支>`
+5. **创建 PR**:用 `gh pr create` 创建 Pull Request,PR body 包含 What/Why/Security/Tests/Review 摘要
+6. **合并 PR**:评审通过后 `gh pr merge --merge`,切回 `main` 并 `git pull`
+7. **清理**:删除已合并分支 `git branch -d <分支>`
 
 ## AI 增强开发三件套:按阶段路由 + 交接契约
 
