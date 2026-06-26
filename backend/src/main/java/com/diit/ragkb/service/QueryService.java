@@ -44,9 +44,10 @@ public class QueryService {
     @Async("queryExecutor")
     public void query(UUID kbId, QueryRequest req, SseEmitter emitter) {
         String sessionId = null;
+        KnowledgeBase kb = null;
         try {
             // 1. 获取知识库(已校验租户,此处不再重复)
-            KnowledgeBase kb = kbRepository.findById(kbId)
+            kb = kbRepository.findById(kbId)
                     .orElseThrow(() -> new RuntimeException("知识库不存在"));
 
             // 2. 懒建 Chat Assistant
@@ -78,12 +79,9 @@ public class QueryService {
                 emitter.completeWithError(ex);
             }
         } finally {
-            // 6. fire-and-forget 删除 Session
-            if (sessionId != null) {
-                KnowledgeBase kb = kbRepository.findById(kbId).orElse(null);
-                if (kb != null && kb.getRagflowChatId() != null) {
-                    ragFlowClient.deleteSession(kb.getRagflowChatId(), sessionId);
-                }
+            // 6. fire-and-forget 删除 Session(复用 try 块的 kb,避免重复查询)
+            if (sessionId != null && kb != null && kb.getRagflowChatId() != null) {
+                ragFlowClient.deleteSession(kb.getRagflowChatId(), sessionId);
             }
         }
     }

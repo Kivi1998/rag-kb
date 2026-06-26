@@ -6,6 +6,7 @@ import com.diit.ragkb.service.KnowledgeBaseService;
 import com.diit.ragkb.service.QueryService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
@@ -21,6 +22,7 @@ import java.util.UUID;
  * 校验阶段(同步):参数校验 + 租户校验 → 失败直接返回 HTTP 错误码
  * 推流阶段(异步):创建 SseEmitter → 委托 QueryService → 立即返回 emitter
  */
+@Slf4j
 @RestController
 @RequestMapping("/api/v1/knowledge-bases/{kbId}")
 @RequiredArgsConstructor
@@ -46,9 +48,9 @@ public class QueryController {
         SseEmitter emitter = new SseEmitter(180_000L);
 
         // 设置超时回调
-        emitter.onTimeout(() -> {
-            // 超时由容器触发,日志记录即可
-        });
+        emitter.onTimeout(() ->
+            log.warn("SseEmitter 超时,kbId={}", kbId)
+        );
 
         // 委托异步服务
         queryService.query(kbId, req, emitter);

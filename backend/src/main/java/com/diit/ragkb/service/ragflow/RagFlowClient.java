@@ -210,6 +210,18 @@ public class RagFlowClient {
     // ===== Chat 操作 =====
 
     /**
+     * 创建 JSON 请求体(HttpHeaders + HttpEntity)
+     *
+     * @param body 请求体
+     * @return HttpEntity(带 Content-Type: application/json)
+     */
+    private HttpEntity<Map<String, Object>> createJsonRequest(Map<String, Object> body) {
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        return new HttpEntity<>(body, headers);
+    }
+
+    /**
      * 创建 Chat Assistant
      *
      * @param kbId      知识库 ID(用于命名:ragkb-chat:{kbId})
@@ -222,12 +234,8 @@ public class RagFlowClient {
                 "dataset_ids", java.util.List.of(datasetId)
         );
 
-        HttpHeaders headers = new HttpHeaders();
-        headers.setContentType(MediaType.APPLICATION_JSON);
-        HttpEntity<Map<String, Object>> request = new HttpEntity<>(body, headers);
-
         String url = ragFlowProperties.getBaseUrl() + "/api/v1/chats";
-        ResponseEntity<Map> response = ragFlowRestTemplate.exchange(url, HttpMethod.POST, request, Map.class);
+        ResponseEntity<Map> response = ragFlowRestTemplate.exchange(url, HttpMethod.POST, createJsonRequest(body), Map.class);
 
         if (response.getStatusCode().is2xxSuccessful() && response.getBody() != null) {
             Map data = (Map) response.getBody().get("data");
@@ -251,12 +259,8 @@ public class RagFlowClient {
                 "name", "session-" + System.currentTimeMillis()
         );
 
-        HttpHeaders headers = new HttpHeaders();
-        headers.setContentType(MediaType.APPLICATION_JSON);
-        HttpEntity<Map<String, Object>> request = new HttpEntity<>(body, headers);
-
         String url = ragFlowProperties.getBaseUrl() + "/api/v1/chats/" + chatId + "/sessions";
-        ResponseEntity<Map> response = ragFlowRestTemplate.exchange(url, HttpMethod.POST, request, Map.class);
+        ResponseEntity<Map> response = ragFlowRestTemplate.exchange(url, HttpMethod.POST, createJsonRequest(body), Map.class);
 
         if (response.getStatusCode().is2xxSuccessful() && response.getBody() != null) {
             Map data = (Map) response.getBody().get("data");
@@ -363,12 +367,9 @@ public class RagFlowClient {
     public void deleteSession(String chatId, String sessionId) {
         try {
             String url = ragFlowProperties.getBaseUrl() + "/api/v1/chats/" + chatId + "/sessions";
-            HttpHeaders headers = new HttpHeaders();
-            headers.setContentType(MediaType.APPLICATION_JSON);
             Map<String, Object> body = Map.of("ids", java.util.List.of(sessionId));
-            HttpEntity<Map<String, Object>> request = new HttpEntity<>(body, headers);
 
-            ragFlowRestTemplate.exchange(url, HttpMethod.DELETE, request, Map.class);
+            ragFlowRestTemplate.exchange(url, HttpMethod.DELETE, createJsonRequest(body), Map.class);
             log.info("删除 Session 成功,chatId={},sessionId={}", chatId, sessionId);
         } catch (Exception e) {
             log.warn("删除 Session 失败(忽略),chatId={},sessionId={}: {}", chatId, sessionId, e.getMessage());
@@ -384,12 +385,9 @@ public class RagFlowClient {
         if (chatId == null) return;
         try {
             String url = ragFlowProperties.getBaseUrl() + "/api/v1/chats";
-            HttpHeaders headers = new HttpHeaders();
-            headers.setContentType(MediaType.APPLICATION_JSON);
             Map<String, Object> body = Map.of("ids", java.util.List.of(chatId));
-            HttpEntity<Map<String, Object>> request = new HttpEntity<>(body, headers);
 
-            ragFlowRestTemplate.exchange(url, HttpMethod.DELETE, request, Map.class);
+            ragFlowRestTemplate.exchange(url, HttpMethod.DELETE, createJsonRequest(body), Map.class);
             log.info("删除 Chat Assistant 成功,chatId={}", chatId);
         } catch (Exception e) {
             log.warn("删除 Chat Assistant 失败,chatId={}: {}", chatId, e.getMessage());
