@@ -36,6 +36,14 @@ spring:
     jwt:
       # 从 application-secret.yml 覆盖
       secret: ${JWT_SECRET:}
+      expiration-seconds: ${JWT_EXPIRATION_SECONDS:86400}  # 默认 24 小时
+
+  # Redis
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
 
 # RAGFlow 连接 — 从 application-secret.yml 覆盖
 ragflow:

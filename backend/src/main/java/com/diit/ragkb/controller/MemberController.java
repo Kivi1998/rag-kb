@@ -3,6 +3,8 @@ package com.diit.ragkb.controller;
 import com.diit.ragkb.common.ApiResponse;
 import com.diit.ragkb.model.Member;
 import com.diit.ragkb.model.MemberRole;
+import com.diit.ragkb.security.TenantContext;
+import com.diit.ragkb.service.AuthService;
 import com.diit.ragkb.service.MemberService;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
@@ -23,6 +25,7 @@ import java.util.UUID;
 public class MemberController {
 
     private final MemberService memberService;
+    private final AuthService authService;
 
     @PostMapping
     public ApiResponse<Member> invite(@Valid @RequestBody InviteMemberRequest req) {
@@ -43,6 +46,17 @@ public class MemberController {
     public ApiResponse<Member> changeRole(@PathVariable("id") UUID id,
                                           @Valid @RequestBody ChangeRoleRequest req) {
         return ApiResponse.ok(memberService.changeRole(id, req.getRole()));
+    }
+
+    /**
+     * 管理员重置成员密码(仅 owner/admin)
+     */
+    @PostMapping("/{id}/reset-password")
+    public ApiResponse<String> resetPassword(@PathVariable("id") UUID memberId) {
+        String callerRole = TenantContext.getRole();
+        String tempPassword = authService.adminResetPassword(
+                TenantContext.getMemberId(), memberId, callerRole);
+        return ApiResponse.ok(tempPassword);
     }
 
     @Data

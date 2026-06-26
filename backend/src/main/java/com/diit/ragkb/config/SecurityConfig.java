@@ -34,8 +34,9 @@ public class SecurityConfig {
             .csrf(AbstractHttpConfigurer::disable)
             .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .authorizeHttpRequests(auth -> auth
-                // 创建组织:需 JWT 认证(在 JwtAuthFilter 中解析 subject),但免租户上下文
-                // Actuator
+                // 免认证端点
+                .requestMatchers("/api/v1/auth/register").permitAll()
+                .requestMatchers("/api/v1/auth/login").permitAll()
                 .requestMatchers("/actuator/**").permitAll()
                 // 其他一律需要认证
                 .anyRequest().authenticated()

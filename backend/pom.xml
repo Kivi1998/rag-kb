@@ -100,6 +100,12 @@
             <artifactId>spring-boot-starter-aop</artifactId>
         </dependency>
 
+        <!-- Redis: token 黑名单 -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-redis</artifactId>
+        </dependency>
+
         <!-- OpenFeign: RAGFlow REST 客户端 -->
         <dependency>
             <groupId>org.springframework.cloud</groupId>

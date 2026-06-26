@@ -3,32 +3,28 @@ package com.diit.ragkb;
 import com.diit.ragkb.model.Member;
 import com.diit.ragkb.model.MemberRole;
 import com.diit.ragkb.model.Organization;
+import com.diit.ragkb.model.User;
 import com.diit.ragkb.repository.MemberRepository;
 import com.diit.ragkb.repository.OrganizationRepository;
-import io.jsonwebtoken.Jwts;
+import com.diit.ragkb.repository.UserRepository;
+import com.diit.ragkb.service.JwtService;
+import com.diit.ragkb.service.PasswordService;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
-import javax.crypto.SecretKey;
-import io.jsonwebtoken.security.Keys;
-import java.nio.charset.StandardCharsets;
-
 /**
- * 测试工具:创建组织/成员,生成 JWT
+ * 测试工具:创建组织/成员/用户,生成 JWT
  */
 @Component
 public class TestHelper {
 
-    @Autowired
-    private OrganizationRepository orgRepository;
-    @Autowired
-    private MemberRepository memberRepository;
+    @Autowired private OrganizationRepository orgRepository;
+    @Autowired private MemberRepository memberRepository;
+    @Autowired private UserRepository userRepository;
+    @Autowired private JwtService jwtService;
+    @Autowired private PasswordService passwordService;
 
-    @Value("${spring.security.jwt.secret}")
-    private String jwtSecret;
-
-    /** 创建组织并返回(subject 自动成为 owner) */
+    /** 创建组织 */
     public Organization createOrg(String name) {
         Organization org = new Organization();
         org.setName(name);
@@ -44,12 +40,22 @@ public class TestHelper {
         return memberRepository.save(member);
     }
 
-    /** 生成 JWT token */
-    public String generateToken(String subjectId) {
-        SecretKey key = Keys.hmacShaKeyFor(jwtSecret.getBytes(StandardCharsets.UTF_8));
-        return Jwts.builder()
-                .subject(subjectId)
-                .signWith(key)
-                .compact();
+    /** 创建用户并返回 */
+    public User createUser(String email, String rawPassword, String displayName) {
+        User user = new User();
+        user.setEmail(email);
+        user.setPasswordHash(passwordService.hash(rawPassword));
+        user.setDisplayName(displayName != null ? displayName : email.split("@")[0]);
+        return userRepository.save(user);
+    }
+
+    /** 用 JwtService 签发 JWT(与生产一致) */
+    public String generateToken(String userId) {
+        return jwtService.generateToken(java.util.UUID.fromString(userId), 0);
+    }
+
+    /** 用 JwtService 签发 JWT(指定 tokenVersion) */
+    public String generateToken(java.util.UUID userId, int tokenVersion) {
+        return jwtService.generateToken(userId, tokenVersion);
     }
 }
