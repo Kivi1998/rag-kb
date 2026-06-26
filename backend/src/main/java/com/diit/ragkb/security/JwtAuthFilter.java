@@ -64,13 +64,13 @@ public class JwtAuthFilter extends OncePerRequestFilter {
     protected boolean shouldNotFilter(HttpServletRequest request) {
         String path = request.getRequestURI();
         // 注册/登录:免 JWT(由 SecurityConfig permitAll 处理)
-        return path.contains("/api/v1/auth/register")
-                || path.contains("/api/v1/auth/login");
+        return path.equals("/api/v1/auth/register")
+                || path.equals("/api/v1/auth/login");
     }
 
     /** 是否是免租户上下文但需 JWT 的端点(如改密) */
     private boolean isAuthOnlyEndpoint(HttpServletRequest request) {
-        return request.getRequestURI().contains("/api/v1/auth/change-password");
+        return request.getRequestURI().equals("/api/v1/auth/change-password");
     }
 
     @Override
@@ -93,7 +93,8 @@ public class JwtAuthFilter extends OncePerRequestFilter {
 
             String subject = claims.getSubject();
             String jti = claims.getId();
-            int tv = claims.get("tv", Integer.class);
+            Integer tvObj = claims.get("tv", Integer.class);
+            int tv = (tvObj != null) ? tvObj : -1; // 缺失时必然不匹配任何用户的 tokenVersion(>=0)
 
             // 2. Redis 黑名单检查(fail-close)
             if (!redisService.isAvailable()) {

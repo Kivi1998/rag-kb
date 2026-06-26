@@ -53,6 +53,13 @@ public class GlobalExceptionHandler {
                 .body(ApiResponse.fail(403, ex.getMessage()));
     }
 
+    /** 账号已锁定(423) */
+    @ExceptionHandler(AccountLockedException.class)
+    public ResponseEntity<ApiResponse<Void>> handleAccountLocked(AccountLockedException ex) {
+        return ResponseEntity.status(423)
+                .body(ApiResponse.fail(423, ex.getMessage()));
+    }
+
     /** 资源不存在(404) —— 含跨租户(对其他组织资源一律按不存在处理) */
     @ExceptionHandler(ResourceNotFoundException.class)
     public ResponseEntity<ApiResponse<Void>> handleNotFound(ResourceNotFoundException ex) {

@@ -50,12 +50,12 @@ public class AuthController {
     public ApiResponse<Void> changePassword(HttpServletRequest request,
                                             @Valid @RequestBody ChangePasswordRequest req) {
         UUID userId = extractUserId(request);
-        // 修改密码后将当前 JWT jti 加入黑名单
         String jti = (String) request.getAttribute("jwtJti");
         long remainingSeconds = (long) request.getAttribute("jwtRemainingSeconds");
 
-        authService.changePassword(userId, req.getOldPassword(), req.getNewPassword());
-        authService.blacklistToken(jti, remainingSeconds);
+        // 黑名单写入已移入 Service(changePassword 内部,事务提交后执行)
+        authService.changePassword(userId, req.getOldPassword(), req.getNewPassword(),
+                jti, remainingSeconds);
 
         return ApiResponse.ok();
     }

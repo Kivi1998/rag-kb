@@ -53,9 +53,12 @@ public class MemberController {
      */
     @PostMapping("/{id}/reset-password")
     public ApiResponse<String> resetPassword(@PathVariable("id") UUID memberId) {
+        // 通过 memberId 反查 subjectId(=userId)
+        Member targetMember = memberService.getByIdAndCurrentOrg(memberId);
+        UUID targetUserId = UUID.fromString(targetMember.getSubjectId());
         String callerRole = TenantContext.getRole();
         String tempPassword = authService.adminResetPassword(
-                TenantContext.getMemberId(), memberId, callerRole);
+                TenantContext.getMemberId(), targetUserId, callerRole);
         return ApiResponse.ok(tempPassword);
     }
 

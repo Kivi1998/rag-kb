@@ -31,8 +31,7 @@ public class AuthService {
     private final JwtService jwtService;
     private final RedisService redisService;
 
-    // 登录失败计数(内存):email → FailureInfo
-    private final Map<String, FailureInfo> failureMap = new ConcurrentHashMap<>();
+    // 登录失败计数存储在 User.failedLoginCount(数据库)
 
     private static final int MAX_LOGIN_FAILURES = 5;
     private static final long LOCK_DURATION_MINUTES = 15;
@@ -96,7 +95,7 @@ public class AuthService {
                 user.setLockedUntil(null);
                 userRepository.save(user);
             } else {
-                throw new com.diit.ragkb.exception.BusinessConflictException("账号已锁定,请稍后再试");
+                throw new com.diit.ragkb.exception.AccountLockedException("账号已锁定,请稍后再试");
             }
         }
 
@@ -124,9 +123,11 @@ public class AuthService {
 
     /**
      * 用户修改密码
+     * 事务提交后再将当前 JWT jti 写入 Redis 黑名单(确保原子性)
      */
     @Transactional
-    public void changePassword(UUID userId, String oldPassword, String newPassword) {
+    public void changePassword(UUID userId, String oldPassword, String newPassword,
+                               String currentJti, long remainingSeconds) {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new ResourceNotFoundException("用户不存在"));
 
@@ -138,6 +139,15 @@ public class AuthService {
         user.setPasswordHash(passwordService.hash(newPassword));
         user.setMustChangePassword(false);
         userRepository.save(user);
+
+        // 事务提交后再写 Redis(避免 DB 成功但 Redis 失败导致不一致)
+        org.springframework.transaction.support.TransactionSynchronizationManager
+                .registerSynchronization(new org.springframework.transaction.support.TransactionSynchronization() {
+                    @Override
+                    public void afterCommit() {
+                        blacklistToken(currentJti, remainingSeconds);
+                    }
+                });
 
         log.info("用户修改密码成功: userId={}", userId);
     }
@@ -210,22 +220,17 @@ public class AuthService {
     }
 
     private String generateTempPassword() {
-        // 8 位: 2 大写 + 2 小写 + 2 数字 + 2 特殊字符
+        // 12 位: 3 大写 + 3 小写 + 3 数字 + 3 特殊字符
         String upper = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
         String lower = "abcdefghijklmnopqrstuvwxyz";
         String digits = "0123456789";
-        String special = "!@#$%";
-        String all = upper + lower + digits + special;
+        String special = "!@#$%^&*";
         java.security.SecureRandom random = new java.security.SecureRandom();
         StringBuilder sb = new StringBuilder();
-        sb.append(upper.charAt(random.nextInt(upper.length())));
-        sb.append(upper.charAt(random.nextInt(upper.length())));
-        sb.append(lower.charAt(random.nextInt(lower.length())));
-        sb.append(lower.charAt(random.nextInt(lower.length())));
-        sb.append(digits.charAt(random.nextInt(digits.length())));
-        sb.append(digits.charAt(random.nextInt(digits.length())));
-        sb.append(special.charAt(random.nextInt(special.length())));
-        sb.append(special.charAt(random.nextInt(special.length())));
+        for (int i = 0; i < 3; i++) sb.append(upper.charAt(random.nextInt(upper.length())));
+        for (int i = 0; i < 3; i++) sb.append(lower.charAt(random.nextInt(lower.length())));
+        for (int i = 0; i < 3; i++) sb.append(digits.charAt(random.nextInt(digits.length())));
+        for (int i = 0; i < 3; i++) sb.append(special.charAt(random.nextInt(special.length())));
         // 打乱顺序
         char[] chars = sb.toString().toCharArray();
         for (int i = chars.length - 1; i > 0; i--) {
@@ -235,8 +240,4 @@ public class AuthService {
         return new String(chars);
     }
 
-    private static class FailureInfo {
-        int count;
-        Instant firstFailure;
-    }
 }
