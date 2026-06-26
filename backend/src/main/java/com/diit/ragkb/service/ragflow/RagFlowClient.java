@@ -32,12 +32,28 @@ import java.util.Map;
  */
 @Slf4j
 @Component
-@RequiredArgsConstructor
 public class RagFlowClient {
 
     private final RestTemplate ragFlowRestTemplate;
+    private RestTemplate ragFlowStreamingRestTemplate;
     private final RagFlowProperties ragFlowProperties;
     private final ObjectMapper objectMapper;
+
+    public RagFlowClient(RestTemplate ragFlowRestTemplate,
+                         RagFlowProperties ragFlowProperties,
+                         ObjectMapper objectMapper) {
+        this.ragFlowRestTemplate = ragFlowRestTemplate;
+        this.ragFlowStreamingRestTemplate = ragFlowRestTemplate; // 默认回退
+        this.ragFlowProperties = ragFlowProperties;
+        this.objectMapper = objectMapper;
+    }
+
+    /** 注入流式专用 RestTemplate(5 分钟读超时) */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    public void setStreamingRestTemplate(
+            @org.springframework.beans.factory.annotation.Qualifier("ragFlowStreamingRestTemplate") RestTemplate streaming) {
+        this.ragFlowStreamingRestTemplate = streaming;
+    }
 
     /**
      * 创建 dataset
@@ -290,7 +306,8 @@ public class RagFlowClient {
 
         Map<String, Object> body = Map.of(
                 "question", question,
-                "stream", true
+                "stream", true,
+                "top_n", topN
         );
 
         RequestCallback requestCallback = req -> {
@@ -298,7 +315,8 @@ public class RagFlowClient {
             req.getBody().write(objectMapper.writeValueAsBytes(body));
         };
 
-        ragFlowRestTemplate.execute(url, HttpMethod.POST, requestCallback, response -> {
+        // 使用流式专用 RestTemplate(5 分钟读超时),避免长文本问答被截断
+        ragFlowStreamingRestTemplate.execute(url, HttpMethod.POST, requestCallback, response -> {
             try (BufferedReader reader = new BufferedReader(
                     new InputStreamReader(response.getBody(), StandardCharsets.UTF_8))) {
                 String line;
@@ -378,20 +396,17 @@ public class RagFlowClient {
 
     /**
      * 删除 Chat Assistant(供知识库删除时级联清理)
+     * 失败时抛出异常,由调用方决定是否标记 PENDING_CLEANUP
      *
      * @param chatId RAGFlow Chat Assistant ID
      */
     public void deleteChat(String chatId) {
         if (chatId == null) return;
-        try {
-            String url = ragFlowProperties.getBaseUrl() + "/api/v1/chats";
-            Map<String, Object> body = Map.of("ids", java.util.List.of(chatId));
+        String url = ragFlowProperties.getBaseUrl() + "/api/v1/chats";
+        Map<String, Object> body = Map.of("ids", java.util.List.of(chatId));
 
-            ragFlowRestTemplate.exchange(url, HttpMethod.DELETE, createJsonRequest(body), Map.class);
-            log.info("删除 Chat Assistant 成功,chatId={}", chatId);
-        } catch (Exception e) {
-            log.warn("删除 Chat Assistant 失败,chatId={}: {}", chatId, e.getMessage());
-        }
+        ragFlowRestTemplate.exchange(url, HttpMethod.DELETE, createJsonRequest(body), Map.class);
+        log.info("删除 Chat Assistant 成功,chatId={}", chatId);
     }
 
     /**

@@ -98,9 +98,12 @@ public class QueryService {
         }
 
         synchronized (kb.getId().toString().intern()) {
-            // double-check
-            if (kb.getRagflowChatId() != null) {
-                return kb.getRagflowChatId();
+            // double-check:重新从 DB 加载,避免 stale 对象导致重复创建
+            KnowledgeBase fresh = kbRepository.findById(kb.getId()).orElse(kb);
+            if (fresh.getRagflowChatId() != null) {
+                // 另一个线程已创建,同步到传入的 kb 对象
+                kb.setRagflowChatId(fresh.getRagflowChatId());
+                return fresh.getRagflowChatId();
             }
 
             String chatId = ragFlowClient.createChat(kb.getId().toString(), kb.getRagflowDatasetId());

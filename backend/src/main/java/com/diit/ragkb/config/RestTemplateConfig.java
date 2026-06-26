@@ -14,12 +14,23 @@ import java.time.Duration;
 @Configuration
 public class RestTemplateConfig {
 
+    /** 通用 RAGFlow REST 客户端(30s 读超时) */
     @Bean
     public RestTemplate ragFlowRestTemplate(RagFlowProperties properties) {
         return new RestTemplateBuilder()
                 .defaultHeader("Authorization", "Bearer " + properties.getApiKey())
                 .setConnectTimeout(Duration.ofSeconds(10))
                 .setReadTimeout(Duration.ofSeconds(30))
+                .build();
+    }
+
+    /** 流式 SSE 客户端(5 分钟读超时,用于长文本问答) */
+    @Bean
+    public RestTemplate ragFlowStreamingRestTemplate(RagFlowProperties properties) {
+        return new RestTemplateBuilder()
+                .defaultHeader("Authorization", "Bearer " + properties.getApiKey())
+                .setConnectTimeout(Duration.ofSeconds(10))
+                .setReadTimeout(Duration.ofMinutes(5))
                 .build();
     }
 }
