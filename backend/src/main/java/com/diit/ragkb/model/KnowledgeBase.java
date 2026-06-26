@@ -38,6 +38,10 @@ public class KnowledgeBase {
     @Column(name = "ragflow_dataset_id", length = 200)
     private String ragflowDatasetId;
 
+    /** RAGFlow Chat Assistant ID(懒建,首次问答时写入) */
+    @Column(name = "ragflow_chat_id", length = 200)
+    private String ragflowChatId;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 30)
     private KbStatus status = KbStatus.ACTIVE;

@@ -83,7 +83,10 @@ public class KnowledgeBaseService {
     public boolean delete(UUID kbId) {
         KnowledgeBase kb = getByIdAndCurrentOrg(kbId);
 
-        // 先删 dataset
+        // 先删 Chat Assistant(可为 null 时跳过)
+        ragFlowClient.deleteChat(kb.getRagflowChatId());
+
+        // 再删 dataset
         try {
             ragFlowClient.deleteDataset(kb.getRagflowDatasetId());
         } catch (Exception e) {
