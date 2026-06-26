@@ -25,6 +25,12 @@ spring:
       hibernate:
         format_sql: true
 
+  # 文件上传
+  servlet:
+    multipart:
+      max-file-size: 50MB
+      max-request-size: 52MB
+
   # Flyway
   flyway:
     enabled: true

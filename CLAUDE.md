@@ -24,13 +24,45 @@
    - 结尾附 `Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>`
 6. **推送**:远程为 GitHub HTTPS(`gh` 已配为凭证助手),`git push origin main` 即可
 
-## AI 增强开发三件套
+## AI 增强开发三件套:按阶段路由 + 交接契约
 
-| 工具 | 阶段 | 用途 |
-|------|------|------|
-| **OpenSpec** | 规划 | 需求 → proposal / specs / design / tasks;`/opsx:propose` 发起,`/opsx:apply` 实现,`openspec validate` 校验 |
-| **Superpowers** | 开发 | 先澄清(brainstorming)、TDD、子 Agent 执行、code-review、完成前 verification |
-| **gstack** | 交付 | 应用跑起来后的 Browser QA / dogfooding(规格阶段不适用,实现出可运行后端后启用) |
+三个工具在"规划"阶段能力三重重叠(OpenSpec propose / Superpowers brainstorming / gstack plan-eng-review 都能做),
+在"代码评审"双重重叠。为避免互相打架,**每个阶段只认一个"权威所有者",重叠技能降级为辅助或弃用**。
+
+各工具不可替代的内核:**OpenSpec = 把规格/变更持久化落盘(可评审、可归档进 `specs/`);
+Superpowers = TDD 内循环纪律 + 自动触发;gstack = 接触真实外部世界(评审 / 安全 / 交付 / 反思)**。
+
+| 阶段 | 权威所有者 | 辅助 | 交接产物 |
+|------|-----------|------|---------|
+| 规划·探索 | **Superpowers `brainstorming`**(自动触发,苏格拉底式追问) | OpenSpec `/opsx:explore` | 澄清后的想法 |
+| 规划·定规格 | **OpenSpec `/opsx:propose`** | — | proposal / specs / design / tasks(落盘进 git) |
+| 规划·评审(强制 ≥1 轮) | **gstack `/plan-eng-review`**;安全相关加 `/cso` | — | 评审决议回填进 design / tasks,`openspec validate --strict` 通过 |
+| 实现 | **Superpowers TDD + 子 Agent**,按 `tasks.md` 逐项红绿重构 | OpenSpec `/opsx:apply` 当任务追踪 | 代码 + 测试 |
+| 代码评审(强制,不可跳) | **gstack `/review`(Opus 4.8)+ `/codex`(MiMo,跨模型第二意见)+ `/cso`**(OWASP/STRIDE 打多租户红线) | Superpowers `requesting-code-review`(实现期每任务内循环) | 评审结论 + 修复 |
+| 交付 | **gstack `/ship`** + `/document-release` | — | PR + 文档更新 |
+| 归档 | **OpenSpec `/opsx:archive`** | — | specs 提升到 `openspec/specs/` |
+| 反思 | gstack `/retro` | — | learnings |
+
+**模型与跨模型评审说明:**
+
+- **强制评审门 = gstack `/review` + `/codex` 交叉模型 + `/cso`**:
+  - `/review`、`/cso`、Superpowers `requesting-code-review` 跑在当前 Claude 会话模型 **Opus 4.8**;
+  - `/codex` 跑 **小米 MiMo v2.5-pro**(`codex-cli 0.142.2`),经 **cc-switch 本地代理**
+    (`http://127.0.0.1:15721/v1`,request rectifier 矫正工具协议)接入。工具调用已实测可用。
+  - 二者构成真正的**跨厂商交叉评审**(Anthropic Opus 4.8 × Xiaomi MiMo):`/review` 与 `/codex`
+    都跑过同一分支后,gstack 给出交叉分析(哪些 bug 两边都报、哪些各自独有)。
+- **`/codex` 的前置依赖**:依赖 **cc-switch 本地代理常驻**(端口 `15721`)。cc-switch / 代理未运行时
+  codex 连不上 → `/codex` 失效。用前确认代理在跑;若 `/codex` 报连接错误,先查 cc-switch 是否启用了对应 provider。
+- **合规红线(MiMo token-plan)**:MiMo token-plan 套餐"仅限交互式编程工具使用,**禁止用于自动化脚本或应用后端**"。
+  该 `tp-` key 只能喂给 codex / Claude Code 这类工具,**绝不可填进 rag-kb 后端当生产 LLM**(违规会被封 key);
+  生产后端用 MiMo 正式 API 套餐。
+
+**注意事项:**
+
+- gstack **半数技能是前端 / 可视化**(`/design-*`、`/qa` 浏览器、`/canary`),纯后端阶段 N/A;
+  后端实际可用的是 `/plan-eng-review`、`/review`、`/codex`、`/cso`、`/ship`、`/document-release`、`/investigate`、`/retro`。
+  待前端就绪后再启用浏览器 QA / 视觉评审一类技能。
+- "规格阶段强制评审"与"代码评审"两道门**都不可跳过**(见 Git 工作流);一个 OpenSpec change 对应一个分支。
 
 ## 编码约定(与 openspec/config.yaml 对齐)
 
