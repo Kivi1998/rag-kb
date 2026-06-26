@@ -1,0 +1,77 @@
+package com.diit.ragkb.exception;
+
+import com.diit.ragkb.common.ApiResponse;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.annotation.ExceptionHandler;
+import org.springframework.web.bind.annotation.RestControllerAdvice;
+
+/**
+ * 全局异常处理
+ *
+ * 错码约定(与 OpenSpec design 对齐):
+ * - 400: 参数非法 / 业务校验失败
+ * - 401: 未认证
+ * - 403: 同租户内角色权限不足
+ * - 404: 资源不存在(含跨租户——对其他组织资源一律按不存在处理)
+ * - 409: 业务不变量冲突(如:降级最后一名 owner)
+ * - 500: 服务端内部错误(非业务异常)
+ */
+@Slf4j
+@RestControllerAdvice
+public class GlobalExceptionHandler {
+
+    /** 参数非法(400) */
+    @ExceptionHandler(MethodArgumentNotValidException.class)
+    public ResponseEntity<ApiResponse<Void>> handleValidation(MethodArgumentNotValidException ex) {
+        String msg = ex.getBindingResult().getFieldErrors().stream()
+                .map(e -> e.getField() + ": " + e.getDefaultMessage())
+                .reduce((a, b) -> a + "; " + b)
+                .orElse("参数校验失败");
+        return ResponseEntity.badRequest().body(ApiResponse.fail(400, msg));
+    }
+
+    /** 参数非法 / 业务校验失败(400) */
+    @ExceptionHandler(IllegalArgumentException.class)
+    public ResponseEntity<ApiResponse<Void>> handleIllegalArgument(IllegalArgumentException ex) {
+        return ResponseEntity.badRequest().body(ApiResponse.fail(400, ex.getMessage()));
+    }
+
+    /** 未认证(401) */
+    @ExceptionHandler(UnauthenticatedException.class)
+    public ResponseEntity<ApiResponse<Void>> handleUnauthenticated(UnauthenticatedException ex) {
+        return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                .body(ApiResponse.fail(401, ex.getMessage()));
+    }
+
+    /** 同租户内角色权限不足(403) */
+    @ExceptionHandler(AccessDeniedException.class)
+    public ResponseEntity<ApiResponse<Void>> handleAccessDenied(AccessDeniedException ex) {
+        return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                .body(ApiResponse.fail(403, ex.getMessage()));
+    }
+
+    /** 资源不存在(404) —— 含跨租户(对其他组织资源一律按不存在处理) */
+    @ExceptionHandler(ResourceNotFoundException.class)
+    public ResponseEntity<ApiResponse<Void>> handleNotFound(ResourceNotFoundException ex) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                .body(ApiResponse.fail(404, ex.getMessage()));
+    }
+
+    /** 业务不变量冲突(409) */
+    @ExceptionHandler(BusinessConflictException.class)
+    public ResponseEntity<ApiResponse<Void>> handleConflict(BusinessConflictException ex) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(ApiResponse.fail(409, ex.getMessage()));
+    }
+
+    /** 服务端内部错误兜底(500) */
+    @ExceptionHandler(Exception.class)
+    public ResponseEntity<ApiResponse<Void>> handleUnknown(Exception ex) {
+        log.error("未捕获异常", ex);
+        return ResponseEntity.internalServerError()
+                .body(ApiResponse.fail(500, "服务内部错误"));
+    }
+}
