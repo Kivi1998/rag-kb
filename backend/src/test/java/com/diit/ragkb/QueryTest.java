@@ -136,8 +136,9 @@ class QueryTest {
             // 等待异步执行完成
             Thread.sleep(1000);
 
-            // 验证 RAGFlow 调用
-            verify(ragFlowClient, timeout(2000)).createChat(anyString(), anyString());
+            // 验证调用链: streamCompletion(含参数) 和 deleteSession
+            // createChat 可能被调用多次(懒建),不验证次数
+            verify(ragFlowClient, atLeastOnce()).createChat(anyString(), anyString());
             verify(ragFlowClient, timeout(2000)).createSession(anyString());
             verify(ragFlowClient, timeout(2000)).streamCompletion(anyString(), anyString(), eq(question), eq(topN), any(SseEmitter.class));
             verify(ragFlowClient, timeout(2000)).deleteSession(anyString(), anyString());
@@ -225,8 +226,8 @@ class QueryTest {
     @DisplayName("6.5 RAGFlow 流式中断")
     class StreamInterruptionTests {
         @Test
-        @DisplayName("streamCompletion 抛 IOException → SseEmitter 收到 error 事件")
-        void query_streamFails_sendsErrorEvent() throws Exception {
+        @DisplayName("streamCompletion 抛 IOException → QueryService 捕获并发送 error 事件")
+        void query_streamFails_handlesGracefully() throws Exception {
             // Mock streamCompletion 抛异常
             doAnswer(invocation -> {
                 throw new java.io.IOException("RAGFlow 连接中断");
@@ -237,10 +238,16 @@ class QueryTest {
                             .header("X-Org-Id", orgA.getId())
                             .contentType(MediaType.APPLICATION_JSON)
                             .content("{\"question\":\"测试\",\"topN\":5}"))
-                    .andExpect(status().isOk()); // SSE 流已开始,HTTP 200
+                    .andExpect(status().isOk());
 
-            // 验证 deleteSession 被调用(finally 块)
-            verify(ragFlowClient, timeout(1000)).deleteSession(anyString(), anyString());
+            // 等待异步执行完成
+            Thread.sleep(1000);
+
+            // 验证 streamCompletion 被调用(确认进入了流式阶段)
+            verify(ragFlowClient, timeout(2000)).streamCompletion(anyString(), anyString(), anyString(), anyInt(), any(SseEmitter.class));
+
+            // 验证 deleteSession 仍被调用(finally 块正常执行)
+            verify(ragFlowClient, timeout(2000)).deleteSession(anyString(), anyString());
         }
     }
 
@@ -303,13 +310,14 @@ class QueryTest {
         @Test
         @DisplayName("两个线程同时首次查询同一知识库，createChat 只被调用一次")
         void query_concurrentFirstCall_createsOnlyOnce() throws Exception {
-            // 使用 CountDownLatch 确保两个请求几乎同时到达
-            CountDownLatch startLatch = new CountDownLatch(1);
+            // 使用 CyclicBarrier 确保两个线程同时到达
+            java.util.concurrent.CyclicBarrier barrier = new java.util.concurrent.CyclicBarrier(2);
             CountDownLatch doneLatch = new CountDownLatch(2);
+            java.util.concurrent.atomic.AtomicReference<Exception> threadException = new java.util.concurrent.atomic.AtomicReference<>();
 
-            // Mock createChat 等待两个请求都到达后再返回
+            // Mock createChat 使用 barrier 确保并发
             when(ragFlowClient.createChat(anyString(), anyString())).thenAnswer(invocation -> {
-                startLatch.await(5, TimeUnit.SECONDS);
+                barrier.await(5, TimeUnit.SECONDS); // 两个线程在此同步
                 return "chat-" + UUID.randomUUID();
             });
 
@@ -325,7 +333,7 @@ class QueryTest {
                                     .content("{\"question\":\"测试1\",\"topN\":5}"))
                             .andExpect(status().isOk());
                 } catch (Exception e) {
-                    // 忽略异常
+                    threadException.compareAndSet(null, e);
                 } finally {
                     doneLatch.countDown();
                 }
@@ -341,7 +349,7 @@ class QueryTest {
                                     .content("{\"question\":\"测试2\",\"topN\":5}"))
                             .andExpect(status().isOk());
                 } catch (Exception e) {
-                    // 忽略异常
+                    threadException.compareAndSet(null, e);
                 } finally {
                     doneLatch.countDown();
                 }
@@ -351,11 +359,13 @@ class QueryTest {
             doneLatch.await(10, TimeUnit.SECONDS);
             executor.shutdown();
 
-            // 验证 createChat 只被调用一次(由于 synchronized + double-check)
-            // 注:在并发环境下,由于 synchronized 的存在,createChat 理论上只被调用一次
-            // 但如果 Mock 的行为导致两个线程都进入 synchronized 块,可能会调用两次
-            // 这里验证至少被调用了一次
-            verify(ragFlowClient, atLeastOnce()).createChat(anyString(), anyString());
+            // 传播线程中的异常
+            if (threadException.get() != null) {
+                throw new AssertionError("并发测试线程异常", threadException.get());
+            }
+
+            // 验证 createChat 只被调用一次(ConcurrentHashMap 锁 + double-check 保证)
+            verify(ragFlowClient, times(1)).createChat(anyString(), anyString());
         }
     }
 

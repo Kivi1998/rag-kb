@@ -1,6 +1,8 @@
 package com.diit.ragkb.controller;
 
+import com.diit.ragkb.dto.QueryChunkEvent;
 import com.diit.ragkb.dto.QueryRequest;
+import com.diit.ragkb.model.KnowledgeBase;
 import com.diit.ragkb.security.TenantContext;
 import com.diit.ragkb.service.KnowledgeBaseService;
 import com.diit.ragkb.service.QueryService;
@@ -12,6 +14,7 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.util.UUID;
+import java.util.concurrent.RejectedExecutionException;
 
 /**
  * 问答控制器(需认证+租户上下文)
@@ -42,18 +45,37 @@ public class QueryController {
     public SseEmitter query(@PathVariable UUID kbId,
                             @Valid @RequestBody QueryRequest req) {
         // 同步阶段:租户校验(跨租户 → 404)
-        knowledgeBaseService.getByIdAndCurrentOrg(kbId);
+        KnowledgeBase kb = knowledgeBaseService.getByIdAndCurrentOrg(kbId);
+        UUID orgId = TenantContext.getOrgId();
 
-        // 创建 SseEmitter(超时 3 分钟)
-        SseEmitter emitter = new SseEmitter(180_000L);
+        // 创建 SseEmitter(超时 5 分钟,与流式 RestTemplate 超时对齐)
+        SseEmitter emitter = new SseEmitter(300_000L);
 
-        // 设置超时回调
-        emitter.onTimeout(() ->
-            log.warn("SseEmitter 超时,kbId={}", kbId)
+        // 设置超时回调:完成 emitter 避免僵尸线程
+        emitter.onTimeout(() -> {
+            log.warn("SseEmitter 超时,kbId={}", kbId);
+            emitter.complete();
+        });
+
+        // 设置完成回调:记录日志
+        emitter.onCompletion(() ->
+            log.debug("SseEmitter 完成,kbId={}", kbId)
         );
 
-        // 委托异步服务
-        queryService.query(kbId, req, emitter);
+        // 委托异步服务,处理线程池满的情况
+        try {
+            queryService.query(kbId, orgId, req, emitter);
+        } catch (RejectedExecutionException e) {
+            log.warn("问答线程池已满,kbId={}", kbId);
+            try {
+                emitter.send(SseEmitter.event()
+                        .name("error")
+                        .data(QueryChunkEvent.error("服务繁忙，请稍后重试")));
+                emitter.complete();
+            } catch (Exception ex) {
+                emitter.completeWithError(ex);
+            }
+        }
 
         return emitter;
     }

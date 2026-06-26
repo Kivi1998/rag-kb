@@ -2,10 +2,7 @@ package com.diit.ragkb.service.ragflow;
 
 import com.diit.ragkb.config.RagFlowProperties;
 import com.diit.ragkb.dto.QueryChunkEvent;
-import com.diit.ragkb.exception.ResourceNotFoundException;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import lombok.Data;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.core.io.Resource;
 import org.springframework.http.*;
@@ -56,6 +53,23 @@ public class RagFlowClient {
     }
 
     /**
+     * 从 RAGFlow 响应中提取 ID(通用解析模式)
+     *
+     * @param response    RAGFlow 响应
+     * @param operation   操作名称(用于日志)
+     * @return 提取的 ID
+     */
+    private String extractId(ResponseEntity<Map> response, String operation) {
+        if (response.getStatusCode().is2xxSuccessful() && response.getBody() != null) {
+            Map data = (Map) response.getBody().get("data");
+            if (data != null && data.get("id") != null) {
+                return data.get("id").toString();
+            }
+        }
+        throw new RuntimeException("RAGFlow " + operation + " 失败: " + response.getBody());
+    }
+
+    /**
      * 创建 dataset
      *
      * @param name        dataset 名称(用于查重:ragkb:{kbId})
@@ -78,22 +92,11 @@ public class RagFlowClient {
                 "parser_config", Map.of()
         );
 
-        HttpHeaders headers = new HttpHeaders();
-        headers.setContentType(MediaType.APPLICATION_JSON);
-        HttpEntity<Map<String, Object>> request = new HttpEntity<>(body, headers);
-
         String url = ragFlowProperties.getBaseUrl() + "/api/v1/datasets";
-        ResponseEntity<Map> response = ragFlowRestTemplate.exchange(url, HttpMethod.POST, request, Map.class);
-
-        if (response.getStatusCode().is2xxSuccessful() && response.getBody() != null) {
-            Map data = (Map) response.getBody().get("data");
-            if (data != null && data.get("id") != null) {
-                String datasetId = data.get("id").toString();
-                log.info("创建 dataset 成功,name={},datasetId={}", name, datasetId);
-                return datasetId;
-            }
-        }
-        throw new RuntimeException("RAGFlow 创建 dataset 失败: " + response.getBody());
+        ResponseEntity<Map> response = ragFlowRestTemplate.exchange(url, HttpMethod.POST, createJsonRequest(body), Map.class);
+        String datasetId = extractId(response, "创建 dataset");
+        log.info("创建 dataset 成功,name={},datasetId={}", name, datasetId);
+        return datasetId;
     }
 
     /**
@@ -252,16 +255,9 @@ public class RagFlowClient {
 
         String url = ragFlowProperties.getBaseUrl() + "/api/v1/chats";
         ResponseEntity<Map> response = ragFlowRestTemplate.exchange(url, HttpMethod.POST, createJsonRequest(body), Map.class);
-
-        if (response.getStatusCode().is2xxSuccessful() && response.getBody() != null) {
-            Map data = (Map) response.getBody().get("data");
-            if (data != null && data.get("id") != null) {
-                String chatId = data.get("id").toString();
-                log.info("创建 Chat Assistant 成功,kbId={},chatId={}", kbId, chatId);
-                return chatId;
-            }
-        }
-        throw new RuntimeException("RAGFlow 创建 Chat 失败: " + response.getBody());
+        String chatId = extractId(response, "创建 Chat");
+        log.info("创建 Chat Assistant 成功,kbId={},chatId={}", kbId, chatId);
+        return chatId;
     }
 
     /**
@@ -277,16 +273,9 @@ public class RagFlowClient {
 
         String url = ragFlowProperties.getBaseUrl() + "/api/v1/chats/" + chatId + "/sessions";
         ResponseEntity<Map> response = ragFlowRestTemplate.exchange(url, HttpMethod.POST, createJsonRequest(body), Map.class);
-
-        if (response.getStatusCode().is2xxSuccessful() && response.getBody() != null) {
-            Map data = (Map) response.getBody().get("data");
-            if (data != null && data.get("id") != null) {
-                String sessionId = data.get("id").toString();
-                log.info("创建 Session 成功,chatId={},sessionId={}", chatId, sessionId);
-                return sessionId;
-            }
-        }
-        throw new RuntimeException("RAGFlow 创建 Session 失败: " + response.getBody());
+        String sessionId = extractId(response, "创建 Session");
+        log.info("创建 Session 成功,chatId={},sessionId={}", chatId, sessionId);
+        return sessionId;
     }
 
     /**
