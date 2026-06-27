@@ -36,7 +36,7 @@ Superpowers = TDD 内循环纪律 + 自动触发;gstack = 接触真实外部世�
 | 规划·定规格 | **OpenSpec `/opsx:propose`** | — | proposal / specs / design / tasks(落盘进 git) |
 | 规划·评审(强制 ≥1 轮) | **gstack `/plan-eng-review`**;安全相关加 `/cso` | — | 评审决议回填进 design / tasks,`openspec validate --strict` 通过 |
 | 实现 | **Superpowers TDD + 子 Agent**,按 `tasks.md` 逐项红绿重构 | OpenSpec `/opsx:apply` 当任务追踪 | 代码 + 测试 |
-| 代码评审(强制,不可跳) | **gstack `/review`(Opus 4.8)+ `/codex`(MiMo,跨模型第二意见)+ `/cso`**(OWASP/STRIDE 打多租户红线) | Superpowers `requesting-code-review`(实现期每任务内循环) | 评审结论 + 修复 |
+| 代码评审(强制,不可跳) | **gstack `/review`(Opus 4.8)+ `/codex`(跨模型第二意见)+ `/cso`**(OWASP/STRIDE 打多租户红线) | Superpowers `requesting-code-review`(实现期每任务内循环) | 评审结论 + 修复 |
 | 交付 | **gstack `/ship`** + `/document-release` | — | PR + 文档更新 |
 | 归档 | **OpenSpec `/opsx:archive`** | — | specs 提升到 `openspec/specs/` |
 | 反思 | gstack `/retro` | — | learnings |

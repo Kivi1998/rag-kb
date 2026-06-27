@@ -83,7 +83,18 @@ public class KnowledgeBaseService {
     public boolean delete(UUID kbId) {
         KnowledgeBase kb = getByIdAndCurrentOrg(kbId);
 
-        // 先删 dataset
+        // 先删 Chat Assistant(可为 null 时跳过)
+        try {
+            ragFlowClient.deleteChat(kb.getRagflowChatId());
+        } catch (Exception e) {
+            // Chat 删除失败:标记待清理,但不阻塞后续 dataset 删除
+            log.warn("删除 Chat Assistant 失败,kbId={},标记待清理: {}", kbId, e.getMessage());
+            kb.setStatus(KbStatus.PENDING_CLEANUP);
+            kbRepository.save(kb);
+            return false;
+        }
+
+        // 再删 dataset
         try {
             ragFlowClient.deleteDataset(kb.getRagflowDatasetId());
         } catch (Exception e) {

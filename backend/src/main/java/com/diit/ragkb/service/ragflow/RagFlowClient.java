@@ -1,17 +1,21 @@
 package com.diit.ragkb.service.ragflow;
 
 import com.diit.ragkb.config.RagFlowProperties;
-import com.diit.ragkb.exception.ResourceNotFoundException;
-import lombok.Data;
-import lombok.RequiredArgsConstructor;
+import com.diit.ragkb.dto.QueryChunkEvent;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.core.io.Resource;
 import org.springframework.http.*;
 import org.springframework.stereotype.Component;
 import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
+import org.springframework.web.client.RequestCallback;
 import org.springframework.web.client.RestTemplate;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
 import java.util.Map;
 
 /**
@@ -25,11 +29,45 @@ import java.util.Map;
  */
 @Slf4j
 @Component
-@RequiredArgsConstructor
 public class RagFlowClient {
 
     private final RestTemplate ragFlowRestTemplate;
+    private RestTemplate ragFlowStreamingRestTemplate;
     private final RagFlowProperties ragFlowProperties;
+    private final ObjectMapper objectMapper;
+
+    public RagFlowClient(RestTemplate ragFlowRestTemplate,
+                         RagFlowProperties ragFlowProperties,
+                         ObjectMapper objectMapper) {
+        this.ragFlowRestTemplate = ragFlowRestTemplate;
+        this.ragFlowStreamingRestTemplate = ragFlowRestTemplate; // 默认回退
+        this.ragFlowProperties = ragFlowProperties;
+        this.objectMapper = objectMapper;
+    }
+
+    /** 注入流式专用 RestTemplate(5 分钟读超时) */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    public void setStreamingRestTemplate(
+            @org.springframework.beans.factory.annotation.Qualifier("ragFlowStreamingRestTemplate") RestTemplate streaming) {
+        this.ragFlowStreamingRestTemplate = streaming;
+    }
+
+    /**
+     * 从 RAGFlow 响应中提取 ID(通用解析模式)
+     *
+     * @param response    RAGFlow 响应
+     * @param operation   操作名称(用于日志)
+     * @return 提取的 ID
+     */
+    private String extractId(ResponseEntity<Map> response, String operation) {
+        if (response.getStatusCode().is2xxSuccessful() && response.getBody() != null) {
+            Map data = (Map) response.getBody().get("data");
+            if (data != null && data.get("id") != null) {
+                return data.get("id").toString();
+            }
+        }
+        throw new RuntimeException("RAGFlow " + operation + " 失败: " + response.getBody());
+    }
 
     /**
      * 创建 dataset
@@ -54,22 +92,11 @@ public class RagFlowClient {
                 "parser_config", Map.of()
         );
 
-        HttpHeaders headers = new HttpHeaders();
-        headers.setContentType(MediaType.APPLICATION_JSON);
-        HttpEntity<Map<String, Object>> request = new HttpEntity<>(body, headers);
-
         String url = ragFlowProperties.getBaseUrl() + "/api/v1/datasets";
-        ResponseEntity<Map> response = ragFlowRestTemplate.exchange(url, HttpMethod.POST, request, Map.class);
-
-        if (response.getStatusCode().is2xxSuccessful() && response.getBody() != null) {
-            Map data = (Map) response.getBody().get("data");
-            if (data != null && data.get("id") != null) {
-                String datasetId = data.get("id").toString();
-                log.info("创建 dataset 成功,name={},datasetId={}", name, datasetId);
-                return datasetId;
-            }
-        }
-        throw new RuntimeException("RAGFlow 创建 dataset 失败: " + response.getBody());
+        ResponseEntity<Map> response = ragFlowRestTemplate.exchange(url, HttpMethod.POST, createJsonRequest(body), Map.class);
+        String datasetId = extractId(response, "创建 dataset");
+        log.info("创建 dataset 成功,name={},datasetId={}", name, datasetId);
+        return datasetId;
     }
 
     /**
@@ -197,6 +224,178 @@ public class RagFlowClient {
             throw new RuntimeException("RAGFlow 删除文档失败: " + response.getBody());
         }
         log.info("删除 RAGFlow 文档成功,datasetId={},docId={}", datasetId, ragflowDocId);
+    }
+
+    // ===== Chat 操作 =====
+
+    /**
+     * 创建 JSON 请求体(HttpHeaders + HttpEntity)
+     *
+     * @param body 请求体
+     * @return HttpEntity(带 Content-Type: application/json)
+     */
+    private HttpEntity<Map<String, Object>> createJsonRequest(Map<String, Object> body) {
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        return new HttpEntity<>(body, headers);
+    }
+
+    /**
+     * 创建 Chat Assistant
+     *
+     * @param kbId      知识库 ID(用于命名:ragkb-chat:{kbId})
+     * @param datasetId 绑定的 RAGFlow dataset ID
+     * @return chatId(RAGFlow 返回)
+     */
+    public String createChat(String kbId, String datasetId) {
+        Map<String, Object> body = Map.of(
+                "name", "ragkb-chat:" + kbId,
+                "dataset_ids", java.util.List.of(datasetId)
+        );
+
+        String url = ragFlowProperties.getBaseUrl() + "/api/v1/chats";
+        ResponseEntity<Map> response = ragFlowRestTemplate.exchange(url, HttpMethod.POST, createJsonRequest(body), Map.class);
+        String chatId = extractId(response, "创建 Chat");
+        log.info("创建 Chat Assistant 成功,kbId={},chatId={}", kbId, chatId);
+        return chatId;
+    }
+
+    /**
+     * 创建临时 Session
+     *
+     * @param chatId RAGFlow Chat Assistant ID
+     * @return sessionId(RAGFlow 返回)
+     */
+    public String createSession(String chatId) {
+        Map<String, Object> body = Map.of(
+                "name", "session-" + System.currentTimeMillis()
+        );
+
+        String url = ragFlowProperties.getBaseUrl() + "/api/v1/chats/" + chatId + "/sessions";
+        ResponseEntity<Map> response = ragFlowRestTemplate.exchange(url, HttpMethod.POST, createJsonRequest(body), Map.class);
+        String sessionId = extractId(response, "创建 Session");
+        log.info("创建 Session 成功,chatId={},sessionId={}", chatId, sessionId);
+        return sessionId;
+    }
+
+    /**
+     * 流式消费 RAGFlow Chat Completion SSE 流
+     *
+     * @param chatId    Chat Assistant ID
+     * @param sessionId Session ID
+     * @param question  用户问题
+     * @param topN      返回引用来源数量
+     * @param emitter   SseEmitter(推送给客户端)
+     */
+    public void streamCompletion(String chatId, String sessionId, String question, int topN, SseEmitter emitter) {
+        String url = ragFlowProperties.getBaseUrl()
+                + "/api/v1/chats/" + chatId
+                + "/sessions/" + sessionId
+                + "/completions";
+
+        Map<String, Object> body = Map.of(
+                "question", question,
+                "stream", true,
+                "top_n", topN
+        );
+
+        RequestCallback requestCallback = req -> {
+            req.getHeaders().setContentType(MediaType.APPLICATION_JSON);
+            req.getBody().write(objectMapper.writeValueAsBytes(body));
+        };
+
+        // 使用流式专用 RestTemplate(5 分钟读超时),避免长文本问答被截断
+        ragFlowStreamingRestTemplate.execute(url, HttpMethod.POST, requestCallback, response -> {
+            try (BufferedReader reader = new BufferedReader(
+                    new InputStreamReader(response.getBody(), StandardCharsets.UTF_8))) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    if (line.startsWith("data:")) {
+                        String json = line.substring(5).trim();
+                        if ("[DONE]".equals(json)) {
+                            break;
+                        }
+                        dispatchSseEvent(json, emitter);
+                    }
+                }
+            }
+            return null;
+        });
+    }
+
+    /**
+     * 解析 RAGFlow SSE 数据行并分发到 SseEmitter
+     *
+     * RAGFlow Chat Completion SSE 格式(待联调确认):
+     * - 答案片段:{"data":"答案文本"}
+     * - 引用来源:{"reference":[...]}(流末尾)
+     * - 结束标记:[DONE]
+     */
+    private void dispatchSseEvent(String json, SseEmitter emitter) {
+        try {
+            Map<String, Object> payload = objectMapper.readValue(json, Map.class);
+
+            // 答案片段
+            Object data = payload.get("data");
+            if (data instanceof String && !((String) data).isBlank()) {
+                emitter.send(SseEmitter.event()
+                        .name("chunk")
+                        .data(QueryChunkEvent.chunk((String) data)));
+            }
+
+            // 引用来源(流末尾携带)
+            Object refs = payload.get("reference");
+            if (refs instanceof java.util.List) {
+                java.util.List<?> refList = (java.util.List<?>) refs;
+                for (Object ref : refList) {
+                    if (ref instanceof Map) {
+                        Map<String, Object> refMap = (Map<String, Object>) ref;
+                        String docName = String.valueOf(refMap.getOrDefault("doc_name", "unknown"));
+                        String content = String.valueOf(refMap.getOrDefault("content", ""));
+                        Object scoreObj = refMap.get("similarity");
+                        double score = scoreObj instanceof Number ? ((Number) scoreObj).doubleValue() : 0.0;
+                        emitter.send(SseEmitter.event()
+                                .name("source")
+                                .data(QueryChunkEvent.source(docName, content, score)));
+                    }
+                }
+            }
+        } catch (Exception e) {
+            log.warn("解析 RAGFlow SSE 数据失败,json={}: {}", json, e.getMessage());
+        }
+    }
+
+    /**
+     * 删除 Session(fire-and-forget,异常静默忽略)
+     *
+     * @param chatId    Chat Assistant ID
+     * @param sessionId Session ID
+     */
+    public void deleteSession(String chatId, String sessionId) {
+        try {
+            String url = ragFlowProperties.getBaseUrl() + "/api/v1/chats/" + chatId + "/sessions";
+            Map<String, Object> body = Map.of("ids", java.util.List.of(sessionId));
+
+            ragFlowRestTemplate.exchange(url, HttpMethod.DELETE, createJsonRequest(body), Map.class);
+            log.info("删除 Session 成功,chatId={},sessionId={}", chatId, sessionId);
+        } catch (Exception e) {
+            log.warn("删除 Session 失败(忽略),chatId={},sessionId={}: {}", chatId, sessionId, e.getMessage());
+        }
+    }
+
+    /**
+     * 删除 Chat Assistant(供知识库删除时级联清理)
+     * 失败时抛出异常,由调用方决定是否标记 PENDING_CLEANUP
+     *
+     * @param chatId RAGFlow Chat Assistant ID
+     */
+    public void deleteChat(String chatId) {
+        if (chatId == null) return;
+        String url = ragFlowProperties.getBaseUrl() + "/api/v1/chats";
+        Map<String, Object> body = Map.of("ids", java.util.List.of(chatId));
+
+        ragFlowRestTemplate.exchange(url, HttpMethod.DELETE, createJsonRequest(body), Map.class);
+        log.info("删除 Chat Assistant 成功,chatId={}", chatId);
     }
 
     /**
