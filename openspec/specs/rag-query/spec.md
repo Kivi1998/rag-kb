@@ -1,4 +1,8 @@
-## ADDED Requirements
+## Purpose
+
+企业知识库 RAG 流式问答——通过 SSE 流式返回 AI 生成答案及引用来源，支持 Chat Assistant 懒建复用和临时 Session 管理。
+
+## Requirements
 
 ### Requirement: 成员可向知识库发起流式问答
 

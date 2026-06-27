@@ -2,7 +2,7 @@
 
 ### Requirement: 前端工程脚手架
 
-系统提供基于 Vue 3 + TypeScript + Element Plus + Pinia + Vue Router 4 + Vite + pnpm 的前端工程，目录结构包含 `src/api/`、`src/stores/`、`src/views/`、`src/components/`、`src/types/`、`src/composables/`。
+系统 SHALL 提供基于 Vue 3 + TypeScript + Element Plus + Pinia + Vue Router 4 + Vite + pnpm 的前端工程，目录结构 MUST 包含 `src/api/`、`src/stores/`、`src/views/`、`src/components/`、`src/types/`、`src/composables/`。
 
 #### Scenario: 开发环境启动
 
@@ -16,7 +16,7 @@
 
 ### Requirement: TypeScript 类型层
 
-`src/types/` 目录包含所有后端 DTO 映射类型：`auth.ts`（LoginResponse、AuthState）、`kb.ts`（KnowledgeBase、DeleteKbResponse）、`query.ts`（QueryChunkEvent、Message、Source）、`document.ts`（Document、DocumentStatus 枚举）。
+`src/types/` 目录 SHALL 包含所有后端 DTO 映射类型：`auth.ts`（LoginResponse、AuthState）、`kb.ts`（KnowledgeBase）、`query.ts`（QueryChunkEvent、Message、Source）、`document.ts`（KbDocument、KbDocumentStatus 枚举：UPLOADING/PARSING/READY/FAILED）。
 
 #### Scenario: 类型导入
 

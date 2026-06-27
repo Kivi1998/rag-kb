@@ -2,7 +2,7 @@
 
 ### Requirement: 文档列表
 
-选中 KB 后，文档管理 Tab 展示 el-table 列表，字段包含文件名、处理状态（UPLOADING/ACTIVE/ERROR）、上传时间、操作列。UPLOADING 状态显示 loading 图标，ACTIVE 显示绿色徽章，ERROR 显示红色徽章和错误信息 tooltip。
+选中 KB 后，文档管理 Tab SHALL 展示 el-table 列表，字段 MUST 包含文件名、处理状态（KbDocumentStatus：UPLOADING/PARSING/READY/FAILED）、上传时间、操作列。UPLOADING 状态 SHALL 显示 loading 图标，PARSING 显示蓝色"解析中"徽章，READY 显示绿色徽章，FAILED 显示红色徽章和错误信息 tooltip。
 
 #### Scenario: 进入文档 Tab
 
@@ -11,7 +11,7 @@
 
 ### Requirement: 文档上传
 
-用户通过 el-upload 组件上传文档（PDF/Word/PPT 等），支持多选，前端校验文件类型和大小（≤ 50MB）。上传采用 multipart/form-data 调用 POST /api/v1/knowledge-bases/{kbId}/documents。
+用户 SHALL 通过 el-upload 组件上传文档（PDF/Word/PPT 等），MUST 支持多选，前端 MUST 校验文件类型和大小（≤ 50MB），超限 SHALL 拒绝并提示，不发请求。上传采用 multipart/form-data 调用 POST /api/v1/knowledge-bases/{kbId}/documents。
 
 #### Scenario: 上传成功
 
@@ -25,7 +25,7 @@
 
 ### Requirement: 文档处理状态轮询
 
-存在 UPLOADING 状态文档时，useDocumentPolling 每 3 秒自动调用 GET /api/v1/knowledge-bases/{kbId}/documents 刷新列表，直至所有文档变为 ACTIVE 或 ERROR，或达到 10 分钟超时上限。
+存在 UPLOADING 或 PARSING 状态文档时，useDocumentPolling SHALL 每 3 秒自动执行以下轮询策略：1) 调用 GET /api/v1/knowledge-bases/{kbId}/documents 刷新列表；2) 对每个 PARSING 文档 MUST 额外调用 GET /documents/{docId} 触发 RAGFlow 状态刷新（list 接口不触发 RAGFlow 查询）。轮询 MUST 在全部文档变为 READY 或 FAILED 时停止，或在 10 分钟超时时停止并显示警告。
 
 #### Scenario: 文档处理完成
 
@@ -44,7 +44,7 @@
 
 ### Requirement: 文档删除
 
-用户可删除文档，需二次确认。成功后从列表移除，调用 DELETE /api/v1/knowledge-bases/{kbId}/documents/{docId}。
+用户 SHALL 通过二次确认（el-message-box）删除文档，系统 MUST 调用 DELETE /api/v1/knowledge-bases/{kbId}/documents/{docId}，成功后从列表移除该文档。
 
 #### Scenario: 删除成功
 

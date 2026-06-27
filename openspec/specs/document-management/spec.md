@@ -1,4 +1,8 @@
-## ADDED Requirements
+## Purpose
+
+企业知识库文档生命周期管理——涵盖文档上传（推送至 RAGFlow 并触发解析）、处理状态查询（查时刷新策略：PARSING 状态实时查 RAGFlow）、文档列表浏览（不触发 RAGFlow 查询）、文档删除（先删 RAGFlow 再删 DB）。所有路径强制多租户隔离，跨组织访问返回 404。
+
+## Requirements
 
 ### Requirement: 文档上传
 

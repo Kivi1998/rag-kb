@@ -2,7 +2,7 @@
 
 ### Requirement: 流式问答
 
-用户在问答 Tab 输入问题并提交，系统通过 SSE（原生 fetch + ReadableStream）调用 POST /api/v1/knowledge-bases/{kbId}/query，实时流式渲染答案。
+用户 SHALL 在问答 Tab 输入问题并提交，系统 MUST 通过 SSE（原生 fetch + ReadableStream）调用 POST /api/v1/knowledge-bases/{kbId}/query 实时流式渲染答案。queryApi.stream() MUST 手动注入 Authorization 和 X-Org-Id 请求头（原生 fetch 不经过 Axios 拦截器）。
 
 SSE 事件格式（Spring SseEmitter 多行）：
 ```
@@ -36,7 +36,7 @@ data: {"message": "..."}
 
 ### Requirement: 多轮对话历史
 
-chatStore 按 kbId 隔离存储对话历史（Record<kbId, Message[]>），切换 KB 时保留各自历史（内存存储，刷新重置）。KB 无历史时显示"向知识库提问，开始对话"引导。
+chatStore SHALL 按 kbId 隔离存储对话历史（Record<kbId, Message[]>），切换 KB 时 MUST 保留各自历史（内存存储，刷新重置）。KB 无历史时 SHALL 显示"向知识库提问，开始对话"引导。
 
 #### Scenario: 切换 KB 历史隔离
 
@@ -50,7 +50,7 @@ chatStore 按 kbId 隔离存储对话历史（Record<kbId, Message[]>），切�
 
 ### Requirement: 引用来源卡片
 
-答案流式完成后，收集所有 source 事件，在答案下方渲染引用来源卡片（SourceCard.vue），展示文档名称、引用片段和相似度分数。
+答案流式完成后，系统 SHALL 收集所有 source 事件，MUST 在答案下方渲染引用来源卡片（SourceCard.vue），展示文档名称、引用片段（截断 200 字）和相似度分数，按 score 降序排列。
 
 #### Scenario: 展示引用来源
 

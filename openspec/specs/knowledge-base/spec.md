@@ -1,7 +1,8 @@
 # knowledge-base Specification
 
 ## Purpose
-TBD - created by archiving change tenant-kb-foundation. Update Purpose after archive.
+
+企业知识库 CRUD 及多租户隔离——创建/查询/更新/删除知识库，关联 RAGFlow dataset，强制 RBAC 与跨组织隔离。
 ## Requirements
 ### Requirement: 知识库 CRUD
 
@@ -75,8 +76,6 @@ TBD - created by archiving change tenant-kb-foundation. Update Purpose after arc
 
 - **WHEN** 成员列举知识库
 - **THEN** 结果只包含其所属组织的知识库
-
-## ADDED Requirements
 
 ### Requirement: 知识库关联 RAGFlow Chat Assistant
 

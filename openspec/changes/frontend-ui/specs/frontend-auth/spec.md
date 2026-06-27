@@ -2,7 +2,7 @@
 
 ### Requirement: 登录页面
 
-系统提供 `/login` 路由，展示邮箱 + 密码表单（el-form），支持回车提交，显示登录中状态和错误提示。
+系统 SHALL 提供 `/login` 路由，展示邮箱 + 密码表单（el-form），MUST 支持回车提交，显示登录中状态和错误提示。
 
 #### Scenario: 登录成功
 
@@ -21,7 +21,7 @@
 
 ### Requirement: JWT + orgId 双头认证
 
-authStore 维护 `{ token, username, orgId }`，持久化到 sessionStorage。Axios 请求拦截器在每个请求上自动注入 `Authorization: Bearer <token>` 和 `X-Org-Id: <orgId>` 两个请求头。
+authStore SHALL 维护 `{ token, username, orgId }`，持久化到 sessionStorage。Axios 请求拦截器 MUST 在每个 Axios 请求上自动注入 `Authorization: Bearer <token>` 和 `X-Org-Id: <orgId>` 两个请求头；SSE 的原生 fetch 请求 SHALL 由 queryApi.stream() 手动注入相同双头。
 
 #### Scenario: 受保护接口请求
 
@@ -35,7 +35,7 @@ authStore 维护 `{ token, username, orgId }`，持久化到 sessionStorage。Ax
 
 ### Requirement: 路由守卫
 
-Vue Router beforeEach 守卫检查 authStore.token：无 token 时强制跳转 `/login`；已登录访问根路径时重定向 `/kb`。
+Vue Router beforeEach 守卫 SHALL 检查 authStore.token：无 token 时 MUST 强制跳转 `/login`；已登录访问根路径时重定向 `/kb`。
 
 #### Scenario: 未登录访问受保护路由
 
@@ -44,7 +44,7 @@ Vue Router beforeEach 守卫检查 authStore.token：无 token 时强制跳转 `
 
 ### Requirement: 退出登录
 
-顶部导航栏提供退出登录按钮，点击后清除 sessionStorage 中的 token 和 orgId，跳转 `/login`。
+系统 SHALL 在顶部导航栏提供退出登录按钮，点击后 MUST 清除 sessionStorage 中的 token 和 orgId，跳转 `/login`。
 
 #### Scenario: 用户退出
 

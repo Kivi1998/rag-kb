@@ -2,7 +2,7 @@
 
 ### Requirement: 知识库导航侧边栏
 
-左侧 220px 固定宽度侧边栏（el-menu）展示当前用户所在组织的知识库列表，包含"新建知识库"入口。选中 KB 高亮显示，切换 KB 时主内容区同步更新。无 KB 时显示空状态引导。
+系统 SHALL 在左侧 220px 固定宽度侧边栏（el-menu）展示当前用户所在组织的知识库列表，MUST 包含"新建知识库"入口。选中 KB SHALL 高亮显示，切换 KB 时主内容区 MUST 同步更新。无 KB 时 SHALL 显示空状态引导。
 
 #### Scenario: 初始加载
 
@@ -16,7 +16,7 @@
 
 ### Requirement: 创建知识库
 
-用户可通过弹窗（el-dialog + el-form）输入知识库名称创建新 KB，名称必填。
+用户 SHALL 通过弹窗（el-dialog + el-form）输入知识库名称创建新 KB，名称 MUST 必填校验。
 
 #### Scenario: 创建成功
 
@@ -30,7 +30,7 @@
 
 ### Requirement: 重命名知识库
 
-用户可对已有 KB 进行重命名，通过右键菜单或操作按钮触发弹窗。
+用户 SHALL 通过右键菜单或操作按钮触发弹窗对已有 KB 进行重命名，MUST 回填当前名称。
 
 #### Scenario: 重命名成功
 
@@ -39,7 +39,7 @@
 
 ### Requirement: 删除知识库
 
-用户可删除 KB，需二次确认（el-message-box）。删除后处理后端 `data.deleted` 字段区分完全删除和待清理状态。
+用户 SHALL 通过二次确认（el-message-box）删除 KB。系统 MUST 检查响应 `code` 字段（0=已删除，202=待清理）区分完全删除和 PENDING_CLEANUP 状态，不可依赖 `data.deleted` 字段（该字段不存在）。
 
 #### Scenario: 删除成功（data.deleted = true）
 
