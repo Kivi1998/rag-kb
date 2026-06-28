@@ -43,7 +43,7 @@
 ## 7. 收尾
 
 - [x] 7.1 TypeScript 无类型错误（`pnpm build` 通过）
-- [ ] 7.2 提交所有变更到 `feat/tenant-mgmt-frontend` 分支
+- [x] 7.2 提交所有变更到 `feat/tenant-mgmt-frontend` 分支
 
 ## 8. 测试
 
