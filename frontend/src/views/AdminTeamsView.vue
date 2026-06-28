@@ -7,7 +7,7 @@ const teamStore = useTeamStore()
 
 // 新建弹窗
 const createDialogVisible = ref(false)
-const teamName = ref('')
+const teamForm = ref({ name: '' })
 const createLoading = ref(false)
 
 onMounted(() => {
@@ -15,17 +15,17 @@ onMounted(() => {
 })
 
 function openCreateDialog() {
-  teamName.value = ''
+  teamForm.value.name = ''
   createDialogVisible.value = true
 }
 
 async function handleCreate() {
-  if (!teamName.value.trim()) {
+  if (!teamForm.value.name.trim()) {
     ElMessage.warning('请输入团队名称')
     return
   }
   createLoading.value = true
-  const ok = await teamStore.createTeam(teamName.value.trim())
+  const ok = await teamStore.createTeam(teamForm.value.name.trim())
   createLoading.value = false
   if (ok) {
     ElMessage.success('团队创建成功')
@@ -86,9 +86,9 @@ function formatTime(iso: string): string {
 
     <!-- 新建弹窗 -->
     <el-dialog v-model="createDialogVisible" title="新建团队" width="420px">
-      <el-form :model="{ teamName }" label-width="80px">
+      <el-form :model="teamForm" label-width="80px">
         <el-form-item label="团队名称">
-          <el-input v-model="teamName" placeholder="输入团队名称" />
+          <el-input v-model="teamForm.name" placeholder="输入团队名称" />
         </el-form-item>
       </el-form>
       <template #footer>

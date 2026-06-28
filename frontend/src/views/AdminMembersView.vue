@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useMemberStore } from '@/stores/memberStore'
 import { useAuthStore } from '@/stores/authStore'
@@ -7,7 +7,7 @@ import type { MemberRole } from '@/types/member'
 
 const memberStore = useMemberStore()
 const authStore = useAuthStore()
-const isOwner = authStore.role === 'OWNER'
+const isOwner = computed(() => authStore.role === 'OWNER')
 
 // 邀请弹窗
 const inviteDialogVisible = ref(false)
