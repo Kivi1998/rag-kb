@@ -45,7 +45,7 @@ const router = createRouter({
   ]
 })
 
-router.beforeEach((to) => {
+router.beforeEach(async (to) => {
   const authStore = useAuthStore()
 
   // 未登录 → /login
@@ -56,6 +56,11 @@ router.beforeEach((to) => {
   // 已登录访问登录页 → /kb
   if (to.name === 'login' && authStore.token) {
     return { name: 'kb' }
+  }
+
+  // 已登录但 role 尚未加载（如页面刷新后 sessionStorage 无 role），先 fetch
+  if (authStore.token && authStore.role === null) {
+    await authStore.fetchRole()
   }
 
   // /admin/* 需要 OWNER 或 ADMIN 角色
