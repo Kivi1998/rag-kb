@@ -17,8 +17,10 @@ async function handleLogin() {
 
   loading.value = true
   try {
-    const success = await authStore.login(form.email, form.password)
-    if (success) {
+    const result = await authStore.login(form.email, form.password)
+    if (result === 'must_change_password') {
+      router.push('/change-password')
+    } else if (result === 'ok') {
       router.push('/kb')
     }
   } finally {

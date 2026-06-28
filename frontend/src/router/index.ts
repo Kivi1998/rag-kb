@@ -18,19 +18,56 @@ const router = createRouter({
       name: 'kb',
       component: () => import('@/views/KbWorkspaceView.vue'),
       meta: { requiresAuth: true }
+    },
+    {
+      path: '/change-password',
+      name: 'change-password',
+      component: () => import('@/views/ChangePasswordView.vue'),
+      meta: { requiresAuth: true }
+    },
+    {
+      path: '/admin',
+      redirect: '/admin/members',
+      meta: { requiresAuth: true, requiresAdmin: true }
+    },
+    {
+      path: '/admin/members',
+      name: 'admin-members',
+      component: () => import('@/views/AdminMembersView.vue'),
+      meta: { requiresAuth: true, requiresAdmin: true }
+    },
+    {
+      path: '/admin/teams',
+      name: 'admin-teams',
+      component: () => import('@/views/AdminTeamsView.vue'),
+      meta: { requiresAuth: true, requiresAdmin: true }
     }
   ]
 })
 
-router.beforeEach((to) => {
+router.beforeEach(async (to) => {
   const authStore = useAuthStore()
-  
+
+  // 未登录 → /login
   if (to.meta.requiresAuth && !authStore.token) {
     return { name: 'login' }
   }
-  
+
+  // 已登录访问登录页 → /kb
   if (to.name === 'login' && authStore.token) {
     return { name: 'kb' }
+  }
+
+  // 已登录但 role 尚未加载（如页面刷新后 sessionStorage 无 role），先 fetch（每次会话只尝试一次）
+  if (authStore.token && !authStore.roleFetched) {
+    await authStore.fetchRole()
+  }
+
+  // /admin/* 需要 OWNER 或 ADMIN 角色
+  if (to.meta.requiresAdmin) {
+    if (authStore.role === 'MEMBER' || authStore.role === null) {
+      return { name: 'kb' }
+    }
   }
 })
 
