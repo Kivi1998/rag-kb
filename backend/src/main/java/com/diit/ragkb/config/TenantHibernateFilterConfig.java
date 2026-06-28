@@ -28,6 +28,6 @@ public class TenantHibernateFilterConfig {
         }
         Session session = entityManager.unwrap(Session.class);
         Filter filter = session.enableFilter(FILTER_NAME);
-        filter.setParameter("orgId", orgId.toString());
+        filter.setParameter("orgId", orgId);
     }
 }

@@ -52,3 +52,7 @@ uploads/
 data/
 *.db
 frontend/coverage/
+frontend/*.tsbuildinfo
+frontend/*.js
+frontend/*.d.ts
+.gstack/
