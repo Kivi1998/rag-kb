@@ -47,7 +47,11 @@ public class MemberService {
         }
 
         UUID currentOrgId = TenantContext.getOrgId();
-        MemberRole callerRole = MemberRole.valueOf(TenantContext.getRole());
+        String inviteRoleStr = TenantContext.getRole();
+        if (inviteRoleStr == null) {
+            throw new AccessDeniedException("用户角色未设置，无权邀请成员");
+        }
+        MemberRole callerRole = MemberRole.valueOf(inviteRoleStr);
 
         // 只有 owner 和 admin 可邀请
         assertCanManage(callerRole, role);
@@ -73,7 +77,11 @@ public class MemberService {
     @Transactional
     public Member changeRole(UUID targetMemberId, MemberRole newRole) {
         UUID currentOrgId = TenantContext.getOrgId();
-        MemberRole callerRole = MemberRole.valueOf(TenantContext.getRole());
+        String changeRoleStr = TenantContext.getRole();
+        if (changeRoleStr == null) {
+            throw new AccessDeniedException("用户角色未设置，无权修改成员角色");
+        }
+        MemberRole callerRole = MemberRole.valueOf(changeRoleStr);
 
         Member target = memberRepository.findByIdAndOrgId(targetMemberId, currentOrgId)
                 .orElseThrow(() -> new ResourceNotFoundException("成员不存在"));
