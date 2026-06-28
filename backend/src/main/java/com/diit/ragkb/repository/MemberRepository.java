@@ -19,4 +19,7 @@ public interface MemberRepository extends JpaRepository<Member, UUID> {
 
     /** 某组织内 owner 数量 */
     long countByOrgIdAndRole(UUID orgId, MemberRole role);
+
+    /** 查某 subject 的首个成员记录（按创建时间升序） */
+    Optional<Member> findFirstBySubjectIdOrderByCreatedAtAsc(String subjectId);
 }

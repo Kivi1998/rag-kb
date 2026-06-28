@@ -5,6 +5,7 @@ import com.diit.ragkb.exception.BusinessConflictException;
 import com.diit.ragkb.exception.ResourceNotFoundException;
 import com.diit.ragkb.model.User;
 import com.diit.ragkb.model.UserStatus;
+import com.diit.ragkb.repository.MemberRepository;
 import com.diit.ragkb.repository.UserRepository;
 import io.jsonwebtoken.Claims;
 import lombok.RequiredArgsConstructor;
@@ -27,6 +28,7 @@ import java.util.regex.Pattern;
 public class AuthService {
 
     private final UserRepository userRepository;
+    private final MemberRepository memberRepository;
     private final PasswordService passwordService;
     private final JwtService jwtService;
     private final RedisService redisService;
@@ -115,6 +117,11 @@ public class AuthService {
         var result = new java.util.LinkedHashMap<String, Object>();
         result.put("token", token);
         result.put("userId", user.getId().toString());
+
+        // 查找用户的首个组织成员身份，取 orgId（用户无成员记录时 orgId=null）
+        memberRepository.findFirstBySubjectIdOrderByCreatedAtAsc(user.getId().toString())
+                .ifPresent(member -> result.put("orgId", member.getOrg().getId().toString()));
+
         if (user.isMustChangePassword()) {
             result.put("mustChangePassword", true);
         }

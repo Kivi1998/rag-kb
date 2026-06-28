@@ -85,14 +85,30 @@ class AuthTest {
     @Nested
     @DisplayName("登录")
     class LoginTests {
-        @Test @DisplayName("正确登录 → 200 + JWT")
+        @Test @DisplayName("正确登录 → 200 + JWT + orgId")
         void login_success() throws Exception {
-            testHelper.createUser("login@test.com", "Pass1234!", "Login");
+            User user = testHelper.createUser("login@test.com", "Pass1234!", "Login");
+            Organization org = testHelper.createOrg("Test Org");
+            testHelper.createMember(user.getId().toString(), org, MemberRole.MEMBER);
+
             mockMvc.perform(post("/api/v1/auth/login")
                     .contentType(MediaType.APPLICATION_JSON)
                     .content("{\"email\":\"login@test.com\",\"password\":\"Pass1234!\"}"))
                     .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.data.token").isNotEmpty());
+                    .andExpect(jsonPath("$.data.token").isNotEmpty())
+                    .andExpect(jsonPath("$.data.orgId").value(org.getId().toString()));
+        }
+
+        @Test @DisplayName("登录用户无组织 → 200 + orgId 缺失")
+        void login_noOrg() throws Exception {
+            testHelper.createUser("noorg@test.com", "Pass1234!", "NoOrg");
+
+            mockMvc.perform(post("/api/v1/auth/login")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("{\"email\":\"noorg@test.com\",\"password\":\"Pass1234!\"}"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data.token").isNotEmpty())
+                    .andExpect(jsonPath("$.data.orgId").doesNotExist());
         }
 
         @Test @DisplayName("错误密码 → 401(不泄露)")

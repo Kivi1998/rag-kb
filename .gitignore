@@ -51,3 +51,4 @@ dist/
 uploads/
 data/
 *.db
+frontend/coverage/
