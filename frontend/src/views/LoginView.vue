@@ -13,8 +13,8 @@ const form = reactive({
 })
 
 async function handleLogin() {
-  if (!form.email || !form.password) return
-  
+  if (loading.value || !form.email || !form.password) return
+
   loading.value = true
   try {
     const success = await authStore.login(form.email, form.password)

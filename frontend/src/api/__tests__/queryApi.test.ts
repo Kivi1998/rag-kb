@@ -87,11 +87,16 @@ describe('queryApi', () => {
       // consume
     }
 
-    expect(mockFetch).toHaveBeenCalledWith('/api/v1/query/stream', expect.objectContaining({
-      headers: expect.objectContaining({
-        Authorization: 'Bearer test-token',
-        'X-Org-Id': 'org-1'
+    expect(mockFetch).toHaveBeenCalledWith(
+      '/api/v1/knowledge-bases/kb-1/query',
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({
+          Authorization: 'Bearer test-token',
+          'X-Org-Id': 'org-1'
+        }),
+        body: JSON.stringify({ question: 'test' })
       })
-    }))
+    )
   })
 })

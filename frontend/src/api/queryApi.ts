@@ -1,5 +1,5 @@
 import { useAuthStore } from '@/stores/authStore'
-import type { QueryChunkEvent } from '@/types/query'
+import type { QueryChunkEvent, QueryEventType } from '@/types/query'
 
 /**
  * SSE 流式查询（原生 fetch，不经过 Axios 拦截器）
@@ -12,14 +12,14 @@ export async function* stream(
 ): AsyncGenerator<QueryChunkEvent> {
   const authStore = useAuthStore()
 
-  const response = await fetch('/api/v1/query/stream', {
+  const response = await fetch(`/api/v1/knowledge-bases/${kbId}/query`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${authStore.token}`,
       'X-Org-Id': authStore.orgId || ''
     },
-    body: JSON.stringify({ kbId, question }),
+    body: JSON.stringify({ question }),
     signal
   })
 
@@ -73,6 +73,13 @@ function parseSSEBlock(block: string): QueryChunkEvent {
     }
   }
 
-  const payload = data ? JSON.parse(data) : {}
-  return { eventType, ...payload }
+  let payload = {}
+  if (data) {
+    try {
+      payload = JSON.parse(data)
+    } catch {
+      return { eventType: 'error', message: '响应数据解析失败' } as QueryChunkEvent
+    }
+  }
+  return { eventType: eventType as QueryEventType, ...payload } as QueryChunkEvent
 }

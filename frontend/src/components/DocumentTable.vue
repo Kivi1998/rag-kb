@@ -105,7 +105,7 @@ async function handleDelete(doc: KbDocument) {
       </el-table-column>
       <el-table-column label="操作" width="100">
         <template #default="{ row }">
-          <el-button text type="danger" size="small" @click="handleDelete(row)">删除</el-button>
+          <el-button text type="danger" size="small" @click="handleDelete(row as KbDocument)">删除</el-button>
         </template>
       </el-table-column>
     </el-table>

@@ -88,7 +88,8 @@ describe('kbStore', () => {
   })
 
   it('deleteKb code=0 完全删除', async () => {
-    vi.mocked(kbApi.remove).mockResolvedValue({ code: 0 })
+    // interceptor 对 code=0 返回内层 data（字符串"已删除"），而非 { code: 0 }
+    vi.mocked(kbApi.remove).mockResolvedValue('已删除' as any)
 
     const store = useKbStore()
     store.kbs = [

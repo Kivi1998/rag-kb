@@ -11,7 +11,7 @@ export const kbApi = {
   },
 
   update(id: string, name: string): Promise<KnowledgeBase> {
-    return http.put(`/api/v1/knowledge-bases/${id}`, { name })
+    return http.patch(`/api/v1/knowledge-bases/${id}`, { name })
   },
 
   remove(id: string): Promise<{ code: number; message?: string }> {

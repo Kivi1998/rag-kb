@@ -3,9 +3,11 @@ import { ElMessage } from 'element-plus'
 import { useAuthStore } from '@/stores/authStore'
 import router from '@/router'
 
+const REQUEST_TIMEOUT_MS = 15_000
+
 const http = axios.create({
   baseURL: '',
-  timeout: 15000
+  timeout: REQUEST_TIMEOUT_MS
 })
 
 // 请求拦截器：注入 Authorization + X-Org-Id
@@ -23,7 +25,13 @@ http.interceptors.request.use((config) => {
 // 响应拦截器：解包 ApiResponse envelope
 http.interceptors.response.use(
   (response) => {
-    const { code, message, data } = response.data
+    // 防御 WAF/CDN 返回非 JSON 体（HTML 错误页等）时 destructure 抛 TypeError
+    const body = response.data
+    if (!body || typeof body !== 'object') {
+      ElMessage.error('响应格式异常')
+      return Promise.reject(new Error('响应格式异常'))
+    }
+    const { code, message, data } = body
 
     // HTTP 2xx + code=0：返回业务数据
     if (code === 0) {

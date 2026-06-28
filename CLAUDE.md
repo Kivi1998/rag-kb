@@ -44,16 +44,12 @@ Superpowers = TDD 内循环纪律 + 自动触发;gstack = 接触真实外部世�
 **模型与跨模型评审说明:**
 
 - **强制评审门 = gstack `/review` + `/codex` 交叉模型 + `/cso`**:
-  - `/review`、`/cso`、Superpowers `requesting-code-review` 跑在当前 Claude 会话模型 **Opus 4.8**;
-  - `/codex` 跑 **小米 MiMo v2.5-pro**(`codex-cli 0.142.2`),经 **cc-switch 本地代理**
-    (`http://127.0.0.1:15721/v1`,request rectifier 矫正工具协议)接入。工具调用已实测可用。
-  - 二者构成真正的**跨厂商交叉评审**(Anthropic Opus 4.8 × Xiaomi MiMo):`/review` 与 `/codex`
-    都跑过同一分支后,gstack 给出交叉分析(哪些 bug 两边都报、哪些各自独有)。
+  - `/review`、`/cso`、Superpowers `requesting-code-review` 跑在当前 Claude 会话模型;
+  - `/codex` 是跨模型第二意见工具,具体使用哪个模型由用户配置决定,经 **cc-switch 本地代理**
+    (`http://127.0.0.1:15721/v1`,request rectifier 矫正工具协议)接入。
+  - 二者构成**跨模型交叉评审**:`/review` 与 `/codex` 都跑过同一分支后,gstack 给出交叉分析(哪些 bug 两边都报、哪些各自独有)。
 - **`/codex` 的前置依赖**:依赖 **cc-switch 本地代理常驻**(端口 `15721`)。cc-switch / 代理未运行时
   codex 连不上 → `/codex` 失效。用前确认代理在跑;若 `/codex` 报连接错误,先查 cc-switch 是否启用了对应 provider。
-- **合规红线(MiMo token-plan)**:MiMo token-plan 套餐"仅限交互式编程工具使用,**禁止用于自动化脚本或应用后端**"。
-  该 `tp-` key 只能喂给 codex / Claude Code 这类工具,**绝不可填进 rag-kb 后端当生产 LLM**(违规会被封 key);
-  生产后端用 MiMo 正式 API 套餐。
 
 **注意事项:**
 

@@ -49,19 +49,20 @@ export const useKbStore = defineStore('kb', () => {
   async function deleteKb(id: string): Promise<void> {
     try {
       const res = await kbApi.remove(id)
-      if (res.code === 0) {
-        // 完全删除
-        kbs.value = kbs.value.filter((k) => k.id !== id)
-        if (selectedKbId.value === id) {
-          selectedKbId.value = kbs.value.length > 0 ? kbs.value[0].id : null
-        }
-      } else if (res.code === 202) {
+      // interceptor 对 code=202 透传 { code: 202, message }，其余 code=0 返回内层 data（字符串）
+      if (res && typeof res === 'object' && (res as any).code === 202) {
         // PENDING_CLEANUP：标记状态
         const kb = kbs.value.find((k) => k.id === id)
         if (kb) {
           kb.status = 'PENDING_CLEANUP'
         }
-        ElMessage.warning(res.message || '知识库已标记待清理')
+        ElMessage.warning((res as any).message || '知识库已标记待清理')
+      } else {
+        // 完全删除（code=0 时 interceptor 返回内层 data，非 { code } 对象）
+        kbs.value = kbs.value.filter((k) => k.id !== id)
+        if (selectedKbId.value === id) {
+          selectedKbId.value = kbs.value.length > 0 ? kbs.value[0].id : null
+        }
       }
     } catch {
       // http.ts 拦截器已处理错误提示

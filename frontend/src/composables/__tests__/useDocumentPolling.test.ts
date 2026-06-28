@@ -27,21 +27,23 @@ describe('useDocumentPolling', () => {
     expect(timedOut.value).toBe(false)
   })
 
-  it('refresh 调用 docApi.list', async () => {
+  it('kbId 设置后立即调 docApi.list（immediate watcher）', async () => {
     vi.mocked(docApi.list).mockResolvedValue([
       { id: '1', name: 'test.pdf', status: KbDocumentStatus.READY, createdAt: '2024-01-01' }
     ])
 
     const kbId = ref('kb-1')
-    const { refresh, docs } = useDocumentPolling(kbId)
-    
-    await refresh()
-    
+    const { docs } = useDocumentPolling(kbId)
+
+    // 等待立即触发的 poll() 完成（list + 无 PARSING 文档）
+    await Promise.resolve()
+    await Promise.resolve()
+
     expect(docApi.list).toHaveBeenCalledWith('kb-1')
     expect(docs.value).toHaveLength(1)
   })
 
-  it('refresh 对 PARSING 文档额外调详情接口', async () => {
+  it('立即 poll 对 PARSING 文档额外调详情接口', async () => {
     vi.mocked(docApi.list).mockResolvedValue([
       { id: '1', name: 'test.pdf', status: KbDocumentStatus.PARSING, createdAt: '2024-01-01' }
     ])
@@ -50,10 +52,13 @@ describe('useDocumentPolling', () => {
     )
 
     const kbId = ref('kb-1')
-    const { refresh, docs } = useDocumentPolling(kbId)
-    
-    await refresh()
-    
+    const { docs } = useDocumentPolling(kbId)
+
+    // 等待立即触发的 poll() 完成（list → get(PARSING)）
+    await Promise.resolve()
+    await Promise.resolve()
+    await Promise.resolve()
+
     expect(docApi.get).toHaveBeenCalledWith('kb-1', '1')
     expect(docs.value[0].status).toBe(KbDocumentStatus.READY)
   })
