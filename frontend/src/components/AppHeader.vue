@@ -1,9 +1,9 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import { useAuthStore } from '@/stores/authStore'
 
 const authStore = useAuthStore()
-
-const isAdmin = authStore.role === 'OWNER' || authStore.role === 'ADMIN'
+const isAdmin = computed(() => authStore.role === 'OWNER' || authStore.role === 'ADMIN')
 </script>
 
 <template>

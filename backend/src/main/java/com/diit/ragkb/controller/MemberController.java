@@ -39,7 +39,11 @@ public class MemberController {
 
     @GetMapping("/me")
     public ApiResponse<Member> me() {
-        return ApiResponse.ok(memberService.getByIdAndCurrentOrg(TenantContext.getMemberId()));
+        UUID memberId = TenantContext.getMemberId();
+        if (memberId == null) {
+            throw new com.diit.ragkb.exception.ResourceNotFoundException("当前用户无成员身份");
+        }
+        return ApiResponse.ok(memberService.getByIdAndCurrentOrg(memberId));
     }
 
     @GetMapping("/{id}")
