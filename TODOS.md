@@ -28,3 +28,37 @@
 - **Cons:** 需新增 /change-password 路由和页面，路由守卫加 mustChangePassword 分支，改密接口。
 - **Context:** frontend-ui 评审确认 MVP 不做。实现时：LoginResponse 加 mustChangePassword，authStore 存储，router.beforeEach 检查并跳转 /change-password。
 - **Depends on / blocked by:** frontend-ui 落地后再做。
+
+## 后端安全加固（deferred from /cso 审计 2026-06-28）
+
+以下 5 项安全发现在 /cso 审计中识别，MVP 阶段暂缓，正式上线前必须处理。
+
+### S1 — JWT_SECRET 空默认值 [HIGH]
+
+- **What:** `application.yml` 中 `secret: ${JWT_SECRET:}` 若环境变量未设置，注入空字符串；JJWT 使用 HMAC 空密钥时所有人均可伪造任意 userId 的 token。
+- **Why:** 高危，可绕过全部认证。
+- **Fix:** 改为 `secret: ${JWT_SECRET}`（无默认值），启动时 fail-fast。
+- **File:** `backend/src/main/resources/application.yml`
+
+### A01-1 — isBootstrapEndpoint() 路径混淆 [MEDIUM]
+
+- **What:** `JwtAuthFilter.isBootstrapEndpoint()` 使用 `contains("/api/v1/organizations")`，精心构造的 URL 可在某些容器下绕过租户上下文检查。
+- **Fix:** 改为 `"/api/v1/organizations".equals(request.getRequestURI())`（精确匹配）。
+- **File:** `backend/src/main/java/com/diit/ragkb/security/JwtAuthFilter.java`（isBootstrapEndpoint 方法）
+
+### A07-1/A07-2 — login/register 无速率限制 [HIGH/MEDIUM]
+
+- **What:** `POST /auth/login` 和 `POST /auth/register` 完全公开且无请求频率限制，可暴力破解密码、批量注册垃圾账户。
+- **Fix:** 引入 Bucket4j + Redis 速率限制（同 IP 5 次/分钟 for login；同邮箱 3 次/小时 for register）。
+- **Context:** 实现时参考 `spring-bucket4j` 自动配置或手写 `RateLimitFilter`。
+
+### A05-2 — Actuator health 泄露基础设施信息 [MEDIUM]
+
+- **What:** `/actuator/health` 公开且默认 `show-details: always`，可泄露 DB/Redis 主机名与连接状态。
+- **Fix:** `application.yml` 追加 `management.endpoint.health.show-details: never`。
+
+### A09-1 — 认证失败无安全审计日志 [MEDIUM]
+
+- **What:** `JwtAuthFilter.sendError()` 只返回 HTTP 401，无 `log.warn` 记录 IP/路径/原因。攻击者暴力破解/token 重放攻击不留痕迹。
+- **Fix:** 在 `sendError()` 前追加 `log.warn("AUTH_FAILURE ip={} path={} reason={}", request.getRemoteAddr(), request.getRequestURI(), message);`
+- **File:** `backend/src/main/java/com/diit/ragkb/security/JwtAuthFilter.java`（sendError 方法）

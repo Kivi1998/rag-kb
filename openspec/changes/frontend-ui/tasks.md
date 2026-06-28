@@ -66,7 +66,7 @@
   3. 使用 ReadableStream 逐块解码 Uint8Array，累积缓冲区，按 `\n\n` 切分完整 SSE 事件块，按 event 类型 yield 事件对象
   4. reader.done=true 但未收到 done 事件时（服务端 5 分钟超时），调用 handleDone 清理状态
 - [ ] 9.2 `src/stores/chatStore.ts`：state `{ histories: Record<kbId, Message[]>, streaming: boolean, currentAnswer: string, pendingSources: Source[], currentAbortController: AbortController | null }`；actions：`handleChunk(content)`、`handleSource(source)`、`handleDone()`、`handleError(msg)`、`switchKb(newKbId)`（顺序：abort currentAbortController → 清空 currentAnswer + streaming=false → 更新 kbStore.selectedKbId）
-- [ ] 9.3 `src/components/ChatPanel.vue`：消息气泡列表（用户/助手），实时渲染 currentAnswer，输入框 + 发送按钮（streaming=true 时禁用），错误气泡（红色），来源卡片按 score 降序
+- [ ] 9.3 `src/components/ChatPanel.vue`：消息气泡列表（用户/助手），实时渲染 currentAnswer，输入框 + 发送按钮（streaming=true 时禁用），错误气泡（红色），来源卡片按 score 降序；**流式内容渲染前必须经 `DOMPurify.sanitize()` 净化**（防止存储型 XSS：知识库文档可植入恶意 HTML，RAGFlow 回答原样转发，`v-html` 或 markdown 渲染器会执行）；安装 `dompurify` + `@types/dompurify`
 - [ ] 9.4 `src/components/SourceCard.vue`：展示 documentName、引用片段（截断 200 字）、分数徽章
 
 ## 10. 测试
