@@ -1,6 +1,8 @@
 package com.diit.ragkb.service;
 
+import com.diit.ragkb.exception.AccessDeniedException;
 import com.diit.ragkb.exception.ResourceNotFoundException;
+import com.diit.ragkb.model.MemberRole;
 import com.diit.ragkb.model.Organization;
 import com.diit.ragkb.model.Team;
 import com.diit.ragkb.repository.OrganizationRepository;
@@ -34,6 +36,12 @@ public class TeamService {
      */
     @Transactional
     public Team create(String name) {
+        // 仅 owner/admin 可创建团队
+        MemberRole callerRole = MemberRole.valueOf(TenantContext.getRole());
+        if (callerRole == MemberRole.MEMBER) {
+            throw new AccessDeniedException("member 角色无权创建团队");
+        }
+
         UUID currentOrgId = TenantContext.getOrgId();
         Organization org = orgRepository.findById(currentOrgId)
                 .orElseThrow(() -> new ResourceNotFoundException("组织不存在"));

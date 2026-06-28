@@ -37,6 +37,11 @@ public class MemberController {
         return ApiResponse.ok(memberService.listByCurrentOrg());
     }
 
+    @GetMapping("/me")
+    public ApiResponse<Member> me() {
+        return ApiResponse.ok(memberService.getByIdAndCurrentOrg(TenantContext.getMemberId()));
+    }
+
     @GetMapping("/{id}")
     public ApiResponse<Member> getById(@PathVariable("id") UUID id) {
         return ApiResponse.ok(memberService.getByIdAndCurrentOrg(id));
