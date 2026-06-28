@@ -1,11 +1,9 @@
 <script setup lang="ts">
 import { ref } from 'vue'
-import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import http from '@/api/http'
 import { useAuthStore } from '@/stores/authStore'
 
-const router = useRouter()
 const authStore = useAuthStore()
 const form = ref({ oldPassword: '', newPassword: '', confirmPassword: '' })
 const submitting = ref(false)

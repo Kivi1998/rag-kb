@@ -38,11 +38,18 @@ async function handleInvite() {
   if (ok) {
     ElMessage.success('成员添加成功')
     inviteDialogVisible.value = false
+  } else {
+    ElMessage.error('添加成员失败，请重试')
   }
 }
 
 async function handleRoleChange(memberId: string, newRole: MemberRole) {
-  await memberStore.updateRole(memberId, newRole)
+  const ok = await memberStore.updateRole(memberId, newRole)
+  if (ok) {
+    ElMessage.success('角色已更新')
+  } else {
+    ElMessage.error('角色修改失败')
+  }
 }
 
 async function handleResetPassword(memberId: string, subjectId: string) {
@@ -124,7 +131,9 @@ function retryLoad() {
       </el-table-column>
       <el-table-column label="操作" width="140" fixed="right">
         <template #default="{ row }">
+          <!-- admin 不可重置 owner 密码（防特权提升，后端同步校验） -->
           <el-button
+            v-if="authStore.role === 'OWNER' || row.role !== 'OWNER'"
             link
             type="warning"
             size="small"

@@ -13,6 +13,8 @@ export const useAuthStore = defineStore('auth', () => {
   const username = ref<string | null>(sessionStorage.getItem('username'))
   const orgId = ref<string | null>(sessionStorage.getItem('orgId'))
   const role = ref<MemberRole | null>(sessionStorage.getItem('role') as MemberRole | null)
+  // 防止 fetchRole 失败后每次导航反复请求
+  const roleFetched = ref(sessionStorage.getItem('role') !== null)
 
   // Getters
   const isAuthenticated = computed(() => !!token.value)
@@ -61,6 +63,8 @@ export const useAuthStore = defineStore('auth', () => {
       // 获取失败时 role 保持 null（可能是新用户尚无 member 记录）
       role.value = null
       sessionStorage.removeItem('role')
+    } finally {
+      roleFetched.value = true
     }
   }
 
@@ -69,6 +73,7 @@ export const useAuthStore = defineStore('auth', () => {
     username.value = null
     orgId.value = null
     role.value = null
+    roleFetched.value = false
     sessionStorage.removeItem('token')
     sessionStorage.removeItem('username')
     sessionStorage.removeItem('orgId')
@@ -76,5 +81,5 @@ export const useAuthStore = defineStore('auth', () => {
     router.push('/login')
   }
 
-  return { token, username, orgId, role, isAuthenticated, login, fetchRole, logout }
+  return { token, username, orgId, role, roleFetched, isAuthenticated, login, fetchRole, logout }
 })

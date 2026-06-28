@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { createRouter, createMemoryHistory } from 'vue-router'
 import { useAuthStore } from '@/stores/authStore'
+import { memberApi } from '@/api/memberApi'
 
 // Mock components
 vi.mock('@/views/LoginView.vue', () => ({ default: { template: '<div>Login</div>' } }))
@@ -67,16 +68,20 @@ describe('router', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     sessionStorage.clear()
+    vi.mocked(memberApi.me).mockReset()
     router = createTestRouter()
 
-    // Add beforeEach guard (matching the real router logic)
-    router.beforeEach((to) => {
+    // Add beforeEach guard (matching the real router logic — async + roleFetched sentinel)
+    router.beforeEach(async (to) => {
       const authStore = useAuthStore()
       if (to.meta.requiresAuth && !authStore.token) {
         return { name: 'login' }
       }
       if (to.name === 'login' && authStore.token) {
         return { name: 'kb' }
+      }
+      if (authStore.token && !authStore.roleFetched) {
+        await authStore.fetchRole()
       }
       if (to.meta.requiresAdmin) {
         if (authStore.role === 'MEMBER' || authStore.role === null) {
@@ -94,6 +99,7 @@ describe('router', () => {
   it('已登录访问 / 重定向 /kb', async () => {
     const authStore = useAuthStore()
     authStore.token = 'test-token'
+    authStore.roleFetched = true
 
     await router.push('/')
     expect(router.currentRoute.value.path).toBe('/kb')
@@ -102,6 +108,7 @@ describe('router', () => {
   it('已登录访问 /login 跳转 /kb', async () => {
     const authStore = useAuthStore()
     authStore.token = 'test-token'
+    authStore.roleFetched = true
 
     await router.push('/login')
     expect(router.currentRoute.value.path).toBe('/kb')
@@ -111,6 +118,7 @@ describe('router', () => {
     const authStore = useAuthStore()
     authStore.token = 'test-token'
     authStore.role = 'OWNER'
+    authStore.roleFetched = true
 
     await router.push('/admin/members')
     expect(router.currentRoute.value.name).toBe('admin-members')
@@ -120,6 +128,7 @@ describe('router', () => {
     const authStore = useAuthStore()
     authStore.token = 'test-token'
     authStore.role = 'ADMIN'
+    authStore.roleFetched = true
 
     await router.push('/admin/teams')
     expect(router.currentRoute.value.name).toBe('admin-teams')
@@ -129,18 +138,31 @@ describe('router', () => {
     const authStore = useAuthStore()
     authStore.token = 'test-token'
     authStore.role = 'MEMBER'
+    authStore.roleFetched = true
 
     await router.push('/admin/members')
     expect(router.currentRoute.value.path).toBe('/kb')
   })
 
-  it('role=null 访问 /admin/teams 重定向 /kb', async () => {
+  it('role=null 且 roleFetched=true 访问 /admin/teams 重定向 /kb', async () => {
     const authStore = useAuthStore()
     authStore.token = 'test-token'
     authStore.role = null
+    authStore.roleFetched = true
 
     await router.push('/admin/teams')
     expect(router.currentRoute.value.path).toBe('/kb')
+  })
+
+  it('页面刷新：token 有效 role 未加载，fetchRole 返回 OWNER 后放行 /admin/members', async () => {
+    vi.mocked(memberApi.me).mockResolvedValue({ id: 'u1', subjectId: 'u1', role: 'OWNER', orgId: 'o1' } as any)
+    const authStore = useAuthStore()
+    authStore.token = 'test-token'
+    authStore.role = null
+    authStore.roleFetched = false
+
+    await router.push('/admin/members')
+    expect(router.currentRoute.value.name).toBe('admin-members')
   })
 
   it('未登录访问 /admin/members 重定向 /login', async () => {
@@ -152,6 +174,7 @@ describe('router', () => {
     const authStore = useAuthStore()
     authStore.token = 'test-token'
     authStore.role = 'OWNER'
+    authStore.roleFetched = true
 
     await router.push('/admin')
     expect(router.currentRoute.value.path).toBe('/admin/members')

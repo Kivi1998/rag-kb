@@ -27,7 +27,6 @@ vi.mock('@/router', () => ({
   default: { push: vi.fn() }
 }))
 
-import { ElMessage } from 'element-plus'
 import { useMemberStore } from '@/stores/memberStore'
 import { useTeamStore } from '@/stores/teamStore'
 import { memberApi } from '@/api/memberApi'
@@ -40,12 +39,10 @@ describe('表单校验', () => {
   })
 
   describe('邀请成员', () => {
-    it('subjectId 为空时不调用 API', async () => {
+    it('subjectId 为空时 store 仍向 API 传递空值', async () => {
       const store = useMemberStore()
-      const ok = await store.inviteMember('', 'MEMBER')
+      await store.inviteMember('', 'MEMBER')
 
-      // inviteMember 本身不校验（校验在组件层），但 API 会被调用
-      // 此测试验证 store 层传递正确参数
       expect(memberApi.invite).toHaveBeenCalledWith({ subjectId: '', role: 'MEMBER' })
     })
 
@@ -64,11 +61,10 @@ describe('表单校验', () => {
   })
 
   describe('新建团队', () => {
-    it('名称为空时不调用 API', async () => {
+    it('名称为空时 store 仍向 API 传递空值', async () => {
       const store = useTeamStore()
-      const ok = await store.createTeam('')
+      await store.createTeam('')
 
-      // createTeam 本身不校验（校验在组件层），但 API 会被调用
       expect(teamApi.create).toHaveBeenCalledWith('')
     })
 

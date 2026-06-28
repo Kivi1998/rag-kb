@@ -37,7 +37,11 @@ public class TeamService {
     @Transactional
     public Team create(String name) {
         // 仅 owner/admin 可创建团队
-        MemberRole callerRole = MemberRole.valueOf(TenantContext.getRole());
+        String roleStr = TenantContext.getRole();
+        if (roleStr == null) {
+            throw new AccessDeniedException("用户角色未设置，无权创建团队");
+        }
+        MemberRole callerRole = MemberRole.valueOf(roleStr);
         if (callerRole == MemberRole.MEMBER) {
             throw new AccessDeniedException("member 角色无权创建团队");
         }

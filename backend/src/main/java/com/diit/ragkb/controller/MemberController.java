@@ -1,6 +1,8 @@
 package com.diit.ragkb.controller;
 
 import com.diit.ragkb.common.ApiResponse;
+import com.diit.ragkb.exception.AccessDeniedException;
+import com.diit.ragkb.exception.ResourceNotFoundException;
 import com.diit.ragkb.model.Member;
 import com.diit.ragkb.model.MemberRole;
 import com.diit.ragkb.security.TenantContext;
@@ -41,7 +43,7 @@ public class MemberController {
     public ApiResponse<Member> me() {
         UUID memberId = TenantContext.getMemberId();
         if (memberId == null) {
-            throw new com.diit.ragkb.exception.ResourceNotFoundException("当前用户无成员身份");
+            throw new ResourceNotFoundException("当前用户无成员身份");
         }
         return ApiResponse.ok(memberService.getByIdAndCurrentOrg(memberId));
     }
@@ -66,6 +68,10 @@ public class MemberController {
         Member targetMember = memberService.getByIdAndCurrentOrg(memberId);
         UUID targetUserId = UUID.fromString(targetMember.getSubjectId());
         String callerRole = TenantContext.getRole();
+        // admin 不可重置 owner 密码，防止通过临时密码完成特权提升
+        if ("ADMIN".equals(callerRole) && targetMember.getRole() == MemberRole.OWNER) {
+            throw new AccessDeniedException("admin 不可重置 owner 的密码");
+        }
         String tempPassword = authService.adminResetPassword(
                 TenantContext.getMemberId(), targetUserId, callerRole);
         return ApiResponse.ok(tempPassword);

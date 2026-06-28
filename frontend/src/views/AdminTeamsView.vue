@@ -30,6 +30,8 @@ async function handleCreate() {
   if (ok) {
     ElMessage.success('团队创建成功')
     createDialogVisible.value = false
+  } else {
+    ElMessage.error('团队创建失败，请重试')
   }
 }
 

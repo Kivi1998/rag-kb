@@ -58,8 +58,8 @@ router.beforeEach(async (to) => {
     return { name: 'kb' }
   }
 
-  // 已登录但 role 尚未加载（如页面刷新后 sessionStorage 无 role），先 fetch
-  if (authStore.token && authStore.role === null) {
+  // 已登录但 role 尚未加载（如页面刷新后 sessionStorage 无 role），先 fetch（每次会话只尝试一次）
+  if (authStore.token && !authStore.roleFetched) {
     await authStore.fetchRole()
   }
 
