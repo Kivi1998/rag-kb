@@ -2,8 +2,6 @@
 import { onMounted } from 'vue'
 import { useKbStore } from '@/stores/kbStore'
 import KbSidebar from '@/components/KbSidebar.vue'
-import DocumentTable from '@/components/DocumentTable.vue'
-import ChatPanel from '@/components/ChatPanel.vue'
 
 const kbStore = useKbStore()
 
@@ -18,14 +16,12 @@ onMounted(() => {
       <KbSidebar />
     </aside>
     <main class="main-content">
-      <el-tabs v-if="kbStore.selectedKbId">
-        <el-tab-pane label="文档管理">
-          <DocumentTable />
-        </el-tab-pane>
-        <el-tab-pane label="问答">
-          <ChatPanel />
-        </el-tab-pane>
-      </el-tabs>
+      <el-result
+        v-if="kbStore.selectedKbId"
+        icon="info"
+        title="RAG 核心正在重构"
+        sub-title="旧文档摄取与问答链路已下线，新的自研技术文档检索能力完成后将在此接入。"
+      />
       <div v-else class="empty-tip">
         <el-empty description="请先选择或创建知识库" />
       </div>

@@ -1,13 +1,11 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useKbStore } from '@/stores/kbStore'
-import { useChatStore } from '@/stores/chatStore'
 import { ElMessageBox, ElMessage } from 'element-plus'
 import { Plus, Edit, Delete } from '@element-plus/icons-vue'
 import type { KnowledgeBase } from '@/types/kb'
 
 const kbStore = useKbStore()
-const chatStore = useChatStore()
 
 // 创建 KB 弹窗
 const showCreateDialog = ref(false)
@@ -73,7 +71,7 @@ async function handleDelete(kb: KnowledgeBase) {
       <span>知识库</span>
       <el-button :icon="Plus" circle size="small" @click="showCreateDialog = true" />
     </div>
-    <el-menu :default-active="kbStore.selectedKbId || ''" @select="chatStore.switchKb($event)">
+    <el-menu :default-active="kbStore.selectedKbId || ''" @select="kbStore.selectedKbId = $event">
       <el-menu-item v-for="kb in kbStore.kbs" :key="kb.id" :index="kb.id">
         <div class="kb-item">
           <span class="kb-name">{{ kb.name }}</span>

@@ -5,7 +5,7 @@
 ## 项目定位
 
 - toB 企业级文档知识库,目标支持百人级团队协作
-- 三层架构:Spring Boot 编排后端 → RAGFlow(RAG 引擎)→ Xinference(模型服务,LLM 优先小米 MiMo)
+- 当前处于自研 RAG Core 重构期：保留 Spring Boot 企业应用层，旧 RAGFlow 文档摄取与问答链路已删除；新实现遵循 `docs/自研RAG核心重构架构设计.md`
 - 详见 [`README.md`](README.md)、[`docs/architecture.md`](docs/architecture.md)
 - 规格驱动开发,规格在 [`openspec/`](openspec/);项目背景固化在 `openspec/config.yaml`
 
@@ -63,4 +63,4 @@ Superpowers = TDD 内循环纪律 + 自动触发;gstack = 接触真实外部世�
 - 注释 / 文档 / commit message 用中文,代码标识符用英文
 - 密钥放 `.env` / `application-secret`,禁止硬编码与提交
 - 多租户隔离必须在每个查询路径强制校验,安全测试覆盖跨租户访问(toB 红线)
-- 后端只用 REST/Feign 调 RAGFlow,不自写 RAG 内核
+- RAG Core 必须自研并保持模块化；不得重新引入 RAGFlow、LangChain、LlamaIndex、Dify 等高层 RAG 编排框架

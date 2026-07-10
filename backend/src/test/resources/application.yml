@@ -19,7 +19,3 @@ spring:
     redis:
       host: localhost
       port: 6379
-
-ragflow:
-  base-url: http://localhost:9380
-  api-key: test-api-key

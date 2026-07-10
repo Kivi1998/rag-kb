@@ -51,11 +51,6 @@ spring:
       port: ${REDIS_PORT:6379}
       password: ${REDIS_PASSWORD:}
 
-# RAGFlow 连接 — 从 application-secret.yml 覆盖
-ragflow:
-  base-url: ${RAGFLOW_BASE_URL:http://localhost:9380}
-  api-key: ${RAGFLOW_API_KEY:}
-
 # Actuator
 management:
   endpoints:
