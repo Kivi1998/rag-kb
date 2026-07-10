@@ -12,6 +12,7 @@ import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.regex.Pattern;
 
@@ -59,8 +60,9 @@ public class TechnicalChunker implements Chunker {
     @Override
     public List<Chunk> chunk(ParsedDocument document, ChunkingOptions options) {
         List<Chunk> chunks = new ArrayList<>();
-        UUID orgId = UUID.randomUUID(); // caller should set, placeholder for contract
-        UUID kbId = UUID.randomUUID();
+        Map<String, String> meta = document.metadata();
+        UUID orgId = parseUuid(meta != null ? meta.get("orgId") : null);
+        UUID kbId  = parseUuid(meta != null ? meta.get("kbId") : null);
 
         for (DocumentSection section : document.sections()) {
             List<Chunk> sectionChunks = chunkSection(section, document, orgId, kbId, options);
@@ -157,55 +159,92 @@ public class TechnicalChunker implements Chunker {
     List<String> splitToUnits(String text, ChunkingOptions options) {
         List<String> units = new ArrayList<>();
 
-        // First, split at ALL_BOUNDARIES
-        String[] blocks = ALL_BOUNDARIES.split(text);
-        java.util.regex.Matcher matcher = ALL_BOUNDARIES.matcher(text);
+        // split by lines, detect structure boundaries, group into semantic units
+        String[] lines = text.split("\n", -1);
+        StringBuilder current = new StringBuilder();
+        boolean inCodeFence = false;
+        boolean preserveCode = options.preserveCodeBlocks();
 
-        List<String> delimiters = new ArrayList<>();
-        while (matcher.find()) delimiters.add(matcher.group());
+        for (int i = 0; i < lines.length; i++) {
+            String line = lines[i];
+            String stripped = line.strip();
 
-        for (int i = 0; i < blocks.length; i++) {
-            // add delimiter before block (except first)
-            if (i > 0 && i - 1 < delimiters.size()) {
-                String delim = delimiters.get(i - 1).trim();
-                if (delim.length() <= 120) {
-                    // short heading: treat as its own unit
-                    units.add(delim);
+            // code fence toggle — only if preserveCodeBlocks is enabled
+            if (preserveCode && stripped.matches("^```\\w*$")) {
+                if (inCodeFence) {
+                    current.append(line).append('\n');
+                    units.add(current.toString().strip());
+                    current.setLength(0);
+                    inCodeFence = false;
+                } else {
+                    flushCurrent(current, units);
+                    current.append(line).append('\n');
+                    inCodeFence = true;
                 }
+                continue;
             }
 
-            String block = blocks[i].trim();
-            if (block.isEmpty()) continue;
+            // inside code fence: accumulate everything
+            if (inCodeFence) {
+                current.append(line).append('\n');
+                continue;
+            }
 
-            if (block.length() <= 1024) {
-                units.add(block);
-            } else {
-                // split overlong block at sentence boundaries
-                String[] sentences = SENTENCE_END.split(block);
-                StringBuilder sentenceBuf = new StringBuilder();
-                for (int j = 0; j < sentences.length; j++) {
-                    String s = sentences[j];
-                    // restore sentence-ending punctuation unless it's the last piece
-                    if (j < sentences.length - 1) {
-                        // find and append the delimiter
-                        int endIdx = block.indexOf(s) + s.length();
-                        if (endIdx < block.length()) {
-                            s += block.charAt(endIdx);
-                        }
-                    }
-                    if (sentenceBuf.length() + s.length() > 1024 && !sentenceBuf.isEmpty()) {
-                        units.add(sentenceBuf.toString().trim());
-                        sentenceBuf.setLength(0);
-                    }
-                    sentenceBuf.append(s);
+            // markdown heading: new semantic unit
+            if (MD_HEADING.matcher(line).find()) {
+                flushCurrent(current, units);
+                current.append(line).append('\n');
+                continue;
+            }
+
+            // Chinese structure heading
+            if (!stripped.isEmpty() && CN_STRUCTURE.matcher(stripped).matches()) {
+                flushCurrent(current, units);
+                current.append(line).append('\n');
+                continue;
+            }
+
+            // blank line: paragraph boundary
+            if (line.isBlank()) {
+                if (current.length() > 50) {
+                    flushCurrent(current, units);
+                    current.setLength(0);
+                } else if (!current.isEmpty()) {
+                    current.append('\n');
                 }
-                if (!sentenceBuf.isEmpty()) {
-                    units.add(sentenceBuf.toString().trim());
+                continue;
+            }
+
+            current.append(line).append('\n');
+        }
+
+        flushCurrent(current, units);
+        return units;
+    }
+
+    private void flushCurrent(StringBuilder buf, List<String> units) {
+        String s = buf.toString().strip();
+        if (!s.isEmpty()) {
+            if (s.length() <= 1024) {
+                units.add(s);
+            } else {
+                // split overlong at sentence boundaries
+                String[] sentences = SENTENCE_END.split(s);
+                StringBuilder sb = new StringBuilder();
+                for (int j = 0; j < sentences.length; j++) {
+                    String part = sentences[j];
+                    if (sb.length() + part.length() > 1024 && !sb.isEmpty()) {
+                        units.add(sb.toString().trim());
+                        sb.setLength(0);
+                    }
+                    sb.append(part);
+                }
+                if (!sb.isEmpty()) {
+                    units.add(sb.toString().trim());
                 }
             }
         }
-
-        return units;
+        buf.setLength(0);
     }
 
     /**
@@ -278,6 +317,14 @@ public class TechnicalChunker implements Chunker {
             return HexFormat.of().formatHex(hash).substring(0, 8);
         } catch (NoSuchAlgorithmException e) {
             return Integer.toHexString(input.hashCode());
+        }
+    }
+
+    private static UUID parseUuid(String s) {
+        try {
+            return s != null ? UUID.fromString(s) : null;
+        } catch (IllegalArgumentException e) {
+            return null;
         }
     }
 }

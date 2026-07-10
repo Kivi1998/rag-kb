@@ -61,7 +61,17 @@ public class StructuredDataParser implements DocumentParser {
         }
 
         List<DocumentSection> sections = new ArrayList<>();
-        flattenJson(tree, "$", sections);
+        // Always recurse from root so that intermediate keys (like $.server)
+        // appear in jsonPath metadata — the test checks for this.
+        if (tree.isObject()) {
+            Iterator<Map.Entry<String, JsonNode>> fields = tree.fields();
+            while (fields.hasNext()) {
+                Map.Entry<String, JsonNode> entry = fields.next();
+                flattenJson(entry.getValue(), "$." + entry.getKey(), sections);
+            }
+        } else {
+            flattenJson(tree, "$", sections);
+        }
 
         return new ParsedDocument(
                 input.documentId(), input.contentType(), input.sourcePath(),

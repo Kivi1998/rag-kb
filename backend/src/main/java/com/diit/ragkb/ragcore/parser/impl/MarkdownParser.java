@@ -25,7 +25,7 @@ import java.util.regex.Pattern;
 public class MarkdownParser implements DocumentParser {
 
     private static final Set<String> SUPPORTED_TYPES = Set.of(
-            "text/markdown", "text/x-markdown", "text/plain"
+            "text/markdown", "text/x-markdown"
     );
     private static final Set<String> MARKDOWN_EXTENSIONS = Set.of("md", "markdown", "mdown", "mkd");
 
