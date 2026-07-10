@@ -8,5 +8,5 @@ import java.util.List;
 /** 将解析结果切为可检索的上下文块。 */
 public interface Chunker {
 
-    List<Chunk> chunk(ParsedDocument document, ChunkingOptions options);
+    List<Chunk> chunk(ParsedDocument document, ChunkingContext context, ChunkingOptions options);
 }

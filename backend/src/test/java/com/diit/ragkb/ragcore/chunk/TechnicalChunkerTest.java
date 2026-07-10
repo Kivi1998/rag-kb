@@ -19,6 +19,11 @@ class TechnicalChunkerTest {
 
     private final TechnicalChunker chunker = new TechnicalChunker();
     private final ChunkingOptions opts = ChunkingOptions.defaults();
+    private static final ChunkingContext CONTEXT = new ChunkingContext(UUID.randomUUID(), UUID.randomUUID());
+
+    private List<Chunk> chunksFor(ParsedDocument document, ChunkingOptions options) {
+        return chunker.chunk(document, CONTEXT, options);
+    }
 
     private static ParsedDocument docWith(String... sectionTexts) {
         List<DocumentSection> sections = java.util.Arrays.stream(sectionTexts)
@@ -35,7 +40,7 @@ class TechnicalChunkerTest {
     @DisplayName("短文档切成单个块")
     void shortDocumentSingleChunk() {
         ParsedDocument doc = docWith("这是一段简短的测试文本。");
-        List<Chunk> chunks = chunker.chunk(doc, opts);
+        List<Chunk> chunks = chunksFor(doc, opts);
         assertEquals(1, chunks.size());
         assertEquals("这是一段简短的测试文本。", chunks.get(0).content());
     }
@@ -48,7 +53,7 @@ class TechnicalChunkerTest {
             sb.append("这是第").append(i).append("段测试文本。\n");
         }
         ParsedDocument doc = docWith(sb.toString());
-        List<Chunk> chunks = chunker.chunk(doc, opts);
+        List<Chunk> chunks = chunksFor(doc, opts);
         assertTrue(chunks.size() > 1, "长文档应切为多块, 实际: " + chunks.size());
     }
 
@@ -56,7 +61,7 @@ class TechnicalChunkerTest {
     @DisplayName("空文档不产生 chunk")
     void emptyDocumentNoChunks() {
         ParsedDocument doc = docWith("", "   ", "\n");
-        List<Chunk> chunks = chunker.chunk(doc, opts);
+        List<Chunk> chunks = chunksFor(doc, opts);
         // may produce 0 or only whitespace-ignored chunks
         long meaningful = chunks.stream().filter(c -> !c.content().isBlank()).count();
         assertEquals(0, meaningful);
@@ -76,7 +81,7 @@ class TechnicalChunkerTest {
                 + "## 部署方案\n\n"
                 + "使用 Docker Compose。\n";
         ParsedDocument doc = docWith(md);
-        List<Chunk> chunks = chunker.chunk(doc, opts);
+        List<Chunk> chunks = chunksFor(doc, opts);
         assertTrue(chunks.size() >= 2, "含标题的文档应切为多个块");
     }
 
@@ -87,7 +92,7 @@ class TechnicalChunkerTest {
                 + "第二条 投保范围\n凡符合投保条件的，均可作为被保险人。\n"
                 + "第三条 保险责任\n在本合同保险责任有效期内，本公司承担保险责任。\n";
         ParsedDocument doc = docWith(text);
-        List<Chunk> chunks = chunker.chunk(doc, opts);
+        List<Chunk> chunks = chunksFor(doc, opts);
         assertTrue(chunks.size() >= 2, "含中文条款的文档应切为多个块, 实际: " + chunks.size());
     }
 
@@ -103,7 +108,7 @@ class TechnicalChunkerTest {
                 + "    }\n"
                 + "}\n```\n\n这是后续文字。\n";
         ParsedDocument doc = docWith(md);
-        List<Chunk> chunks = chunker.chunk(doc, opts);
+        List<Chunk> chunks = chunksFor(doc, opts);
 
         // code fence content should appear completely in at least one chunk
         boolean codeIntact = chunks.stream().anyMatch(
@@ -123,7 +128,7 @@ class TechnicalChunkerTest {
         }
         ParsedDocument doc = docWith(sb.toString());
         ChunkingOptions optsSmall = new ChunkingOptions(600, 80, true);
-        List<Chunk> chunks = chunker.chunk(doc, optsSmall);
+        List<Chunk> chunks = chunksFor(doc, optsSmall);
         assertTrue(chunks.size() > 1, "应切为多块");
 
         // check that chunk ordinals are sequential
@@ -142,19 +147,39 @@ class TechnicalChunkerTest {
                 List.of(new DocumentSection("# Design\nContent here.", List.of("Design"), 1, 1, 3, Map.of())),
                 Map.of("language", "")
         );
-        List<Chunk> chunks = chunker.chunk(doc, opts);
+        List<Chunk> chunks = chunksFor(doc, opts);
         assertFalse(chunks.isEmpty());
         Chunk c = chunks.get(0);
         assertEquals("docs/design.md", c.sourcePath());
+        assertEquals(CONTEXT.organizationId(), c.organizationId());
+        assertEquals(CONTEXT.knowledgeBaseId(), c.knowledgeBaseId());
         assertNotNull(c.contentHash());
         assertEquals(8, c.contentHash().length(), "contentHash 应为 8 位 hex");
+    }
+
+    @Test
+    @DisplayName("结构边界后的 chunk 保留各自的行号范围")
+    void chunkCarriesAccurateLineRange() {
+        ParsedDocument doc = new ParsedDocument(
+                UUID.randomUUID(), "text/markdown", "docs/lines.md",
+                List.of(new DocumentSection("前言\n# 模块\n模块说明", List.of(), 1, 20, 22, Map.of())),
+                Map.of()
+        );
+
+        List<Chunk> chunks = chunksFor(doc, opts);
+
+        assertEquals(2, chunks.size());
+        assertEquals(20, chunks.get(0).lineStart());
+        assertEquals(20, chunks.get(0).lineEnd());
+        assertEquals(21, chunks.get(1).lineStart());
+        assertEquals(22, chunks.get(1).lineEnd());
     }
 
     @Test
     @DisplayName("chunk ID 包含 documentId、ordinal 和 content hash")
     void chunkIdFormat() {
         ParsedDocument doc = docWith("测试内容。");
-        List<Chunk> chunks = chunker.chunk(doc, opts);
+        List<Chunk> chunks = chunksFor(doc, opts);
         assertEquals(1, chunks.size());
         String id = chunks.get(0).id();
         assertTrue(id.contains(":"), "ID 应包含冒号分隔符");
@@ -186,12 +211,12 @@ class TechnicalChunkerTest {
     @Test
     @DisplayName("中英文混合文本正确切分")
     void mixedLanguageText() {
-        String text = "The system architecture is designed for high availability.\n"
+        String text = ("The system architecture is designed for high availability.\n"
                 + "系统架构设计为高可用。\n"
                 + "This includes database replication and Redis caching.\n"
-                + "包括数据库复制和 Redis 缓存。\n".repeat(50);
+                + "包括数据库复制和 Redis 缓存。\n").repeat(50);
         ParsedDocument doc = docWith(text);
-        List<Chunk> chunks = chunker.chunk(doc, opts);
+        List<Chunk> chunks = chunksFor(doc, opts);
         assertTrue(chunks.size() > 1, "混合文本应被切分");
         // 不应出现空 chunk
         assertTrue(chunks.stream().noneMatch(c -> c.content().isBlank()));

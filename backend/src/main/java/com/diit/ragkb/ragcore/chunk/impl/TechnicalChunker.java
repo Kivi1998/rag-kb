@@ -1,6 +1,7 @@
 package com.diit.ragkb.ragcore.chunk.impl;
 
 import com.diit.ragkb.ragcore.chunk.Chunker;
+import com.diit.ragkb.ragcore.chunk.ChunkingContext;
 import com.diit.ragkb.ragcore.chunk.ChunkingOptions;
 import com.diit.ragkb.ragcore.model.Chunk;
 import com.diit.ragkb.ragcore.model.DocumentSection;
@@ -12,7 +13,6 @@ import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
 import java.util.regex.Pattern;
 
@@ -58,14 +58,12 @@ public class TechnicalChunker implements Chunker {
     );
 
     @Override
-    public List<Chunk> chunk(ParsedDocument document, ChunkingOptions options) {
+    public List<Chunk> chunk(ParsedDocument document, ChunkingContext context, ChunkingOptions options) {
         List<Chunk> chunks = new ArrayList<>();
-        Map<String, String> meta = document.metadata();
-        UUID orgId = parseUuid(meta != null ? meta.get("orgId") : null);
-        UUID kbId  = parseUuid(meta != null ? meta.get("kbId") : null);
 
         for (DocumentSection section : document.sections()) {
-            List<Chunk> sectionChunks = chunkSection(section, document, orgId, kbId, options);
+            List<Chunk> sectionChunks = chunkSection(
+                    section, document, context.organizationId(), context.knowledgeBaseId(), options);
             chunks.addAll(sectionChunks);
         }
 
@@ -94,11 +92,18 @@ public class TechnicalChunker implements Chunker {
 
         // Step 2: fill buffer with units, flush when exceeding maxChars
         StringBuilder buf = new StringBuilder();
-        int bufLineStart = section.lineStart() != null ? section.lineStart() : 1;
-        int currentLine = bufLineStart;
+        int sourceLine = section.lineStart() != null ? section.lineStart() : 1;
+        int bufferLineStart = sourceLine;
+        int currentLine = sourceLine;
 
         for (String unit : units) {
             int unitLines = countLines(unit);
+            if (startsStructuralUnit(unit) && !buf.isEmpty()) {
+                chunks.add(flushBuffer(buf, section, document, orgId, kbId, chunks.size(),
+                        bufferLineStart, currentLine - 1));
+                buf.setLength(0);
+                bufferLineStart = currentLine;
+            }
             boolean isCodeFenceLine = unit.trim().matches("^```\\w*$");
 
             // code fence toggle: always accumulate (code blocks kept together)
@@ -112,14 +117,18 @@ public class TechnicalChunker implements Chunker {
             // check if adding unit exceeds max
             if (!buf.isEmpty() && buf.length() + unit.length() > options.maxCharacters()) {
                 String prev = buf.toString();
-                Chunk c = flushBuffer(buf, section, document, orgId, kbId, chunks.size(), options);
-                chunks.add(c);
+                chunks.add(flushBuffer(buf, section, document, orgId, kbId, chunks.size(),
+                        bufferLineStart, currentLine - 1));
                 buf.setLength(0);
 
                 // carry overlap from previous block tail
                 String overlap = tailOverlap(prev, options.overlapCharacters());
                 if (!overlap.isEmpty()) {
                     buf.append(overlap);
+                    bufferLineStart = Math.max(section.lineStart() == null ? 1 : section.lineStart(),
+                            currentLine - countLines(overlap));
+                } else {
+                    bufferLineStart = currentLine;
                 }
             }
 
@@ -131,8 +140,9 @@ public class TechnicalChunker implements Chunker {
             while (buf.length() > options.maxCharacters()) {
                 int splitAt = findSentenceSplit(buf.toString(), options.maxCharacters());
                 String head = buf.substring(0, splitAt).strip();
-                Chunk c = flushBuffer(new StringBuilder(head), section, document, orgId, kbId, chunks.size(), options);
-                chunks.add(c);
+                int headLineEnd = bufferLineStart + countLines(head) - 1;
+                chunks.add(flushBuffer(new StringBuilder(head), section, document, orgId, kbId, chunks.size(),
+                        bufferLineStart, headLineEnd));
 
                 // carry overlap + remainder
                 String tailPart = buf.substring(splitAt);
@@ -140,13 +150,17 @@ public class TechnicalChunker implements Chunker {
                 buf.setLength(0);
                 if (!overlap.isEmpty()) buf.append(overlap);
                 buf.append(tailPart);
+                bufferLineStart = overlap.isEmpty()
+                        ? headLineEnd + 1
+                        : Math.max(section.lineStart() == null ? 1 : section.lineStart(),
+                                headLineEnd - countLines(overlap) + 1);
             }
         }
 
         // flush remaining
         if (!buf.isEmpty()) {
-            Chunk c = flushBuffer(buf, section, document, orgId, kbId, chunks.size(), options);
-            chunks.add(c);
+            chunks.add(flushBuffer(buf, section, document, orgId, kbId, chunks.size(),
+                    bufferLineStart, currentLine - 1));
         }
 
         return chunks;
@@ -198,7 +212,7 @@ public class TechnicalChunker implements Chunker {
             }
 
             // Chinese structure heading
-            if (!stripped.isEmpty() && CN_STRUCTURE.matcher(stripped).matches()) {
+            if (!stripped.isEmpty() && CN_STRUCTURE.matcher(stripped).find()) {
                 flushCurrent(current, units);
                 current.append(line).append('\n');
                 continue;
@@ -274,13 +288,11 @@ public class TechnicalChunker implements Chunker {
     }
 
     private Chunk flushBuffer(StringBuilder buf, DocumentSection section, ParsedDocument document,
-                               UUID orgId, UUID kbId, int ordinal, ChunkingOptions options) {
+                               UUID orgId, UUID kbId, int ordinal, int lineStart, int lineEnd) {
         String content = buf.toString().strip();
         if (content.isEmpty()) content = buf.toString(); // preserve whitespace-only chunks as-is
 
         String lang = document.metadata() != null ? document.metadata().getOrDefault("language", "") : "";
-        SectionLineInfo info = computeLineInfo(section, content);
-
         String id = document.documentId() + ":" + ordinal + ":" + sha256_8(content);
 
         return new Chunk(
@@ -289,20 +301,17 @@ public class TechnicalChunker implements Chunker {
                 section.headingPath(),
                 document.sourcePath(),
                 section.pageNo(),
-                info.lineStart(),
-                info.lineEnd(),
+                section.lineStart() == null ? null : lineStart,
+                section.lineEnd() == null ? null : lineEnd,
                 lang,
                 sha256_8(content),
                 section.metadata()
         );
     }
 
-    private record SectionLineInfo(Integer lineStart, Integer lineEnd) {}
-
-    private SectionLineInfo computeLineInfo(DocumentSection section, String content) {
-        if (section.lineStart() == null) return new SectionLineInfo(null, null);
-        int lines = countLines(content);
-        return new SectionLineInfo(section.lineStart(), section.lineStart() + lines);
+    private boolean startsStructuralUnit(String unit) {
+        String stripped = unit.strip();
+        return MD_HEADING.matcher(stripped).find() || CN_STRUCTURE.matcher(stripped).find();
     }
 
     private int countLines(String text) {
