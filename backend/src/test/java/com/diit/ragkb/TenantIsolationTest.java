@@ -72,6 +72,12 @@ class TenantIsolationTest {
     @Nested
     @DisplayName("认证与上下文解析")
     class AuthTests {
+        @Test @DisplayName("健康检查无需凭证")
+        void healthCheck_isPublic() throws Exception {
+            mockMvc.perform(get("/actuator/health"))
+                    .andExpect(status().isOk());
+        }
+
         @Test @DisplayName("无凭证请求 → 401")
         void noCredentials_returns401() throws Exception {
             mockMvc.perform(get("/api/v1/teams").header("X-Org-Id", orgA.getId()))
@@ -200,6 +206,18 @@ class TenantIsolationTest {
             mockMvc.perform(post("/api/v1/organizations")
                     .contentType(MediaType.APPLICATION_JSON)
                     .content("{\"name\":\"新组织\"}"))
+                    .andExpect(status().isUnauthorized());
+        }
+
+        @Test @DisplayName("组织路径的前缀变体不能绕过租户上下文")
+        void organizationPathVariant_requiresOrgContext() throws Exception {
+            User newUser = testHelper.createUser("bootstrap-path@test.com", "Pass1234!", "Bootstrap Path");
+            String token = testHelper.generateToken(newUser.getId(), 0);
+
+            mockMvc.perform(post("/api/v1/organizations/unexpected")
+                    .header("Authorization", "Bearer " + token)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("{\"name\":\"不应创建\"}"))
                     .andExpect(status().isUnauthorized());
         }
     }

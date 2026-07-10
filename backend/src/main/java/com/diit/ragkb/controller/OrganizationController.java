@@ -13,7 +13,7 @@ import org.springframework.web.bind.annotation.*;
 /**
  * 组织控制器
  *
- * POST /api/v1/organizations = bootstrap(免租户上下文,白名单放行)
+ * POST /api/v1/organizations = bootstrap(免租户上下文，但需 JWT)
  * GET  /api/v1/organizations/{id} = 需认证+租户上下文
  */
 @RestController
