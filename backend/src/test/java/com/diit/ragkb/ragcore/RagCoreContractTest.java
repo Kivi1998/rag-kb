@@ -51,6 +51,22 @@ class RagCoreContractTest {
     }
 
     @Test
+    void 查询流事件应映射为稳定的小写SSE事件名() {
+        assertEquals("chunk", QueryEventType.CHUNK.wireName());
+        assertEquals("source", QueryEventType.SOURCE.wireName());
+        assertEquals("refusal", QueryEventType.REFUSAL.wireName());
+        assertEquals("done", QueryEventType.DONE.wireName());
+        assertEquals("error", QueryEventType.ERROR.wireName());
+
+        assertEquals("chunk", QueryEvent.chunk("回答").sseEventName());
+        assertEquals("source", QueryEvent.source(new Citation(
+                UUID.randomUUID(), "设计说明.md", List.of(), "片段", null, null, null, 0.91)).sseEventName());
+        assertEquals("refusal", QueryEvent.refusal("证据不足").sseEventName());
+        assertEquals("done", QueryEvent.done().sseEventName());
+        assertEquals("error", QueryEvent.error("服务异常").sseEventName());
+    }
+
+    @Test
     void 应拒绝无效的检索与切分参数() {
         assertThrows(IllegalArgumentException.class, () -> new ChunkingOptions(100, 100, true));
         assertThrows(IllegalArgumentException.class, () -> new RetrievalOptions(5, 6, true));
