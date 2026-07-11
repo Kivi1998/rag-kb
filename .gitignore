@@ -55,4 +55,6 @@ frontend/coverage/
 frontend/*.tsbuildinfo
 frontend/*.js
 frontend/*.d.ts
+__pycache__/
+*.py[cod]
 .gstack/

@@ -14,8 +14,8 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
  * Spring Security 配置
  *
  * URL 权限规则:
- * - POST /api/v1/organizations → permitAll(创建组织 = bootstrap,免租户上下文)
- * - /actuator/** → permitAll
+ * - POST /api/v1/organizations → 需有效 JWT、免租户上下文
+ * - /actuator/health → permitAll（供编排平台探活）
  * - 其他 → 认证(经 JwtAuthFilter)
  */
 @Configuration
@@ -37,7 +37,7 @@ public class SecurityConfig {
                 // 免认证端点
                 .requestMatchers("/api/v1/auth/register").permitAll()
                 .requestMatchers("/api/v1/auth/login").permitAll()
-                .requestMatchers("/actuator/**").permitAll()
+                .requestMatchers("/actuator/health", "/actuator/health/**").permitAll()
                 // 其他一律需要认证
                 .anyRequest().authenticated()
             )

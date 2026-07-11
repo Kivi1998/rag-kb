@@ -63,9 +63,11 @@ public class JwtAuthFilter extends OncePerRequestFilter {
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
         String path = request.getRequestURI();
-        // 注册/登录:免 JWT(由 SecurityConfig permitAll 处理)
+        // 注册、登录和健康检查无需 JWT；其余端点均经过 JWT 校验。
         return path.equals("/api/v1/auth/register")
-                || path.equals("/api/v1/auth/login");
+                || path.equals("/api/v1/auth/login")
+                || path.equals("/actuator/health")
+                || path.startsWith("/actuator/health/");
     }
 
     /** 是否是免租户上下文但需 JWT 的端点(如改密) */
@@ -165,7 +167,7 @@ public class JwtAuthFilter extends OncePerRequestFilter {
 
     private boolean isBootstrapEndpoint(HttpServletRequest request) {
         return HttpMethod.POST.matches(request.getMethod())
-                && request.getRequestURI().contains("/api/v1/organizations");
+                && request.getRequestURI().equals("/api/v1/organizations");
     }
 
     private String extractToken(HttpServletRequest request) {

@@ -24,12 +24,24 @@ import java.util.UUID;
 @Service
 public class JwtService {
 
+    private static final int MINIMUM_HS256_SECRET_BYTES = 32;
+
     private final SecretKey signingKey;
     private final long expirationSeconds;
 
     public JwtService(@Value("${spring.security.jwt.secret}") String secret,
                       @Value("${spring.security.jwt.expiration-seconds:86400}") long expirationSeconds) {
-        this.signingKey = Keys.hmacShaKeyFor(secret.getBytes(StandardCharsets.UTF_8));
+        if (secret == null || secret.isBlank()) {
+            throw new IllegalStateException("JWT_SECRET 未配置，服务拒绝启动");
+        }
+        byte[] secretBytes = secret.getBytes(StandardCharsets.UTF_8);
+        if (secretBytes.length < MINIMUM_HS256_SECRET_BYTES) {
+            throw new IllegalStateException("JWT_SECRET 至少需要 32 个字节");
+        }
+        if (expirationSeconds <= 0) {
+            throw new IllegalStateException("JWT_EXPIRATION_SECONDS 必须大于 0");
+        }
+        this.signingKey = Keys.hmacShaKeyFor(secretBytes);
         this.expirationSeconds = expirationSeconds;
     }
 

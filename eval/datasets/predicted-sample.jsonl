@@ -1,0 +1,55 @@
+{"id": "q-001", "predicted_chunk_ids": ["c-api-auth-login-200"], "predicted_refusal": false, "reranked": false}
+{"id": "q-002", "predicted_chunk_ids": ["c-api-kb-list-default", "c-api-kb-patch", "c-arch-ragcore-layout"], "predicted_refusal": false, "reranked": false}
+{"id": "q-003", "predicted_chunk_ids": ["c-async-worker", "c-api-doc-upload"], "predicted_refusal": false, "reranked": true}
+{"id": "q-004", "predicted_chunk_ids": ["c-err-4010", "c-err-4003"], "predicted_refusal": false, "reranked": false}
+{"id": "q-005", "predicted_chunk_ids": ["c-err-4003", "c-err-4004"], "predicted_refusal": false, "reranked": false}
+{"id": "q-006", "predicted_chunk_ids": ["c-envelope-202", "c-ts-pending-cleanup"], "predicted_refusal": false, "reranked": false}
+{"id": "q-007", "predicted_chunk_ids": ["c-sse-event-types"], "predicted_refusal": false, "reranked": false}
+{"id": "q-008", "predicted_chunk_ids": ["c-api-kb-patch"], "predicted_refusal": false, "reranked": false}
+{"id": "q-009", "predicted_chunk_ids": ["c-api-doc-delete"], "predicted_refusal": false, "reranked": false}
+{"id": "q-010", "predicted_chunk_ids": ["c-api-doc-mime", "c-parser-scanned-pdf"], "predicted_refusal": false, "reranked": true}
+{"id": "q-011", "predicted_chunk_ids": ["c-config-ingest-concurrency"], "predicted_refusal": false, "reranked": false}
+{"id": "q-012", "predicted_chunk_ids": ["c-config-bm25-weight", "c-config-vector-weight"], "predicted_refusal": false, "reranked": false}
+{"id": "q-013", "predicted_chunk_ids": ["c-config-rerank-fallback"], "predicted_refusal": false, "reranked": false}
+{"id": "q-014", "predicted_chunk_ids": ["c-config-jwt-ttl"], "predicted_refusal": false, "reranked": false}
+{"id": "q-015", "predicted_chunk_ids": ["c-config-es-bulk"], "predicted_refusal": false, "reranked": false}
+{"id": "q-016", "predicted_chunk_ids": ["c-config-hyde"], "predicted_refusal": false, "reranked": false}
+{"id": "q-017", "predicted_chunk_ids": ["c-config-chunk-overlap"], "predicted_refusal": false, "reranked": false}
+{"id": "q-018", "predicted_chunk_ids": ["c-config-rate-limit"], "predicted_refusal": false, "reranked": false}
+{"id": "q-019", "predicted_chunk_ids": ["c-config-embedding-baseurl"], "predicted_refusal": false, "reranked": false}
+{"id": "q-020", "predicted_chunk_ids": ["c-config-minio-prefix"], "predicted_refusal": false, "reranked": false}
+{"id": "q-021", "predicted_chunk_ids": ["c-api-document-parser", "c-arch-ragcore-layout"], "predicted_refusal": false, "reranked": false}
+{"id": "q-022", "predicted_chunk_ids": ["c-api-embedding-client"], "predicted_refusal": false, "reranked": false}
+{"id": "q-023", "predicted_chunk_ids": ["c-api-retriever"], "predicted_refusal": false, "reranked": false}
+{"id": "q-024", "predicted_chunk_ids": ["c-api-reranker-degrade"], "predicted_refusal": false, "reranked": false}
+{"id": "q-025", "predicted_chunk_ids": ["c-api-answer-generator"], "predicted_refusal": false, "reranked": true}
+{"id": "q-026", "predicted_chunk_ids": ["c-api-chunk-index"], "predicted_refusal": false, "reranked": false}
+{"id": "q-027", "predicted_chunk_ids": ["c-types-ingestion-status"], "predicted_refusal": false, "reranked": false}
+{"id": "q-028", "predicted_chunk_ids": ["c-types-citation"], "predicted_refusal": false, "reranked": false}
+{"id": "q-029", "predicted_chunk_ids": ["c-types-retrieved-chunk"], "predicted_refusal": false, "reranked": false}
+{"id": "q-030", "predicted_chunk_ids": ["c-types-query-event"], "predicted_refusal": false, "reranked": false}
+{"id": "q-031", "predicted_chunk_ids": ["c-arch-ragcore-layout", "c-arch-controller-boundary"], "predicted_refusal": false, "reranked": false}
+{"id": "q-032", "predicted_chunk_ids": ["c-arch-controller-boundary"], "predicted_refusal": false, "reranked": false}
+{"id": "q-033", "predicted_chunk_ids": ["c-arch-compensation"], "predicted_refusal": false, "reranked": false}
+{"id": "q-034", "predicted_chunk_ids": ["c-arch-no-langchain"], "predicted_refusal": false, "reranked": false}
+{"id": "q-035", "predicted_chunk_ids": ["c-arch-tenant-filter"], "predicted_refusal": false, "reranked": false}
+{"id": "q-036", "predicted_chunk_ids": ["c-algo-rrf", "c-algo-bm25-field"], "predicted_refusal": false, "reranked": true}
+{"id": "q-037", "predicted_chunk_ids": ["c-algo-bm25-field"], "predicted_refusal": false, "reranked": false}
+{"id": "q-038", "predicted_chunk_ids": ["c-algo-content-hash"], "predicted_refusal": false, "reranked": false}
+{"id": "q-039", "predicted_chunk_ids": ["c-algo-chunk-id-field"], "predicted_refusal": false, "reranked": false}
+{"id": "q-040", "predicted_chunk_ids": ["c-algo-vector-dim"], "predicted_refusal": false, "reranked": false}
+{"id": "q-041", "predicted_chunk_ids": ["c-ts-zero-recall", "c-algo-vector-dim", "c-algo-bm25-field"], "predicted_refusal": false, "reranked": true}
+{"id": "q-042", "predicted_chunk_ids": ["c-ts-sse-reconnect", "c-types-query-event"], "predicted_refusal": false, "reranked": false}
+{"id": "q-043", "predicted_chunk_ids": ["c-ts-pending-cleanup", "c-envelope-202"], "predicted_refusal": false, "reranked": false}
+{"id": "q-044", "predicted_chunk_ids": ["c-ts-no-org", "c-auth-no-org"], "predicted_refusal": false, "reranked": false}
+{"id": "q-045", "predicted_chunk_ids": ["c-ts-refusal-causes"], "predicted_refusal": false, "reranked": false}
+{"id": "q-046", "predicted_chunk_ids": ["c-ts-verify-index"], "predicted_refusal": false, "reranked": false}
+{"id": "q-047", "predicted_chunk_ids": ["c-ts-retry-flow", "c-types-ingestion-status"], "predicted_refusal": false, "reranked": false}
+{"id": "q-048", "predicted_chunk_ids": ["c-ts-delete-reconcile"], "predicted_refusal": false, "reranked": false}
+{"id": "q-049", "predicted_chunk_ids": ["c-ts-es-bulk-fail"], "predicted_refusal": false, "reranked": false}
+{"id": "q-050", "predicted_chunk_ids": ["c-ts-readable-stream"], "predicted_refusal": false, "reranked": false}
+{"id": "q-051", "predicted_chunk_ids": [], "predicted_refusal": true, "predicted_refusal_reason": "OUT_OF_SCOPE", "reranked": false}
+{"id": "q-052", "predicted_chunk_ids": [], "predicted_refusal": true, "predicted_refusal_reason": "OUT_OF_SCOPE", "reranked": false}
+{"id": "q-053", "predicted_chunk_ids": [], "predicted_refusal": true, "predicted_refusal_reason": "OUT_OF_SCOPE", "reranked": false}
+{"id": "q-054", "predicted_chunk_ids": [], "predicted_refusal": true, "predicted_refusal_reason": "OUT_OF_SCOPE", "reranked": false}
+{"id": "q-055", "predicted_chunk_ids": [], "predicted_refusal": true, "predicted_refusal_reason": "SAFETY", "reranked": false}
