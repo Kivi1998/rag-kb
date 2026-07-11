@@ -10,6 +10,7 @@ import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.text.PDFTextStripper;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.util.*;
 
 /**
@@ -45,7 +46,8 @@ public class PdfParser implements DocumentParser {
 
     @Override
     public ParsedDocument parse(DocumentInput input) throws IOException {
-        try (PDDocument pdDoc = Loader.loadPDF(input.openStream().readAllBytes())) {
+        try (InputStream stream = input.openStream();
+             PDDocument pdDoc = Loader.loadPDF(stream.readAllBytes())) {
             int numPages = pdDoc.getNumberOfPages();
             if (numPages == 0) {
                 throw new IOException("PDF 文件无页面");

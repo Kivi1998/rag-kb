@@ -25,7 +25,7 @@ import java.util.*;
  */
 public class StructuredDataParser implements DocumentParser {
 
-    private static final Set<String> STRUCT_EXTENSIONS = Set.of("json", "yaml", "yml", "xml", "toml");
+    private static final Set<String> STRUCT_EXTENSIONS = Set.of("json", "yaml", "yml", "xml");
     private static final Set<String> STRUCT_TYPES = Set.of(
             "application/json", "application/xml", "text/xml",
             "application/x-yaml", "text/yaml", "text/x-yaml", "application/yaml"
@@ -45,7 +45,10 @@ public class StructuredDataParser implements DocumentParser {
 
     @Override
     public ParsedDocument parse(DocumentInput input) throws IOException {
-        String raw = new String(input.openStream().readAllBytes(), StandardCharsets.UTF_8).strip();
+        String raw;
+        try (InputStream stream = input.openStream()) {
+            raw = new String(stream.readAllBytes(), StandardCharsets.UTF_8).strip();
+        }
         String format = detectFormat(input.filename());
 
         if ("xml".equals(format)) {
@@ -162,7 +165,6 @@ public class StructuredDataParser implements DocumentParser {
         String lower = filename.toLowerCase();
         if (lower.endsWith(".yaml") || lower.endsWith(".yml")) return "yaml";
         if (lower.endsWith(".xml")) return "xml";
-        if (lower.endsWith(".toml")) return "toml";
         return "json";
     }
 

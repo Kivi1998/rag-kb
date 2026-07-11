@@ -117,6 +117,28 @@ class TechnicalChunkerTest {
         assertTrue(codeIntact, "代码块应完整保留在一个 chunk 内");
     }
 
+    @Test
+    @DisplayName("关闭代码块保护后允许按长度切分")
+    void codeBlockCanSplitWhenProtectionDisabled() {
+        String code = "```java\n" + "System.out.println(\"line\");\n".repeat(20) + "```";
+        List<Chunk> chunks = chunksFor(docWith(code), new ChunkingOptions(80, 0, false));
+
+        assertTrue(chunks.size() > 1, "关闭保护后，超长代码块应按 maxCharacters 切分");
+        assertTrue(chunks.stream().allMatch(chunk -> chunk.content().length() <= 80));
+    }
+
+    @Test
+    @DisplayName("超长文本切分保留标点和换行，并服从 maxCharacters")
+    void longTextPreservesPunctuationAndNewlines() {
+        String text = ("第一句。\n第二句。\n第三句。\n").repeat(200);
+        List<Chunk> chunks = chunksFor(docWith(text), new ChunkingOptions(80, 0, false));
+
+        assertTrue(chunks.size() > 1);
+        assertTrue(chunks.stream().allMatch(chunk -> chunk.content().length() <= 80));
+        assertEquals(text.strip(), chunks.stream().map(Chunk::content).collect(java.util.stream.Collectors.joining()),
+                "切分不得丢失原始标点或换行");
+    }
+
     // ── Overlap ──
 
     @Test
@@ -185,6 +207,27 @@ class TechnicalChunkerTest {
         assertTrue(id.contains(":"), "ID 应包含冒号分隔符");
         String[] parts = id.split(":");
         assertEquals(3, parts.length, "ID 格式: documentId:ordinal:hash");
+    }
+
+    @Test
+    @DisplayName("多个 section 的相同内容仍生成全局唯一且一致的 chunk ID")
+    void chunkIdsUseGlobalOrdinalAcrossSections() {
+        UUID documentId = UUID.randomUUID();
+        ParsedDocument doc = new ParsedDocument(
+                documentId, "text/plain", "docs/repeated.txt",
+                List.of(
+                        new DocumentSection("重复内容。", List.of(), null, 1, 1, Map.of()),
+                        new DocumentSection("重复内容。", List.of(), null, 2, 2, Map.of())
+                ),
+                Map.of()
+        );
+
+        List<Chunk> chunks = chunksFor(doc, opts);
+
+        assertEquals(2, chunks.size());
+        assertNotEquals(chunks.get(0).id(), chunks.get(1).id(), "同文档的 chunk ID 必须唯一");
+        assertTrue(chunks.get(0).id().contains(":" + chunks.get(0).ordinal() + ":"));
+        assertTrue(chunks.get(1).id().contains(":" + chunks.get(1).ordinal() + ":"));
     }
 
     // ── ChunkingOptions 校验 ──

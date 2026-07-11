@@ -41,6 +41,20 @@ class DocumentParserTest {
         assertTrue(totalChars > 10, "解析后总字符数应 > 10, 实际: " + totalChars);
     }
 
+    static final class CloseTrackingInputStream extends ByteArrayInputStream {
+        private boolean closed;
+
+        CloseTrackingInputStream(byte[] bytes) {
+            super(bytes);
+        }
+
+        @Override
+        public void close() throws IOException {
+            closed = true;
+            super.close();
+        }
+    }
+
     // ── MarkdownParser ──
 
     @Test
@@ -88,6 +102,19 @@ class DocumentParserTest {
         assertTrue(parser.supports(null, "readme.md"));
         assertTrue(parser.supports(null, "doc.mdown"));
         assertFalse(parser.supports(null, "data.json"));
+    }
+
+    @Test
+    @DisplayName("Markdown 标题层级回退时不保留已结束的子标题")
+    void markdownParserTracksHeadingLevels() throws IOException {
+        String markdown = "# 根标题\n\n根内容。\n\n### 深层标题\n\n深层内容。\n\n## 同级标题\n\n同级内容。";
+        ParsedDocument doc = new MarkdownParser().parse(inputOf("levels.md", "text/markdown", markdown));
+
+        DocumentSection siblingSection = doc.sections().stream()
+                .filter(section -> section.text().contains("同级内容"))
+                .findFirst()
+                .orElseThrow();
+        assertEquals(List.of("根标题", "同级标题"), siblingSection.headingPath());
     }
 
     // ── TextParser ──
@@ -253,6 +280,24 @@ class DocumentParserTest {
     void structuredDataParserUnsupported() {
         StructuredDataParser parser = new StructuredDataParser();
         assertFalse(parser.supports("application/pdf", "doc.pdf"));
+        assertFalse(parser.supports(null, "config.toml"));
+    }
+
+    @Test
+    @DisplayName("StructuredDataParser 关闭调用方提供的输入流")
+    void structuredDataParserClosesInputStream() throws IOException {
+        CloseTrackingInputStream stream = new CloseTrackingInputStream("{\"key\": \"value\"}".getBytes(StandardCharsets.UTF_8));
+        DocumentInput input = new DocumentInput() {
+            @Override public UUID documentId() { return UUID.randomUUID(); }
+            @Override public String filename() { return "config.json"; }
+            @Override public String contentType() { return "application/json"; }
+            @Override public String sourcePath() { return "test/config.json"; }
+            @Override public InputStream openStream() { return stream; }
+        };
+
+        new StructuredDataParser().parse(input);
+
+        assertTrue(stream.closed, "解析器必须关闭 DocumentInput 打开的输入流");
     }
 
     // ── DocxParser ──
@@ -262,7 +307,7 @@ class DocumentParserTest {
     void docxParserSupports() {
         DocxParser parser = new DocxParser();
         assertTrue(parser.supports("application/vnd.openxmlformats-officedocument.wordprocessingml.document", "doc.docx"));
-        assertTrue(parser.supports(null, "report.doc"));
+        assertFalse(parser.supports(null, "report.doc"));
         assertFalse(parser.supports(null, "data.json"));
     }
 

@@ -71,7 +71,8 @@ public class TechnicalChunker implements Chunker {
         for (int i = 0; i < chunks.size(); i++) {
             Chunk old = chunks.get(i);
             chunks.set(i, new Chunk(
-                    old.id(), old.organizationId(), old.knowledgeBaseId(), old.documentId(),
+                    chunkId(old.documentId(), i, old.content()),
+                    old.organizationId(), old.knowledgeBaseId(), old.documentId(),
                     i, old.content(), old.headingPath(), old.sourcePath(),
                     old.pageNo(), old.lineStart(), old.lineEnd(),
                     old.language(), old.contentHash(), old.metadata()
@@ -104,10 +105,12 @@ public class TechnicalChunker implements Chunker {
                 buf.setLength(0);
                 bufferLineStart = currentLine;
             }
-            boolean isCodeFenceLine = unit.trim().matches("^```\\w*$");
+            boolean isCodeFenceLine = options.preserveCodeBlocks()
+                    && unit.trim().matches("^```\\w*$");
 
             // code fence toggle: always accumulate (code blocks kept together)
-            if (isCodeFenceLine || (buf.length() > 0 && buf.toString().trim().startsWith("```"))) {
+            if (isCodeFenceLine || (options.preserveCodeBlocks()
+                    && buf.length() > 0 && buf.toString().trim().startsWith("```"))) {
                 if (!buf.isEmpty()) buf.append('\n');
                 buf.append(unit);
                 currentLine += unitLines;
@@ -139,7 +142,7 @@ public class TechnicalChunker implements Chunker {
             // if single unit alone exceeds max, split at sentence boundaries
             while (buf.length() > options.maxCharacters()) {
                 int splitAt = findSentenceSplit(buf.toString(), options.maxCharacters());
-                String head = buf.substring(0, splitAt).strip();
+                String head = buf.substring(0, splitAt);
                 int headLineEnd = bufferLineStart + countLines(head) - 1;
                 chunks.add(flushBuffer(new StringBuilder(head), section, document, orgId, kbId, chunks.size(),
                         bufferLineStart, headLineEnd));
@@ -167,8 +170,9 @@ public class TechnicalChunker implements Chunker {
     }
 
     /**
-     * Split text at natural structure boundaries, then at sentence boundaries
-     * for overlong segments. Ported from rag3 {@code _split_units}.
+     * Split text at natural structure boundaries. Overlong units are split in
+     * {@link #chunkSection(DocumentSection, ParsedDocument, UUID, UUID, ChunkingOptions)}
+     * so that {@link ChunkingOptions#maxCharacters()} is the only length limit.
      */
     List<String> splitToUnits(String text, ChunkingOptions options) {
         List<String> units = new ArrayList<>();
@@ -239,24 +243,8 @@ public class TechnicalChunker implements Chunker {
     private void flushCurrent(StringBuilder buf, List<String> units) {
         String s = buf.toString().strip();
         if (!s.isEmpty()) {
-            if (s.length() <= 1024) {
-                units.add(s);
-            } else {
-                // split overlong at sentence boundaries
-                String[] sentences = SENTENCE_END.split(s);
-                StringBuilder sb = new StringBuilder();
-                for (int j = 0; j < sentences.length; j++) {
-                    String part = sentences[j];
-                    if (sb.length() + part.length() > 1024 && !sb.isEmpty()) {
-                        units.add(sb.toString().trim());
-                        sb.setLength(0);
-                    }
-                    sb.append(part);
-                }
-                if (!sb.isEmpty()) {
-                    units.add(sb.toString().trim());
-                }
-            }
+            // 保留原始标点与换行；长度切分统一由 chunkSection 按 options.maxCharacters 处理。
+            units.add(s);
         }
         buf.setLength(0);
     }
@@ -289,11 +277,10 @@ public class TechnicalChunker implements Chunker {
 
     private Chunk flushBuffer(StringBuilder buf, DocumentSection section, ParsedDocument document,
                                UUID orgId, UUID kbId, int ordinal, int lineStart, int lineEnd) {
-        String content = buf.toString().strip();
-        if (content.isEmpty()) content = buf.toString(); // preserve whitespace-only chunks as-is
+        String content = buf.toString();
 
         String lang = document.metadata() != null ? document.metadata().getOrDefault("language", "") : "";
-        String id = document.documentId() + ":" + ordinal + ":" + sha256_8(content);
+        String id = chunkId(document.documentId(), ordinal, content);
 
         return new Chunk(
                 id, orgId, kbId, document.documentId(), ordinal,
@@ -329,11 +316,7 @@ public class TechnicalChunker implements Chunker {
         }
     }
 
-    private static UUID parseUuid(String s) {
-        try {
-            return s != null ? UUID.fromString(s) : null;
-        } catch (IllegalArgumentException e) {
-            return null;
-        }
+    private static String chunkId(UUID documentId, int ordinal, String content) {
+        return documentId + ":" + ordinal + ":" + sha256_8(content);
     }
 }

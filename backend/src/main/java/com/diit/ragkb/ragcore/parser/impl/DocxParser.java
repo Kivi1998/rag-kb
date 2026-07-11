@@ -8,6 +8,7 @@ import com.diit.ragkb.ragcore.parser.DocumentParser;
 import org.apache.poi.xwpf.usermodel.*;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.util.*;
 
 /**
@@ -23,10 +24,9 @@ import java.util.*;
 public class DocxParser implements DocumentParser {
 
     private static final Set<String> SUPPORTED_TYPES = Set.of(
-            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            "application/msword"
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     );
-    private static final Set<String> DOCX_EXTENSIONS = Set.of("docx", "doc");
+    private static final Set<String> DOCX_EXTENSIONS = Set.of("docx");
 
     @Override
     public boolean supports(String contentType, String filename) {
@@ -40,63 +40,64 @@ public class DocxParser implements DocumentParser {
 
     @Override
     public ParsedDocument parse(DocumentInput input) throws IOException {
-        XWPFDocument doc = new XWPFDocument(input.openStream());
-        List<DocumentSection> sections = new ArrayList<>();
+        try (InputStream stream = input.openStream(); XWPFDocument doc = new XWPFDocument(stream)) {
+            List<DocumentSection> sections = new ArrayList<>();
 
-        Deque<String> headingStack = new ArrayDeque<>();
-        StringBuilder currentBlock = new StringBuilder();
-        Integer blockStartPage = null;
+            Deque<String> headingStack = new ArrayDeque<>();
+            StringBuilder currentBlock = new StringBuilder();
+            Integer blockStartPage = null;
 
-        for (IBodyElement elem : doc.getBodyElements()) {
-            if (elem instanceof XWPFParagraph para) {
-                String style = para.getStyleID() != null ? para.getStyleID() : "";
-                String text = para.getText();
+            for (IBodyElement elem : doc.getBodyElements()) {
+                if (elem instanceof XWPFParagraph para) {
+                    String style = para.getStyleID() != null ? para.getStyleID() : "";
+                    String text = para.getText();
 
-                if (text == null || text.isBlank()) {
-                    // blank line: flush accumulated block
-                    if (currentBlock.length() > 50) {
+                    if (text == null || text.isBlank()) {
+                        // blank line: flush accumulated block
+                        if (currentBlock.length() > 50) {
+                            flushBlock(currentBlock, headingStack, blockStartPage, sections);
+                            currentBlock.setLength(0);
+                        }
+                        continue;
+                    }
+
+                    // heading detection
+                    if (style.matches("(?i)Heading\\d+") || style.matches("(?i)heading\\d+")) {
+                        // flush previous
                         flushBlock(currentBlock, headingStack, blockStartPage, sections);
                         currentBlock.setLength(0);
-                    }
-                    continue;
-                }
 
-                // heading detection
-                if (style.matches("(?i)Heading\\d+") || style.matches("(?i)heading\\d+")) {
-                    // flush previous
+                        int level = extractHeadingLevel(style);
+                        while (headingStack.size() >= level) headingStack.pollLast();
+                        headingStack.add(text.strip());
+                        currentBlock.append(text.strip()).append('\n');
+                        continue;
+                    }
+
+                    if (currentBlock.isEmpty()) blockStartPage = null; // approximate
+                    if (!currentBlock.isEmpty()) currentBlock.append('\n');
+                    currentBlock.append(text);
+                } else if (elem instanceof XWPFTable table) {
                     flushBlock(currentBlock, headingStack, blockStartPage, sections);
                     currentBlock.setLength(0);
 
-                    int level = extractHeadingLevel(style);
-                    while (headingStack.size() >= level) headingStack.pollLast();
-                    headingStack.add(text.strip());
-                    currentBlock.append(text.strip()).append('\n');
-                    continue;
-                }
-
-                if (currentBlock.isEmpty()) blockStartPage = null; // approximate
-                if (!currentBlock.isEmpty()) currentBlock.append('\n');
-                currentBlock.append(text);
-            } else if (elem instanceof XWPFTable table) {
-                flushBlock(currentBlock, headingStack, blockStartPage, sections);
-                currentBlock.setLength(0);
-
-                // extract table as structured text
-                String tableText = extractTable(table);
-                if (!tableText.isBlank()) {
-                    sections.add(new DocumentSection(
-                            tableText, headingStack.isEmpty() ? List.of() : List.copyOf(headingStack),
-                            null, null, null, Map.of("type", "table")
-                    ));
+                    // extract table as structured text
+                    String tableText = extractTable(table);
+                    if (!tableText.isBlank()) {
+                        sections.add(new DocumentSection(
+                                tableText, headingStack.isEmpty() ? List.of() : List.copyOf(headingStack),
+                                null, null, null, Map.of("type", "table")
+                        ));
+                    }
                 }
             }
-        }
-        flushBlock(currentBlock, headingStack, blockStartPage, sections);
+            flushBlock(currentBlock, headingStack, blockStartPage, sections);
 
-        return new ParsedDocument(
-                input.documentId(), input.contentType(), input.sourcePath(),
-                sections, Map.of("format", "docx", "filename", input.filename())
-        );
+            return new ParsedDocument(
+                    input.documentId(), input.contentType(), input.sourcePath(),
+                    sections, Map.of("format", "docx", "filename", input.filename())
+            );
+        }
     }
 
     private void flushBlock(StringBuilder block, Deque<String> headingStack,

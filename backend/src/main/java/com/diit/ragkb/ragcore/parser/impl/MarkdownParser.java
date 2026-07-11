@@ -54,6 +54,7 @@ public class MarkdownParser implements DocumentParser {
 
         List<DocumentSection> sections = new ArrayList<>();
         Deque<String> headingStack = new ArrayDeque<>();
+        Deque<Integer> headingLevels = new ArrayDeque<>();
         StringBuilder currentBlock = new StringBuilder();
         int blockStartLine = 1;
         boolean inCodeFence = false;
@@ -86,8 +87,12 @@ public class MarkdownParser implements DocumentParser {
                 int level = headingMatcher.group(1).length();
                 String title = headingMatcher.group(2).strip();
 
-                // adjust heading stack to current level
-                while (headingStack.size() >= level) headingStack.pollLast();
+                // 以标题真实层级回退；不能仅按栈长度判断（例如 ### 后出现 ##）。
+                while (!headingLevels.isEmpty() && headingLevels.peekLast() >= level) {
+                    headingLevels.pollLast();
+                    headingStack.pollLast();
+                }
+                headingLevels.add(level);
                 headingStack.add(title);
 
                 blockStartLine = lineNo;
