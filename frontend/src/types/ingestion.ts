@@ -57,8 +57,8 @@ export interface Document {
   uploadedAt: string
   /** READY 时间 ISO 8601（READY 之前为空） */
   readyAt?: string
-  /** 服务端可选 metadata 中的 sourcePath/key，便于做审计追溯 */
-  sourcePath?: string
+  /** 当前/最近一次摄取任务；失败重试必须使用该服务端返回的 ID。 */
+  jobId?: string
 }
 
 /**

@@ -8,8 +8,7 @@
  * 摄取状态机：QUEUED → PARSING → CHUNKING → EMBEDDING → INDEXING → READY
  * 任何阶段失败 → FAILED；管理员可手动重试。
  *
- * 注意：当前后端尚未实现这些文档端点；本文件和其单测只冻结调用形状，不能视为
- * 已完成的端到端 API。后端 T101/T102 落地后必须以集成测试复核。
+ * 后端已提供该契约；真实环境仍需以 MinIO、ES、Embedding Worker 完成端到端验收。
  *
  * 本文件不显式标注 axios 泛型，因为 `http.ts` 的响应拦截器已经在内部
  * 解包 ApiResponse envelope（code=0 → data），TS 无法感知到这一变换；

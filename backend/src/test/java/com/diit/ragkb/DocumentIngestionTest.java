@@ -99,7 +99,9 @@ class DocumentIngestionTest {
                 .andExpect(jsonPath("$.code").value(0))
                 .andExpect(jsonPath("$.data.name").value("架构说明.md"))
                 .andExpect(jsonPath("$.data.kbId").value(knowledgeBase.getId().toString()))
-                .andExpect(jsonPath("$.data.status").value("QUEUED"));
+                .andExpect(jsonPath("$.data.status").value("QUEUED"))
+                .andExpect(jsonPath("$.data.jobId").isNotEmpty())
+                .andExpect(jsonPath("$.data.sourcePath").doesNotExist());
 
         var documents = documentRepository.findByKnowledgeBaseIdAndOrgIdOrderByCreatedAtDesc(knowledgeBase.getId(), org.getId());
         assertEquals(1, documents.size());

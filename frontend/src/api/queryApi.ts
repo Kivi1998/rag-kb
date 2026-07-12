@@ -1,5 +1,5 @@
 /**
- * 知识库 SSE 流式问答 API 占位 Mock 契约（11 节 + T005 / T203 / T205）。
+ * 知识库 SSE 流式问答契约（T203 / T205）。
  *
  * 设计要点：
  * - 五类事件固定：chunk / source / refusal / done / error，禁止自创
@@ -158,7 +158,7 @@ function protocolError(message: string): QueryEvent {
  * - 调用方负责把 token / X-Org-Id 放到 headers 中
  * - AbortSignal 触发时，闭包内 fetch 自动抛 AbortError，AsyncGenerator 终止
  * - 5 类事件按到达顺序 yield；任何非五类事件（如服务端推送注释、空块）被静默跳过
- * - 当前为前端占位实现；后端 T203 未实现前，不能视为已完成接口联调
+ * - 后端已实现该协议；真实 ES/模型环境仍需按部署手册完成端到端验收
  */
 export interface OpenStreamOptions {
   url: string
