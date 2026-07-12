@@ -2,6 +2,8 @@ package com.diit.ragkb.config;
 
 import com.diit.ragkb.ragcore.index.ChunkIndex;
 import com.diit.ragkb.ragcore.index.ElasticsearchChunkIndex;
+import com.diit.ragkb.ragcore.retrieval.ElasticsearchHybridCandidateSource;
+import com.diit.ragkb.ragcore.retrieval.HybridCandidateSource;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.http.Header;
 import org.apache.http.message.BasicHeader;
@@ -36,6 +38,13 @@ public class RagElasticsearchConfiguration {
     public ChunkIndex chunkIndex(RestClient ragRestClient, RagElasticsearchProperties properties,
                                  ObjectMapper objectMapper) {
         return new ElasticsearchChunkIndex(ragRestClient, properties, objectMapper);
+    }
+
+    @Bean
+    @ConditionalOnProperty(prefix = "rag.elasticsearch", name = "enabled", havingValue = "true")
+    public HybridCandidateSource hybridCandidateSource(RestClient ragRestClient, RagElasticsearchProperties properties,
+                                                       ObjectMapper objectMapper) {
+        return new ElasticsearchHybridCandidateSource(ragRestClient, properties, objectMapper);
     }
 
     private void validate(RagElasticsearchProperties properties) {

@@ -1,6 +1,6 @@
-# 自研 RAG 摄取与索引部署验收手册
+# 自研 RAG 摄取、检索与问答部署验收手册
 
-> 适用范围：P1 摄取与索引闭环（T003、T101–T107）。
+> 适用范围：P1 摄取与索引、P2 混合检索与 SSE 问答（T003、T101–T107、T201–T203）。
 >
 > 目标：让技术文档可靠经历“上传 → `QUEUED` → 解析 → 切块 → 向量化 → ES Bulk → `READY`”，并在删除时不再被检索命中。
 
@@ -15,11 +15,15 @@
 - 管理员/Owner 上传、查询任务、重试和删除 API；
 - 数据库条件更新领取任务，避免多 Worker 重复处理同一 `QUEUED` 任务；
 - Markdown、TXT、代码、YAML/JSON/XML、DOCX、文本型 PDF 的解析与结构化切块；
-- OpenAI 兼容 Embedding/Rerank HTTP 客户端；
+- OpenAI 兼容 Embedding/Rerank/Chat Completions HTTP 客户端；
 - 共享 ES 索引 `rag_chunks_v1` 的 mapping、Bulk Upsert、按 org/kb/document 三重过滤删除；
 - `DELETING` 删除补偿：优先删除 ES chunk，再删除对象与数据库元数据，失败自动重试。
+- ES 原生 BM25 与 kNN 双路召回、RRF 融合、可选 Rerank、低置信度拒答；
+- `POST /api/v1/knowledge-bases/{kbId}/query` SSE 接口，稳定输出 `chunk/source/refusal/done/error` 五类事件；
+- 服务端引用卡片：从最终 chunk 和本租户文档元数据构造，不向前端暴露对象存储路径；
+- Embedding 故障时退化为 BM25，Rerank 故障时退化为 RRF，空召回不调用生成模型。
 
-尚未实现：混合检索、RRF/Rerank 决策、SSE 问答、引用展示和线上可观测性；这些属于 T201–T203、T302。
+尚未实现：问答前端页面/取消交互、端到端真实模型验收、离线评测、线上指标和审计落库；这些属于 T204–T207、T301–T306。
 
 ## 2. 运行依赖
 
@@ -30,6 +34,7 @@
 | Elasticsearch 8.x | `rag_chunks_v1` 与向量/BM25 索引 | 向量维度与 Embedding 模型一致 |
 | Embedding 网关 | 批量向量 | OpenAI `POST /v1/embeddings` 兼容协议 |
 | Rerank 网关 | 后续检索精排 | 可选；支持 `query/documents/results` 协议 |
+| Generation 网关 | SSE 答案生成 | OpenAI Chat Completions 流式兼容协议 |
 
 ES Java REST Client 采用 8.17 分支。应将客户端主版本与实际 ES 主版本保持一致；本项目不使用 Spring Data Elasticsearch 或 RAG 编排框架。
 
@@ -64,9 +69,24 @@ RAG_ES_VECTOR_DIMENSIONS=1024
 RAG_INGESTION_WORKER_ENABLED=true
 RAG_INGESTION_POLL_INTERVAL_MS=1000
 RAG_INGESTION_CLEANUP_ENABLED=true
+
+# 检索与 SSE 问答（所有依赖均就绪后再开启）
+RAG_RETRIEVAL_ENABLED=true
+RAG_RERANK_ENABLED=true
+RAG_RERANK_ENDPOINT=https://model.example.internal/v1/rerank
+RAG_RERANK_API_KEY=...
+RAG_RERANK_MODEL=bge-reranker-v2-m3
+RAG_GENERATION_ENABLED=true
+RAG_GENERATION_ENDPOINT=https://model.example.internal/v1/chat/completions
+RAG_GENERATION_API_KEY=...
+RAG_GENERATION_MODEL=your-chat-model
+RAG_GENERATION_TIMEOUT_MS=60000
+RAG_QUERY_ENABLED=true
+RAG_QUERY_STREAM_TIMEOUT_MS=120000
+RAG_QUERY_WORKER_THREADS=8
 ```
 
-启动保护：当 `RAG_INGESTION_WORKER_ENABLED=true` 而 Embedding/ES Bean 未配置时，Spring Boot 会因缺少依赖而启动失败；这是故意的 fail-fast，不能关闭后伪造 `READY`。
+启动保护：当 `RAG_INGESTION_WORKER_ENABLED=true` 而 Embedding/ES Bean 未配置时，或 `RAG_QUERY_ENABLED=true` 而 Retriever/Generation Bean 未配置时，Spring Boot 会启动失败；这是故意的 fail-fast，不能关闭后伪造 `READY` 或提供未过滤的问答入口。
 
 ## 4. API 与权限
 
@@ -79,6 +99,17 @@ RAG_INGESTION_CLEANUP_ENABLED=true
 | 任务查询 | `GET /api/v1/documents/jobs/{jobId}?kbId=` | 已认证成员 | 返回状态、错误与可重试性 |
 | 失败重试 | `POST /api/v1/documents/jobs/{jobId}/retry?kbId=` | Owner/Admin | 仅 `FAILED` 且未超过最大尝试次数 |
 | 删除 | `DELETE /api/v1/documents/{documentId}?kbId=` | Owner/Admin | 标记 `DELETING` 并执行/重试补偿 |
+| 流式问答 | `POST /api/v1/knowledge-bases/{kbId}/query` | 已认证成员 | 服务端锁定 org/kb，返回 SSE；不接收客户端 ES 过滤条件 |
+
+SSE 的 `data:` 是 JSON，严格对应前端已冻结的五类事件：
+
+| event | data | 说明 |
+|---|---|---|
+| `chunk` | `{ "content": "..." }` | 模型文本增量 |
+| `source` | `{ "citation": { ... } }` | 文档名、标题路径、页码/行号、片段与分数 |
+| `refusal` | `{ "message": "..." }` | 正常业务拒答，不调用 Generation |
+| `done` | `{}` | 正常收尾 |
+| `error` | `{ "message": "..." }` | 上游模型或 SSE 异常；消息已脱敏 |
 
 ## 5. 状态机与失败处理
 
@@ -138,6 +169,26 @@ curl -H "Authorization: ApiKey $RAG_ES_API_KEY" \
 4. 最终 `document` 与关联 `ingestion_job` 记录被删除；
 5. 若任一步失败，记录保持 `DELETING`，等待下一次 cleanup，而不是返回伪成功。
 
+### 6.5 混合检索与 SSE 验收
+
+使用已完成摄取的脱敏 Markdown，包含类名、错误码、配置项和普通说明文字。
+
+1. 开启 `RAG_RETRIEVAL_ENABLED`、`RAG_GENERATION_ENABLED` 和 `RAG_QUERY_ENABLED` 后启动应用；确认没有缺失 Bean 的启动异常。
+2. 使用有效 JWT 与 `X-Org-Id` 调用：
+
+```bash
+curl -N -X POST "http://localhost:8080/api/v1/knowledge-bases/$KB_ID/query" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "X-Org-Id: $ORG_ID" \
+  -H "Content-Type: application/json" \
+  -d '{"question":"SearchService 启动失败如何排查？"}'
+```
+
+3. 预期先收到一个或多个 `source`，再收到连续 `chunk`，最后收到 `done`；每个 `source.citation.documentName` 必须是原始文件名，不得是 `org/...` 对象键。
+4. 使用不存在的问题，预期收到 `refusal` 和 `done`，且 Generation 网关没有请求日志。
+5. 临时断开 Rerank，预期仍返回 RRF 结果；临时断开 Embedding，若 BM25 有命中则仍返回基于 BM25 的结果。两类降级均需记录告警但不得输出 Key、Prompt 或文档正文。
+6. 使用另一组织的 Token/`X-Org-Id` 查询相同 `KB_ID`，预期 HTTP 404；不得返回任何 `source`、文档名或分数。
+
 ## 7. 回滚与故障处置
 
 | 场景 | 操作 |
@@ -155,6 +206,6 @@ cd backend
 JAVA_HOME=$(/usr/libexec/java_home -v 17) PATH="$JAVA_HOME/bin:$PATH" mvn test
 ```
 
-当前覆盖：上传权限和白名单、任务原子领取、失败与手动重试、删除清理、Parser/Chunker、模型客户端分批/超时、ES mapping/Bulk/三重过滤、Pipeline 阶段顺序和现有认证/租户回归。
+当前覆盖：上传权限和白名单、任务原子领取、失败与手动重试、删除清理、Parser/Chunker、模型客户端分批/超时、ES mapping/Bulk/三重过滤、RRF 与两类模型降级、Prompt 上游流解析、五类 SSE 载荷、引用构造、空召回拒答不调用生成模型、以及现有认证/租户回归。
 
-自动化测试不替代真实依赖验收：必须按第 6 节至少完成一份 Markdown 和一份文本型 PDF 的真实 `READY` 验收后，才可宣告 P1 可部署。
+自动化测试不替代真实依赖验收：必须按第 6 节完成一份 Markdown、一份文本型 PDF 的真实 `READY` 验收和一轮真实 SSE 问答后，才可宣告 P1/P2 可部署。

@@ -9,6 +9,11 @@ import com.diit.ragkb.ragcore.ingestion.DocumentIngestionPipeline;
 import com.diit.ragkb.ragcore.ingestion.IngestionJobLifecycleService;
 import com.diit.ragkb.ragcore.parser.impl.DocumentParserFactory;
 import com.diit.ragkb.ragcore.storage.ObjectStorage;
+import com.diit.ragkb.ragcore.retrieval.HybridCandidateSource;
+import com.diit.ragkb.ragcore.retrieval.HybridRetriever;
+import com.diit.ragkb.ragcore.retrieval.Retriever;
+import com.diit.ragkb.ragcore.rerank.RerankerClient;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -35,5 +40,12 @@ public class RagIngestionConfiguration {
                                                                IngestionJobLifecycleService lifecycleService) {
         return new DefaultDocumentIngestionPipeline(parserFactory, chunker, embeddingClient, chunkIndex,
                 objectStorage, lifecycleService);
+    }
+
+    @Bean
+    @ConditionalOnProperty(prefix = "rag.retrieval", name = "enabled", havingValue = "true")
+    public Retriever retriever(HybridCandidateSource candidateSource, EmbeddingClient embeddingClient,
+                               ObjectProvider<RerankerClient> rerankerProvider) {
+        return new HybridRetriever(candidateSource, embeddingClient, rerankerProvider);
     }
 }
