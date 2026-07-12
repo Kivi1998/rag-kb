@@ -245,10 +245,10 @@ Prompt 必须包含：系统职责、仅可依据参考资料、资料不足时�
 
 | 能力 | 接口/事件 | 约定 |
 |---|---|---|
-| 上传文档 | `POST /knowledge-bases/{kbId}/documents` | 立即返回 documentId 与 `QUEUED` 状态，不等待解析完成 |
-| 文档状态 | `GET /knowledge-bases/{kbId}/documents/{docId}` | 返回状态、错误、进度、重试次数 |
-| 重试摄取 | `POST /knowledge-bases/{kbId}/documents/{docId}/retry` | 仅 OWNER/ADMIN，可重建索引 |
-| 流式问答 | `POST /knowledge-bases/{kbId}/query` | 保持 SSE，输入 `question`、可选 `topN` |
+| 上传文档 | `POST /api/v1/documents/upload?kbId=` | 立即返回 documentId、jobId 与 `QUEUED` 状态，不等待解析完成 |
+| 文档状态 | `GET /api/v1/documents?kbId=&status=` | 返回状态、错误、重试次数与最近 jobId；不返回对象存储路径 |
+| 重试摄取 | `POST /api/v1/documents/jobs/{jobId}/retry?kbId=` | 仅 OWNER/ADMIN，前端必须使用服务端返回的 jobId |
+| 流式问答 | `POST /api/v1/knowledge-bases/{kbId}/query` | 保持 SSE，输入 `question`、可选历史字段；首期不启用 Query Rewrite |
 | SSE 文本 | `event: chunk` | 仅答案增量 |
 | SSE 引用 | `event: source` | `documentName`、`headingPath`、`snippet`、`pageNo/lineRange`、`score` |
 | SSE 拒答 | `event: refusal` | 明确说明检索不足，不触发模型时也应正常结束 |

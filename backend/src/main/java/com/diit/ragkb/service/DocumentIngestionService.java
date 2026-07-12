@@ -88,7 +88,7 @@ public class DocumentIngestionService {
             job.setAttempt(0);
             job.setMaxAttempts(3);
             job = jobRepository.save(job);
-            return new UploadResult(toDocumentView(document), toJobView(job));
+            return new UploadResult(toDocumentView(document, job.getId()), toJobView(job));
         } catch (IOException | RuntimeException ex) {
             if (stored) {
                 try {
@@ -106,7 +106,7 @@ public class DocumentIngestionService {
         findKnowledgeBase(kbId);
         return documentRepository.findByKnowledgeBaseIdAndOrgIdOrderByCreatedAtDesc(kbId, currentOrgId()).stream()
                 .filter(document -> status == null || document.getStatus() == status)
-                .map(this::toDocumentView)
+                .map(document -> toDocumentView(document, latestJobId(document.getId())))
                 .toList();
     }
 
@@ -197,12 +197,15 @@ public class DocumentIngestionService {
         return "org/" + currentOrgId() + "/kb/" + kbId + "/documents/" + documentId + "." + extension;
     }
 
-    private DocumentView toDocumentView(KnowledgeDocument document) {
+    private UUID latestJobId(UUID documentId) {
+        return jobRepository.findFirstByDocumentIdOrderByCreatedAtDesc(documentId).map(IngestionJob::getId).orElse(null);
+    }
+
+    private DocumentView toDocumentView(KnowledgeDocument document, UUID jobId) {
         return new DocumentView(document.getId(), document.getKnowledgeBase().getId(), document.getName(),
                 document.getSizeBytes(), document.getContentType(), document.getStatus(), document.getLastError(),
                 document.getRetryCount(), document.getStatus() == IngestionStatus.FAILED && document.getRetryCount() < 3,
-                document.getCreatedAt(), null,
-                document.getObjectStoragePath());
+                document.getCreatedAt(), null, jobId);
     }
 
     private JobView toJobView(IngestionJob job) {
@@ -218,7 +221,7 @@ public class DocumentIngestionService {
 
     public record DocumentView(UUID documentId, UUID kbId, String name, long size, String contentType,
                                IngestionStatus status, String errorMessage, int retryCount, boolean retryable,
-                               Instant uploadedAt, Instant readyAt, String sourcePath) { }
+                               Instant uploadedAt, Instant readyAt, UUID jobId) { }
 
     public record JobView(UUID jobId, UUID documentId, UUID kbId, IngestionStatus status, String errorMessage,
                           int retryLimit, boolean retryable, Instant createdAt, Instant updatedAt) { }

@@ -23,7 +23,7 @@
 - 服务端引用卡片：从最终 chunk 和本租户文档元数据构造，不向前端暴露对象存储路径；
 - Embedding 故障时退化为 BM25，Rerank 故障时退化为 RRF，空召回不调用生成模型。
 
-尚未实现：问答前端页面/取消交互、端到端真实模型验收、离线评测、压测、索引重建与发布回归；这些属于 T204–T207、T301、T303–T306。
+尚未实现：真实依赖环境的端到端试点验收、离线评测、压测、索引重建与发布回归；这些属于 T207、T301、T303–T306。
 
 ## 2. 运行依赖
 
@@ -96,8 +96,8 @@ RAG_QUERY_WORKER_THREADS=8
 
 | 操作 | 路径 | 权限 | 说明 |
 |---|---|---|---|
-| 上传 | `POST /api/v1/documents/upload?kbId=` | Owner/Admin | 仅保存原文件并创建 `QUEUED` 任务 |
-| 列表 | `GET /api/v1/documents?kbId=&status=` | 已认证成员 | 返回文档摄取状态 |
+| 上传 | `POST /api/v1/documents/upload?kbId=` | Owner/Admin | 仅保存原文件并创建 `QUEUED` 任务，返回 `documentId` 与 `jobId` |
+| 列表 | `GET /api/v1/documents?kbId=&status=` | 已认证成员 | 返回文档摄取状态与最近 `jobId`；不返回对象存储路径 |
 | 任务查询 | `GET /api/v1/documents/jobs/{jobId}?kbId=` | 已认证成员 | 返回状态、错误与可重试性 |
 | 失败重试 | `POST /api/v1/documents/jobs/{jobId}/retry?kbId=` | Owner/Admin | 仅 `FAILED` 且未超过最大尝试次数 |
 | 删除 | `DELETE /api/v1/documents/{documentId}?kbId=` | Owner/Admin | 标记 `DELETING` 并执行/重试补偿 |
@@ -112,6 +112,14 @@ SSE 的 `data:` 是 JSON，严格对应前端已冻结的五类事件：
 | `refusal` | `{ "message": "..." }` | 正常业务拒答，不调用 Generation |
 | `done` | `{}` | 正常收尾 |
 | `error` | `{ "message": "..." }` | 上游模型或 SSE 异常；消息已脱敏 |
+
+## 4.1 前端工作区行为
+
+`/kb` 工作区已接入自研 RAG API：左侧选择知识库；右侧同时显示文档面板与聊天面板。
+
+- 文档面板支持白名单文件上传、摄取状态轮询、失败原因、基于服务端 `jobId` 的重试与删除；普通成员的管理操作由后端 RBAC 拒绝，前端不伪造权限判断。
+- 聊天面板原生解析 `chunk/source/refusal/done/error`；来源卡片只使用服务端 `source` 事件；支持取消当前 fetch/SSE 请求，切换知识库时自动清空会话与取消旧请求。
+- 文档对象键、ES 查询条件和模型凭证均不进入浏览器。前端仅发送 JWT、`X-Org-Id`、路径中的 `kbId` 和问题文本。
 
 ## 5. 状态机与失败处理
 
