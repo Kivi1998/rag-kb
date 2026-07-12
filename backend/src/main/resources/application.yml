@@ -65,6 +65,20 @@ rag:
       # T107 接入 Parser → Chunker → Embedding → ES 后由部署环境显式开启，避免未完成管道误消费任务。
       enabled: ${RAG_INGESTION_WORKER_ENABLED:false}
       poll-interval-ms: ${RAG_INGESTION_POLL_INTERVAL_MS:1000}
+  model:
+    embedding:
+      enabled: ${RAG_EMBEDDING_ENABLED:false}
+      endpoint: ${RAG_EMBEDDING_ENDPOINT:}
+      api-key: ${RAG_EMBEDDING_API_KEY:}
+      model: ${RAG_EMBEDDING_MODEL:}
+      batch-size: ${RAG_EMBEDDING_BATCH_SIZE:32}
+      timeout-ms: ${RAG_EMBEDDING_TIMEOUT_MS:15000}
+    rerank:
+      enabled: ${RAG_RERANK_ENABLED:false}
+      endpoint: ${RAG_RERANK_ENDPOINT:}
+      api-key: ${RAG_RERANK_API_KEY:}
+      model: ${RAG_RERANK_MODEL:}
+      timeout-ms: ${RAG_RERANK_TIMEOUT_MS:15000}
 
 # Actuator
 management:
