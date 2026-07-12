@@ -79,6 +79,15 @@ rag:
       api-key: ${RAG_RERANK_API_KEY:}
       model: ${RAG_RERANK_MODEL:}
       timeout-ms: ${RAG_RERANK_TIMEOUT_MS:15000}
+  elasticsearch:
+    # 只有 T107 管道与 ES 均完成部署后开启；向量维度必须与 Embedding 模型完全一致。
+    enabled: ${RAG_ES_ENABLED:false}
+    endpoint: ${RAG_ES_ENDPOINT:}
+    api-key: ${RAG_ES_API_KEY:}
+    index-name: ${RAG_ES_INDEX_NAME:rag_chunks_v1}
+    vector-dimensions: ${RAG_ES_VECTOR_DIMENSIONS:0}
+    connect-timeout-ms: ${RAG_ES_CONNECT_TIMEOUT_MS:3000}
+    socket-timeout-ms: ${RAG_ES_SOCKET_TIMEOUT_MS:30000}
 
 # Actuator
 management:
