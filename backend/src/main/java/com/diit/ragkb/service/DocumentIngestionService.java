@@ -8,6 +8,7 @@ import com.diit.ragkb.model.KnowledgeDocument;
 import com.diit.ragkb.model.Member;
 import com.diit.ragkb.model.MemberRole;
 import com.diit.ragkb.ragcore.model.IngestionStatus;
+import com.diit.ragkb.ragcore.ingestion.IngestionJobLifecycleService;
 import com.diit.ragkb.ragcore.storage.ObjectStorage;
 import com.diit.ragkb.repository.IngestionJobRepository;
 import com.diit.ragkb.repository.KnowledgeBaseRepository;
@@ -47,6 +48,7 @@ public class DocumentIngestionService {
     private final IngestionJobRepository jobRepository;
     private final MemberRepository memberRepository;
     private final ObjectStorage objectStorage;
+    private final IngestionJobLifecycleService lifecycleService;
 
     /** 上传原文件并创建一个待消费的摄取任务。 */
     @Transactional
@@ -117,23 +119,7 @@ public class DocumentIngestionService {
     public JobView retry(UUID kbId, UUID jobId) {
         requireDocumentManager();
         IngestionJob job = findJob(jobId, kbId);
-        if (job.getStatus() != IngestionStatus.FAILED) {
-            throw new IllegalArgumentException("仅失败的摄取任务可以重试");
-        }
-        if (job.getAttempt() >= job.getMaxAttempts()) {
-            throw new IllegalArgumentException("摄取任务已达到最大重试次数");
-        }
-        job.setStatus(IngestionStatus.QUEUED);
-        job.setErrorMessage(null);
-        job.setStartedAt(null);
-        job.setFinishedAt(null);
-
-        KnowledgeDocument document = job.getDocument();
-        document.setStatus(IngestionStatus.QUEUED);
-        document.setRetryCount(document.getRetryCount() + 1);
-        document.setLastError(null);
-        document.setLastErrorAt(null);
-        return toJobView(job);
+        return toJobView(lifecycleService.retry(job.getId()));
     }
 
     /** 删除原文件、任务记录和文档元数据。向量索引删除将在 Worker 的删除补偿任务中接入。 */

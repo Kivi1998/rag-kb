@@ -29,6 +29,11 @@ public class LocalObjectStorage implements ObjectStorage {
     }
 
     @Override
+    public InputStream open(String objectKey) throws IOException {
+        return Files.newInputStream(resolve(objectKey));
+    }
+
+    @Override
     public void delete(String objectKey) throws IOException {
         Files.deleteIfExists(resolve(objectKey));
     }

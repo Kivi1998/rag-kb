@@ -8,5 +8,8 @@ public interface ObjectStorage {
 
     void put(String objectKey, InputStream input, long sizeBytes, String contentType) throws IOException;
 
+    /** 打开已保存的对象；调用方负责关闭返回的流。 */
+    InputStream open(String objectKey) throws IOException;
+
     void delete(String objectKey) throws IOException;
 }

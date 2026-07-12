@@ -7,6 +7,7 @@ import com.diit.ragkb.model.MemberRole;
 import com.diit.ragkb.model.Organization;
 import com.diit.ragkb.model.User;
 import com.diit.ragkb.ragcore.model.IngestionStatus;
+import com.diit.ragkb.ragcore.ingestion.IngestionJobLifecycleService;
 import com.diit.ragkb.repository.IngestionJobRepository;
 import com.diit.ragkb.repository.KnowledgeBaseRepository;
 import com.diit.ragkb.repository.KnowledgeDocumentRepository;
@@ -30,6 +31,7 @@ import java.util.Comparator;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -49,6 +51,7 @@ class DocumentIngestionTest {
     @Autowired private MockMvc mockMvc;
     @Autowired private TestHelper testHelper;
     @Autowired private IngestionJobRepository jobRepository;
+    @Autowired private IngestionJobLifecycleService lifecycleService;
     @Autowired private KnowledgeDocumentRepository documentRepository;
     @Autowired private KnowledgeBaseRepository knowledgeBaseRepository;
     @Autowired private MemberRepository memberRepository;
@@ -134,6 +137,40 @@ class DocumentIngestionTest {
                         .header("X-Org-Id", org.getId().toString()))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value(400));
+    }
+
+    @Test
+    @DisplayName("任务只允许一个 Worker 领取，失败后管理员可重试")
+    void lifecycle_claimFailAndRetry_keepsDocumentInSync() throws Exception {
+        mockMvc.perform(multipart("/api/v1/documents/upload")
+                        .file(new MockMultipartFile("file", "worker.md", "text/markdown", "# worker".getBytes()))
+                        .param("kbId", knowledgeBase.getId().toString())
+                        .header("Authorization", "Bearer " + ownerToken)
+                        .header("X-Org-Id", org.getId().toString()))
+                .andExpect(status().isCreated());
+
+        var document = documentRepository.findByKnowledgeBaseIdAndOrgIdOrderByCreatedAtDesc(knowledgeBase.getId(), org.getId()).get(0);
+        IngestionJob job = jobRepository.findFirstByDocumentIdOrderByCreatedAtDesc(document.getId()).orElseThrow();
+
+        assertTrue(lifecycleService.claim(job.getId()).isPresent());
+        assertTrue(lifecycleService.claim(job.getId()).isEmpty());
+        lifecycleService.fail(job.getId(), new IllegalStateException("模拟解析失败"));
+
+        IngestionJob failed = jobRepository.findById(job.getId()).orElseThrow();
+        assertEquals(IngestionStatus.FAILED, failed.getStatus());
+        assertEquals(1, failed.getAttempt());
+        assertEquals(IngestionStatus.FAILED,
+                documentRepository.findById(document.getId()).orElseThrow().getStatus());
+
+        mockMvc.perform(post("/api/v1/documents/jobs/{jobId}/retry", job.getId())
+                        .param("kbId", knowledgeBase.getId().toString())
+                        .header("Authorization", "Bearer " + ownerToken)
+                        .header("X-Org-Id", org.getId().toString()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("QUEUED"));
+
+        assertEquals(IngestionStatus.QUEUED, jobRepository.findById(job.getId()).orElseThrow().getStatus());
+        assertEquals(1, documentRepository.findById(document.getId()).orElseThrow().getRetryCount());
     }
 
     private void cleanDatabaseAndObjects() throws IOException {

@@ -1,6 +1,7 @@
 package com.diit.ragkb.ragcore.storage;
 
 import io.minio.MinioClient;
+import io.minio.GetObjectArgs;
 import io.minio.PutObjectArgs;
 import io.minio.RemoveObjectArgs;
 import org.springframework.beans.factory.annotation.Value;
@@ -37,6 +38,15 @@ public class MinioObjectStorage implements ObjectStorage {
                     .contentType(contentType).build());
         } catch (Exception e) {
             throw new IOException("MinIO 上传失败", e);
+        }
+    }
+
+    @Override
+    public InputStream open(String objectKey) throws IOException {
+        try {
+            return client.getObject(GetObjectArgs.builder().bucket(bucket).object(objectKey).build());
+        } catch (Exception e) {
+            throw new IOException("MinIO 读取失败", e);
         }
     }
 
