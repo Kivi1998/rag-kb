@@ -51,6 +51,16 @@ spring:
       port: ${REDIS_PORT:6379}
       password: ${REDIS_PASSWORD:}
 
+rag:
+  storage:
+    # local 仅用于本地开发与测试；生产环境设置为 minio 并配置 endpoint / bucket / access-key / secret-key
+    type: ${RAG_STORAGE_TYPE:local}
+    local-root: ${RAG_LOCAL_STORAGE_ROOT:./data/rag-objects}
+    endpoint: ${MINIO_ENDPOINT:}
+    bucket: ${MINIO_BUCKET:rag-kb}
+    access-key: ${MINIO_ACCESS_KEY:}
+    secret-key: ${MINIO_SECRET_KEY:}
+
 # Actuator
 management:
   endpoints:

@@ -146,6 +146,13 @@
             <version>2.18.0</version>
         </dependency>
 
+        <!-- 对象存储：生产使用 MinIO / S3 兼容接口 -->
+        <dependency>
+            <groupId>io.minio</groupId>
+            <artifactId>minio</artifactId>
+            <version>8.5.12</version>
+        </dependency>
+
         <!-- 测试 -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
