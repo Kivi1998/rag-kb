@@ -11,6 +11,7 @@ import com.diit.ragkb.ragcore.model.IngestionStatus;
 import com.diit.ragkb.ragcore.ingestion.IngestionJobLifecycleService;
 import com.diit.ragkb.ragcore.ingestion.DocumentDeletionService;
 import com.diit.ragkb.ragcore.storage.ObjectStorage;
+import com.diit.ragkb.ragcore.upload.UploadContentInspector;
 import com.diit.ragkb.repository.IngestionJobRepository;
 import com.diit.ragkb.repository.KnowledgeBaseRepository;
 import com.diit.ragkb.repository.KnowledgeDocumentRepository;
@@ -22,9 +23,14 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
+import java.io.BufferedInputStream;
+import java.security.DigestInputStream;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
 import java.util.List;
 import java.util.Locale;
+import java.util.HexFormat;
 import java.util.Set;
 import java.util.UUID;
 
@@ -39,8 +45,9 @@ import java.util.UUID;
 public class DocumentIngestionService {
 
     private static final int MAX_FILE_NAME_LENGTH = 500;
+    private static final int CONTENT_SNIFF_BYTES = 8 * 1024;
     private static final Set<String> ALLOWED_EXTENSIONS = Set.of(
-            "md", "markdown", "txt", "pdf", "docx", "json", "yaml", "yml", "xml",
+            "md", "markdown", "txt", "pdf", "docx", "pptx", "srt", "vtt", "json", "yaml", "yml", "xml",
             "java", "py", "js", "ts", "tsx", "jsx", "go", "rs", "sql", "sh", "bash",
             "properties", "conf", "ini", "gradle", "pom");
 
@@ -65,9 +72,6 @@ public class DocumentIngestionService {
         document.setOrg(kb.getOrg());
         document.setCreatedBy(uploader);
         document.setName(uploadFile.safeFileName());
-        String contentType = file.getContentType() == null || file.getContentType().isBlank()
-                ? "application/octet-stream" : file.getContentType();
-        document.setContentType(contentType);
         document.setSizeBytes(file.getSize());
         document.setStatus(IngestionStatus.QUEUED);
         // save 后由 Hibernate 生成 documentId；对象键不采用原文件名，避免路径注入和同名覆盖。
@@ -75,10 +79,20 @@ public class DocumentIngestionService {
 
         String storageKey = buildStorageKey(kbId, document.getId(), uploadFile.extension());
         boolean stored = false;
-        try {
-            objectStorage.put(storageKey, file.getInputStream(), file.getSize(), contentType);
+        try (BufferedInputStream input = new BufferedInputStream(file.getInputStream())) {
+            input.mark(CONTENT_SNIFF_BYTES);
+            byte[] prefix = input.readNBytes(CONTENT_SNIFF_BYTES);
+            input.reset();
+            String detectedContentType = UploadContentInspector.inspect(uploadFile.safeFileName(), prefix);
+            document.setContentType(detectedContentType);
+
+            MessageDigest digest = sha256();
+            try (DigestInputStream digestInput = new DigestInputStream(input, digest)) {
+                objectStorage.put(storageKey, digestInput, file.getSize(), detectedContentType);
+            }
             stored = true;
             document.setObjectStoragePath(storageKey);
+            document.setContentSha256(HexFormat.of().formatHex(digest.digest()));
 
             IngestionJob job = new IngestionJob();
             job.setDocument(document);
@@ -89,16 +103,23 @@ public class DocumentIngestionService {
             job.setMaxAttempts(3);
             job = jobRepository.save(job);
             return new UploadResult(toDocumentView(document, job.getId()), toJobView(job));
+        } catch (IllegalArgumentException ex) {
+            cleanupStoredObject(stored, storageKey, ex);
+            throw ex;
         } catch (IOException | RuntimeException ex) {
+            cleanupStoredObject(stored, storageKey, ex);
+            throw new IllegalStateException("文档对象存储失败，请稍后重试", ex);
+        }
+    }
+
+    private void cleanupStoredObject(boolean stored, String storageKey, Exception original) {
             if (stored) {
                 try {
                     objectStorage.delete(storageKey);
                 } catch (IOException cleanupEx) {
-                    ex.addSuppressed(cleanupEx);
+                    original.addSuppressed(cleanupEx);
                 }
             }
-            throw new IllegalStateException("文档对象存储失败，请稍后重试", ex);
-        }
     }
 
     @Transactional(readOnly = true)
@@ -191,6 +212,14 @@ public class DocumentIngestionService {
             throw new IllegalArgumentException("不支持的文件类型: " + extension);
         }
         return new UploadFile(safeFileName, extension);
+    }
+
+    private MessageDigest sha256() {
+        try {
+            return MessageDigest.getInstance("SHA-256");
+        } catch (NoSuchAlgorithmException ex) {
+            throw new IllegalStateException("JRE 不支持 SHA-256", ex);
+        }
     }
 
     private String buildStorageKey(UUID kbId, UUID documentId, String extension) {

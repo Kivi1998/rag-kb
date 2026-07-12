@@ -12,6 +12,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
+import java.time.Duration;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -26,6 +28,8 @@ import java.util.UUID;
 public class IngestionJobLifecycleService {
 
     private static final int MAX_ERROR_MESSAGE_LENGTH = 4_000;
+    private static final List<IngestionStatus> ACTIVE_STATUSES = List.of(
+            IngestionStatus.PARSING, IngestionStatus.CHUNKING, IngestionStatus.EMBEDDING, IngestionStatus.INDEXING);
 
     private final IngestionJobRepository jobRepository;
     private final KnowledgeDocumentRepository documentRepository;
@@ -33,8 +37,16 @@ public class IngestionJobLifecycleService {
     /** 使用条件更新原子领取排队任务。 */
     @Transactional
     public Optional<IngestionTask> claim(UUID jobId) {
+        return claim(jobId, "legacy-worker", Duration.ofMinutes(30));
+    }
+
+    /** 使用实例租约原子领取任务；租约过期后可由其他实例安全接管。 */
+    @Transactional
+    public Optional<IngestionTask> claim(UUID jobId, String workerId, Duration leaseDuration) {
         Instant now = Instant.now();
-        int updated = jobRepository.claimIfQueued(jobId, IngestionStatus.QUEUED, IngestionStatus.PARSING, now);
+        Instant leaseExpiresAt = now.plus(leaseDuration);
+        int updated = jobRepository.claimIfQueued(jobId, IngestionStatus.QUEUED, IngestionStatus.PARSING, now,
+                workerId, leaseExpiresAt);
         if (updated == 0) {
             return Optional.empty();
         }
@@ -47,6 +59,36 @@ public class IngestionJobLifecycleService {
                 document.getObjectStoragePath()));
     }
 
+    /** 活跃 Worker 定期续租；返回 false 表示任务已被删除、取消或接管。 */
+    @Transactional
+    public boolean heartbeat(UUID jobId, String workerId, Duration leaseDuration) {
+        Instant now = Instant.now();
+        return jobRepository.heartbeat(jobId, workerId, ACTIVE_STATUSES, now, now.plus(leaseDuration)) == 1;
+    }
+
+    /** 仅回收明确已过期的任务，超过最大尝试次数的任务转 FAILED，避免无限重试。 */
+    @Transactional
+    public int recoverExpiredLeases() {
+        Instant now = Instant.now();
+        int recovered = 0;
+        for (IngestionJob job : jobRepository.findByStatusInAndLeaseExpiresAtBefore(ACTIVE_STATUSES, now)) {
+            KnowledgeDocument document = job.getDocument();
+            if (job.getAttempt() >= job.getMaxAttempts()) {
+                String message = "摄取 Worker 租约过期，已达到最大尝试次数";
+                if (jobRepository.failExpiredLease(job.getId(), ACTIVE_STATUSES, IngestionStatus.FAILED, message, now) == 1) {
+                    document.setStatus(IngestionStatus.FAILED);
+                    document.setLastError(message);
+                    document.setLastErrorAt(now);
+                    recovered++;
+                }
+            } else if (jobRepository.requeueExpiredLease(job.getId(), ACTIVE_STATUSES, IngestionStatus.QUEUED, now) == 1) {
+                document.setStatus(IngestionStatus.QUEUED);
+                recovered++;
+            }
+        }
+        return recovered;
+    }
+
     /** Worker 在一个合法阶段完成后推进至下一阶段。 */
     @Transactional
     public IngestionJob advance(UUID jobId, IngestionStatus nextStatus) {
@@ -56,6 +98,7 @@ public class IngestionJobLifecycleService {
         if (nextStatus == IngestionStatus.READY) {
             job.setFinishedAt(Instant.now());
             job.setErrorMessage(null);
+            clearLease(job);
         }
         updateDocumentStatus(job.getDocument(), nextStatus);
         return job;
@@ -76,6 +119,7 @@ public class IngestionJobLifecycleService {
         String message = safeErrorMessage(cause);
         job.setErrorMessage(message);
         job.setFinishedAt(Instant.now());
+        clearLease(job);
 
         KnowledgeDocument document = job.getDocument();
         document.setStatus(IngestionStatus.FAILED);
@@ -99,6 +143,7 @@ public class IngestionJobLifecycleService {
         job.setErrorMessage(null);
         job.setStartedAt(null);
         job.setFinishedAt(null);
+        clearLease(job);
 
         KnowledgeDocument document = job.getDocument();
         document.setStatus(IngestionStatus.QUEUED);
@@ -115,6 +160,12 @@ public class IngestionJobLifecycleService {
 
     private void updateDocumentStatus(KnowledgeDocument document, IngestionStatus status) {
         document.setStatus(status);
+    }
+
+    private void clearLease(IngestionJob job) {
+        job.setLeaseOwner(null);
+        job.setLeaseExpiresAt(null);
+        job.setLastHeartbeatAt(null);
     }
 
     private String safeErrorMessage(Throwable cause) {

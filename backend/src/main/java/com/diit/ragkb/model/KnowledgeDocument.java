@@ -41,6 +41,10 @@ public class KnowledgeDocument {
     @Column(name = "object_storage_path", length = 1000)
     private String objectStoragePath;
 
+    /** 原始文件的 SHA-256，用于审计、内容去重与版本追溯。 */
+    @Column(name = "content_sha256", length = 64)
+    private String contentSha256;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 30)
     private IngestionStatus status = IngestionStatus.QUEUED;

@@ -27,6 +27,8 @@ import org.springframework.test.web.servlet.MockMvc;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.Comparator;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -36,6 +38,8 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** 文档上传 API 与异步摄取任务创建的集成测试。 */
@@ -106,6 +110,8 @@ class DocumentIngestionTest {
         var documents = documentRepository.findByKnowledgeBaseIdAndOrgIdOrderByCreatedAtDesc(knowledgeBase.getId(), org.getId());
         assertEquals(1, documents.size());
         assertTrue(documents.get(0).getObjectStoragePath().endsWith(".md"));
+        assertNotNull(documents.get(0).getContentSha256());
+        assertEquals(64, documents.get(0).getContentSha256().length());
         IngestionJob job = jobRepository.findFirstByDocumentIdOrderByCreatedAtDesc(documents.get(0).getId()).orElseThrow();
         assertEquals(IngestionStatus.QUEUED, job.getStatus());
 
@@ -143,6 +149,20 @@ class DocumentIngestionTest {
     }
 
     @Test
+    @DisplayName("伪装为 PDF 的非 PDF 内容在上传阶段被拒绝")
+    void fakePdfContent_isRejectedBeforeIngestion() throws Exception {
+        mockMvc.perform(multipart("/api/v1/documents/upload")
+                        .file(new MockMultipartFile("file", "fake.pdf", "application/pdf", "not-a-pdf".getBytes()))
+                        .param("kbId", knowledgeBase.getId().toString())
+                        .header("Authorization", "Bearer " + ownerToken)
+                        .header("X-Org-Id", org.getId().toString()))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(400));
+
+        assertTrue(documentRepository.findByKnowledgeBaseIdAndOrgIdOrderByCreatedAtDesc(knowledgeBase.getId(), org.getId()).isEmpty());
+    }
+
+    @Test
     @DisplayName("任务只允许一个 Worker 领取，失败后管理员可重试")
     void lifecycle_claimFailAndRetry_keepsDocumentInSync() throws Exception {
         mockMvc.perform(multipart("/api/v1/documents/upload")
@@ -174,6 +194,34 @@ class DocumentIngestionTest {
 
         assertEquals(IngestionStatus.QUEUED, jobRepository.findById(job.getId()).orElseThrow().getStatus());
         assertEquals(1, documentRepository.findById(document.getId()).orElseThrow().getRetryCount());
+    }
+
+    @Test
+    @DisplayName("过期 Worker 租约会恢复任务，避免进程异常后文档永久卡住")
+    void expiredLease_isRecoveredToQueue() throws Exception {
+        mockMvc.perform(multipart("/api/v1/documents/upload")
+                        .file(new MockMultipartFile("file", "recover.md", "text/markdown", "# recover".getBytes()))
+                        .param("kbId", knowledgeBase.getId().toString())
+                        .header("Authorization", "Bearer " + ownerToken)
+                        .header("X-Org-Id", org.getId().toString()))
+                .andExpect(status().isCreated());
+
+        var document = documentRepository.findByKnowledgeBaseIdAndOrgIdOrderByCreatedAtDesc(knowledgeBase.getId(), org.getId()).get(0);
+        IngestionJob job = jobRepository.findFirstByDocumentIdOrderByCreatedAtDesc(document.getId()).orElseThrow();
+        assertTrue(lifecycleService.claim(job.getId(), "crashed-worker", Duration.ofMinutes(1)).isPresent());
+
+        job = jobRepository.findById(job.getId()).orElseThrow();
+        assertEquals("crashed-worker", job.getLeaseOwner());
+        assertNotNull(job.getLeaseExpiresAt());
+        job.setLeaseExpiresAt(Instant.now().minusSeconds(1));
+        jobRepository.save(job);
+
+        assertEquals(1, lifecycleService.recoverExpiredLeases());
+        job = jobRepository.findById(job.getId()).orElseThrow();
+        assertEquals(IngestionStatus.QUEUED, job.getStatus());
+        assertNull(job.getLeaseOwner());
+        assertNull(job.getLeaseExpiresAt());
+        assertEquals(IngestionStatus.QUEUED, documentRepository.findById(document.getId()).orElseThrow().getStatus());
     }
 
     @Test

@@ -52,6 +52,16 @@ public class IngestionJob {
     @Column(name = "finished_at")
     private Instant finishedAt;
 
+    /** 当前处理实例及其租约；用于多实例竞争与故障接管。 */
+    @Column(name = "lease_owner", length = 200)
+    private String leaseOwner;
+
+    @Column(name = "lease_expires_at")
+    private Instant leaseExpiresAt;
+
+    @Column(name = "last_heartbeat_at")
+    private Instant lastHeartbeatAt;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 

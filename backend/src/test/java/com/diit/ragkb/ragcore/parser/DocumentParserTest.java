@@ -3,16 +3,21 @@ package com.diit.ragkb.ragcore.parser;
 import com.diit.ragkb.ragcore.model.DocumentInput;
 import com.diit.ragkb.ragcore.model.DocumentSection;
 import com.diit.ragkb.ragcore.model.ParsedDocument;
+import com.diit.ragkb.ragcore.parser.MultimodalDocumentParser;
+import com.diit.ragkb.ragcore.parser.NeedsMultimodalParsingException;
 import com.diit.ragkb.ragcore.parser.impl.*;
+import org.apache.poi.xslf.usermodel.XMLSlideShow;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.DisplayName;
 
 import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -23,7 +28,10 @@ class DocumentParserTest {
     // ── helper ──
 
     static DocumentInput inputOf(String filename, String contentType, String content) {
-        byte[] bytes = content.getBytes(StandardCharsets.UTF_8);
+        return inputOfBytes(filename, contentType, content.getBytes(StandardCharsets.UTF_8));
+    }
+
+    static DocumentInput inputOfBytes(String filename, String contentType, byte[] bytes) {
         return new DocumentInput() {
             @Override public UUID documentId() { return UUID.randomUUID(); }
             @Override public String filename() { return filename; }
@@ -151,6 +159,93 @@ class DocumentParserTest {
     void textParserUnsupported() {
         TextParser parser = new TextParser();
         assertFalse(parser.supports("application/pdf", "doc.pdf"));
+    }
+
+    // ── SubtitleParser ──
+
+    @Test
+    @DisplayName("解析 SRT 字幕，保留时间范围元数据")
+    void subtitleParserSrt() throws IOException {
+        String srt = """
+                1
+                00:00:01,000 --> 00:00:04,000
+                欢迎使用知识库。
+
+                2
+                00:00:04,500 --> 00:00:08,000
+                本节介绍文档摄取流程。
+                """;
+        ParsedDocument doc = new SubtitleParser().parse(inputOf("demo.srt", "application/x-subrip", srt));
+
+        assertEquals(2, doc.sections().size());
+        assertEquals("00:00:01,000 --> 00:00:04,000", doc.sections().get(0).metadata().get("timeRange"));
+        assertTrue(doc.sections().get(1).text().contains("摄取流程"));
+    }
+
+    @Test
+    @DisplayName("解析 WebVTT 字幕，忽略文件头")
+    void subtitleParserVtt() throws IOException {
+        String vtt = """
+                WEBVTT
+
+                00:00:01.000 --> 00:00:04.000
+                视频开场内容。
+                """;
+        ParsedDocument doc = new SubtitleParser().parse(inputOf("demo.vtt", "text/vtt", vtt));
+
+        assertEquals("vtt", doc.metadata().get("format"));
+        assertEquals("视频开场内容。", doc.sections().get(0).text());
+    }
+
+    // ── PptxParser ──
+
+    @Test
+    @DisplayName("解析 PPTX 幻灯片，保留页码和标题")
+    void pptxParser() throws IOException {
+        byte[] bytes;
+        try (XMLSlideShow show = new XMLSlideShow(); ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+            var slide = show.createSlide();
+            var title = slide.createTextBox();
+            title.setText("RAG 摄取架构");
+            var body = slide.createTextBox();
+            body.setText("上传、解析、切块与索引四个阶段。");
+            show.write(out);
+            bytes = out.toByteArray();
+        }
+        PptxParser parser = new PptxParser();
+        assertTrue(parser.supports(null, "architecture.pptx"));
+        ParsedDocument doc = parser.parse(inputOfBytes("architecture.pptx",
+                "application/vnd.openxmlformats-officedocument.presentationml.presentation", bytes));
+
+        assertEquals("pptx", doc.metadata().get("format"));
+        assertEquals(1, doc.sections().size());
+        assertEquals(1, doc.sections().get(0).pageNo());
+        assertTrue(doc.sections().get(0).text().contains("RAG 摄取架构"));
+    }
+
+    @Test
+    @DisplayName("扫描件需要多模态能力时，Parser 工厂交由网关适配器处理")
+    void parserFactoryFallsBackToMultimodalGateway() throws IOException {
+        var localParser = new com.diit.ragkb.ragcore.parser.DocumentParser() {
+            @Override public boolean supports(String contentType, String filename) { return true; }
+            @Override public ParsedDocument parse(DocumentInput input) throws IOException {
+                throw new NeedsMultimodalParsingException("需要 OCR");
+            }
+        };
+        MultimodalDocumentParser gateway = new MultimodalDocumentParser() {
+            @Override public boolean supports(DocumentInput input) { return true; }
+            @Override public ParsedDocument parse(DocumentInput input) {
+                return new ParsedDocument(input.documentId(), input.contentType(), input.sourcePath(),
+                        List.of(new DocumentSection("OCR 识别到的正文", List.of("第一页"), 1, null, null, Map.of("ocr", "true"))),
+                        Map.of("parser", "multimodal-gateway"));
+            }
+        };
+
+        ParsedDocument parsed = new DocumentParserFactory(List.of(localParser), gateway)
+                .parse(inputOf("scan.pdf", "application/pdf", "placeholder"));
+
+        assertEquals("OCR 识别到的正文", parsed.sections().get(0).text());
+        assertEquals("multimodal-gateway", parsed.metadata().get("parser"));
     }
 
     // ── CodeParser ──

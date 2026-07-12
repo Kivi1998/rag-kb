@@ -4,6 +4,7 @@ import com.diit.ragkb.ragcore.model.DocumentInput;
 import com.diit.ragkb.ragcore.model.DocumentSection;
 import com.diit.ragkb.ragcore.model.ParsedDocument;
 import com.diit.ragkb.ragcore.parser.DocumentParser;
+import com.diit.ragkb.ragcore.parser.NeedsMultimodalParsingException;
 
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.pdmodel.PDDocument;
@@ -62,7 +63,7 @@ public class PdfParser implements DocumentParser {
 
             double avgCharsPerPage = (double) fullText.length() / numPages;
             if (avgCharsPerPage < MIN_CHARS_PER_PAGE) {
-                throw new IOException(
+                throw new NeedsMultimodalParsingException(
                         "PDF 文本量过低（平均每页 " + String.format("%.0f", avgCharsPerPage)
                         + " 字符），可能为扫描件或纯图片 PDF，当前不支持解析"
                 );

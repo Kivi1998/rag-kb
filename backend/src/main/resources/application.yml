@@ -28,8 +28,9 @@ spring:
   # 文件上传
   servlet:
     multipart:
-      max-file-size: 50MB
-      max-request-size: 52MB
+      # API 直传的安全上限。大于此值的源视频/超大附件应使用 MinIO 分片直传并走完成回调。
+      max-file-size: ${RAG_UPLOAD_MAX_FILE_SIZE:512MB}
+      max-request-size: ${RAG_UPLOAD_MAX_REQUEST_SIZE:520MB}
 
   # Flyway
   flyway:
@@ -52,6 +53,13 @@ spring:
       password: ${REDIS_PASSWORD:}
 
 rag:
+  parser:
+    multimodal:
+      # 独立 OCR/版面/ASR 服务；本地 Parser 遇到扫描 PDF 或图片型 PPTX 时才调用。
+      enabled: ${RAG_MULTIMODAL_PARSER_ENABLED:false}
+      endpoint: ${RAG_MULTIMODAL_PARSER_ENDPOINT:}
+      api-key: ${RAG_MULTIMODAL_PARSER_API_KEY:}
+      timeout-ms: ${RAG_MULTIMODAL_PARSER_TIMEOUT_MS:600000}
   storage:
     # local 仅用于本地开发与测试；生产环境设置为 minio 并配置 endpoint / bucket / access-key / secret-key
     type: ${RAG_STORAGE_TYPE:local}
@@ -62,9 +70,14 @@ rag:
     secret-key: ${MINIO_SECRET_KEY:}
   ingestion:
     worker:
-      # T107 接入 Parser → Chunker → Embedding → ES 后由部署环境显式开启，避免未完成管道误消费任务。
+      # 生产部署时与 Embedding、ES 一起显式开启；Worker 可横向扩容，单实例并发由配置控制。
       enabled: ${RAG_INGESTION_WORKER_ENABLED:false}
       poll-interval-ms: ${RAG_INGESTION_POLL_INTERVAL_MS:1000}
+      # 5000+ 文档场景可按解析耗时与 CPU 配额横向扩容；每个实例的内存中任务数不超过 concurrency。
+      id: ${RAG_INGESTION_WORKER_ID:${HOSTNAME:rag-ingestion-local}}
+      concurrency: ${RAG_INGESTION_WORKER_CONCURRENCY:4}
+      batch-size: ${RAG_INGESTION_WORKER_BATCH_SIZE:16}
+      lease-duration-ms: ${RAG_INGESTION_WORKER_LEASE_DURATION_MS:1800000}
     cleanup:
       enabled: ${RAG_INGESTION_CLEANUP_ENABLED:true}
       poll-interval-ms: ${RAG_INGESTION_CLEANUP_POLL_INTERVAL_MS:30000}
