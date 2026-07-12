@@ -1,8 +1,10 @@
 package com.diit.ragkb.service;
 
 import com.diit.ragkb.model.KnowledgeDocument;
+import com.diit.ragkb.ragcore.audit.QueryAuditSnapshot;
 import com.diit.ragkb.ragcore.generation.AnswerGenerator;
 import com.diit.ragkb.ragcore.generation.CitationBuilder;
+import com.diit.ragkb.ragcore.generation.GenerationMetrics;
 import com.diit.ragkb.ragcore.model.Citation;
 import com.diit.ragkb.ragcore.model.QueryEvent;
 import com.diit.ragkb.ragcore.model.RetrievedChunk;
@@ -36,34 +38,54 @@ public class QueryService {
     }
 
     public PreparedQuery prepare(UUID knowledgeBaseId, String question) {
+        return prepare(knowledgeBaseId, question, UUID.randomUUID().toString());
+    }
+
+    public PreparedQuery prepare(UUID knowledgeBaseId, String question, String traceId) {
         // 先按当前 ThreadLocal 租户验证 kb，异步线程不再读取 TenantContext。
         knowledgeBaseService.getByIdAndCurrentOrg(knowledgeBaseId);
         UUID organizationId = requireOrganizationId();
+        UUID memberId = requireMemberId();
+        long retrievalStartedAt = System.nanoTime();
         RetrievalResult result = retriever.retrieveWithDecision(organizationId, knowledgeBaseId, question,
                 RetrievalOptions.defaults());
+        long retrievalLatencyMs = elapsedMs(retrievalStartedAt);
+        QueryAuditSnapshot audit = QueryAuditSnapshot.from(traceId, organizationId, knowledgeBaseId, memberId,
+                retrievalLatencyMs, result.chunks(), result.diagnostics(), result.refused(), result.refusalReason());
         if (result.refused()) {
-            return PreparedQuery.refused(question, result.refusalReason());
+            return PreparedQuery.refused(question, result.refusalReason(), audit);
         }
         assertBoundary(result.chunks(), organizationId, knowledgeBaseId);
         Map<UUID, String> documentNames = documentRepository
                 .findByKnowledgeBaseIdAndOrgIdOrderByCreatedAtDesc(knowledgeBaseId, organizationId).stream()
                 .collect(java.util.stream.Collectors.toMap(KnowledgeDocument::getId, KnowledgeDocument::getName));
-        return new PreparedQuery(question, result.chunks(), CitationBuilder.build(result.chunks(), documentNames), null);
+        return new PreparedQuery(question, result.chunks(), CitationBuilder.build(result.chunks(), documentNames), null,
+                audit);
     }
 
-    public void stream(PreparedQuery query, Consumer<QueryEvent> eventConsumer) {
+    public GenerationMetrics stream(PreparedQuery query, Consumer<QueryEvent> eventConsumer) {
         if (query.refusalReason() != null) {
             eventConsumer.accept(QueryEvent.refusal(query.refusalReason()));
-            return;
+            return GenerationMetrics.none();
         }
         query.citations().forEach(citation -> eventConsumer.accept(QueryEvent.source(citation)));
-        answerGenerator.stream(query.question(), query.contexts(), eventConsumer);
+        return answerGenerator.streamWithMetrics(query.question(), query.contexts(), eventConsumer);
     }
 
     private UUID requireOrganizationId() {
         UUID organizationId = TenantContext.getOrgId();
         if (organizationId == null) throw new IllegalStateException("缺少租户上下文");
         return organizationId;
+    }
+
+    private UUID requireMemberId() {
+        UUID memberId = TenantContext.getMemberId();
+        if (memberId == null) throw new IllegalStateException("缺少成员上下文");
+        return memberId;
+    }
+
+    private long elapsedMs(long startedAtNanos) {
+        return java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAtNanos);
     }
 
     private void assertBoundary(List<RetrievedChunk> chunks, UUID organizationId, UUID knowledgeBaseId) {
@@ -73,14 +95,14 @@ public class QueryService {
     }
 
     public record PreparedQuery(String question, List<RetrievedChunk> contexts, List<Citation> citations,
-                                String refusalReason) {
+                                String refusalReason, QueryAuditSnapshot audit) {
         public PreparedQuery {
             contexts = contexts == null ? List.of() : List.copyOf(contexts);
             citations = citations == null ? List.of() : List.copyOf(citations);
         }
 
-        static PreparedQuery refused(String question, String reason) {
-            return new PreparedQuery(question, List.of(), List.of(), reason);
+        static PreparedQuery refused(String question, String reason, QueryAuditSnapshot audit) {
+            return new PreparedQuery(question, List.of(), List.of(), reason, audit);
         }
     }
 }

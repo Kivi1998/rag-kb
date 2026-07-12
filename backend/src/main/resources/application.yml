@@ -88,6 +88,8 @@ rag:
       api-key: ${RAG_GENERATION_API_KEY:}
       model: ${RAG_GENERATION_MODEL:}
       timeout-ms: ${RAG_GENERATION_TIMEOUT_MS:60000}
+      # OpenAI 标准流会在最后一个 data 块给出 usage；不兼容的网关可显式关闭。
+      include-usage: ${RAG_GENERATION_INCLUDE_USAGE:true}
   elasticsearch:
     # 只有 T107 管道与 ES 均完成部署后开启；向量维度必须与 Embedding 模型完全一致。
     enabled: ${RAG_ES_ENABLED:false}
