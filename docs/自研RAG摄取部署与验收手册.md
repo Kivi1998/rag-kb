@@ -23,13 +23,13 @@
 - 服务端引用卡片：从最终 chunk 和本租户文档元数据构造，不向前端暴露对象存储路径；
 - Embedding 故障时退化为 BM25，Rerank 故障时退化为 RRF，空召回不调用生成模型。
 
-尚未实现：真实依赖环境的端到端试点验收、离线评测、可观测性、压测、索引重建与发布回归；这些属于 T207、T301–T306。
+尚未实现：真实依赖环境的端到端试点验收、离线评测、压测、索引重建与发布回归；这些属于 T207、T301、T303–T306。
 
 ## 2. 运行依赖
 
 | 组件 | 用途 | 最小要求 |
 |---|---|---|
-| PostgreSQL | 文档元数据与任务状态 | 已执行 Flyway V005 |
+| PostgreSQL | 文档元数据、任务状态与无正文查询审计 | 已执行 Flyway V006 |
 | MinIO/S3 | 原始文件 | Bucket 已创建，应用账号可读写该 Bucket |
 | Elasticsearch 8.x | `rag_chunks_v1` 与向量/BM25 索引 | 向量维度与 Embedding 模型一致 |
 | Embedding 网关 | 批量向量 | OpenAI `POST /v1/embeddings` 兼容协议 |
@@ -81,6 +81,8 @@ RAG_GENERATION_ENDPOINT=https://model.example.internal/v1/chat/completions
 RAG_GENERATION_API_KEY=...
 RAG_GENERATION_MODEL=your-chat-model
 RAG_GENERATION_TIMEOUT_MS=60000
+# 标准 OpenAI 流的最终 data 块携带 prompt/completion tokens；不兼容网关可关闭。
+RAG_GENERATION_INCLUDE_USAGE=true
 RAG_QUERY_ENABLED=true
 RAG_QUERY_STREAM_TIMEOUT_MS=120000
 RAG_QUERY_WORKER_THREADS=8
@@ -197,6 +199,25 @@ curl -N -X POST "http://localhost:8080/api/v1/knowledge-bases/$KB_ID/query" \
 5. 临时断开 Rerank，预期仍返回 RRF 结果；临时断开 Embedding，若 BM25 有命中则仍返回基于 BM25 的结果。两类降级均需记录告警但不得输出 Key、Prompt 或文档正文。
 6. 使用另一组织的 Token/`X-Org-Id` 查询相同 `KB_ID`，预期 HTTP 404；不得返回任何 `source`、文档名或分数。
 
+### 6.6 审计与可观测性验收
+
+每次问答响应头都应返回 `X-RAG-Trace-Id`。用该值同时查询应用日志和 PostgreSQL：
+
+```sql
+select trace_id, org_id, kb_id, member_id, status, retrieval_latency_ms,
+       generation_latency_ms, total_latency_ms, embedding_fallback, rerank_fallback,
+       generation_model, prompt_tokens, completion_tokens, output_characters, error_code
+from rag_query_audit
+where trace_id = :trace_id;
+```
+
+验收标准：
+
+1. 结构化日志 `rag_query_audit` 与数据库记录含同一 `traceId`；`status` 必须可区分 `COMPLETED`、`REFUSED`、`FAILED`、`CANCELLED`。
+2. 命中 chunk ID、文档 ID、最终分数和 Embedding/Rerank 降级标记可追踪；若上游支持标准 `stream_options.include_usage`，应记录 prompt/completion token 数。
+3. `rag_query_audit` 表、应用日志和异常堆栈中不得出现问题、模型回答、Prompt、文档片段、MinIO 对象键、API Key 或 Authorization 值。
+4. 审计落库失败只能记录服务端错误，不能中断已开始的 SSE 响应。
+
 ## 7. 回滚与故障处置
 
 | 场景 | 操作 |
@@ -214,6 +235,6 @@ cd backend
 JAVA_HOME=$(/usr/libexec/java_home -v 17) PATH="$JAVA_HOME/bin:$PATH" mvn test
 ```
 
-当前覆盖：上传权限和白名单、任务原子领取、失败与手动重试、删除清理、Parser/Chunker、模型客户端分批/超时、ES mapping/Bulk/三重过滤、RRF 与两类模型降级、Prompt 上游流解析、五类 SSE 载荷、引用构造、空召回拒答不调用生成模型、以及现有认证/租户回归。
+当前覆盖：上传权限和白名单、任务原子领取、失败与手动重试、删除清理、Parser/Chunker、模型客户端分批/超时、ES mapping/Bulk/三重过滤、RRF 与两类模型降级、Prompt 上游流解析、五类 SSE 载荷、引用构造、空召回拒答不调用生成模型、无正文审计字段与 token 用量、以及现有认证/租户回归。
 
 自动化测试不替代真实依赖验收：必须按第 6 节完成一份 Markdown、一份文本型 PDF 的真实 `READY` 验收和一轮真实 SSE 问答后，才可宣告 P1/P2 可部署。

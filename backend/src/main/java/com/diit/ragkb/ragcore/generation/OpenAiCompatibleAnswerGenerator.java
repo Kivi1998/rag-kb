@@ -50,10 +50,17 @@ public class OpenAiCompatibleAnswerGenerator implements AnswerGenerator {
 
     @Override
     public void stream(String question, List<RetrievedChunk> contexts, Consumer<QueryEvent> eventConsumer) {
+        streamWithMetrics(question, contexts, eventConsumer);
+    }
+
+    @Override
+    public GenerationMetrics streamWithMetrics(String question, List<RetrievedChunk> contexts,
+                                               Consumer<QueryEvent> eventConsumer) {
         try {
             String body = objectMapper.writeValueAsString(new ChatCompletionRequest(properties.getModel(), List.of(
                     new ChatMessage("system", promptAssembler.systemPrompt()),
-                    new ChatMessage("user", promptAssembler.userPrompt(question, contexts))), true, 0));
+                    new ChatMessage("user", promptAssembler.userPrompt(question, contexts))), true, 0,
+                    new StreamOptions(properties.isIncludeUsage())));
             HttpRequest.Builder builder = HttpRequest.newBuilder(URI.create(properties.getEndpoint()))
                     .timeout(Duration.ofMillis(properties.getTimeoutMs()))
                     .header("Content-Type", "application/json")
@@ -67,7 +74,9 @@ public class OpenAiCompatibleAnswerGenerator implements AnswerGenerator {
                 throw new ModelClientException("Generation 服务返回 HTTP " + response.statusCode());
             }
             try (InputStream bodyStream = response.body()) {
-                parseSse(bodyStream, objectMapper, eventConsumer);
+                StreamUsage usage = parseSse(bodyStream, objectMapper, eventConsumer);
+                return new GenerationMetrics(usage.model() == null ? properties.getModel() : usage.model(),
+                        usage.promptTokens(), usage.completionTokens(), usage.outputCharacters());
             }
         } catch (IOException ex) {
             throw new ModelClientException("调用 Generation 服务失败", ex);
@@ -79,20 +88,37 @@ public class OpenAiCompatibleAnswerGenerator implements AnswerGenerator {
         }
     }
 
-    static void parseSse(InputStream input, ObjectMapper objectMapper, Consumer<QueryEvent> eventConsumer) throws IOException {
+    @Override
+    public String modelId() {
+        return properties.getModel();
+    }
+
+    static StreamUsage parseSse(InputStream input, ObjectMapper objectMapper, Consumer<QueryEvent> eventConsumer)
+            throws IOException {
+        String model = null;
+        Integer promptTokens = null;
+        Integer completionTokens = null;
+        long outputCharacters = 0;
         try (BufferedReader reader = new BufferedReader(new InputStreamReader(input, StandardCharsets.UTF_8))) {
             String line;
             while ((line = reader.readLine()) != null) {
                 if (!line.startsWith("data:")) continue;
                 String data = line.substring(5).trim();
-                if ("[DONE]".equals(data)) return;
-                JsonNode delta = objectMapper.readTree(data).path("choices").path(0).path("delta");
+                if ("[DONE]".equals(data)) break;
+                JsonNode root = objectMapper.readTree(data);
+                if (root.path("model").isTextual()) model = root.path("model").asText();
+                JsonNode usage = root.path("usage");
+                if (usage.path("prompt_tokens").isInt()) promptTokens = usage.path("prompt_tokens").intValue();
+                if (usage.path("completion_tokens").isInt()) completionTokens = usage.path("completion_tokens").intValue();
+                JsonNode delta = root.path("choices").path(0).path("delta");
                 JsonNode content = delta.path("content");
                 if (content.isTextual() && !content.asText().isEmpty()) {
                     eventConsumer.accept(QueryEvent.chunk(content.asText()));
+                    outputCharacters += content.asText().length();
                 }
             }
         }
+        return new StreamUsage(model, promptTokens, completionTokens, outputCharacters);
     }
 
     private static long requirePositiveTimeout(RagModelProperties.Endpoint properties) {
@@ -102,6 +128,9 @@ public class OpenAiCompatibleAnswerGenerator implements AnswerGenerator {
         return properties.getTimeoutMs();
     }
 
-    private record ChatCompletionRequest(String model, List<ChatMessage> messages, boolean stream, int temperature) { }
+    private record ChatCompletionRequest(String model, List<ChatMessage> messages, boolean stream, int temperature,
+                                         StreamOptions stream_options) { }
     private record ChatMessage(String role, String content) { }
+    private record StreamOptions(boolean include_usage) { }
+    record StreamUsage(String model, Integer promptTokens, Integer completionTokens, long outputCharacters) { }
 }

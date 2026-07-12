@@ -46,6 +46,8 @@ class HybridRetrieverTest {
         assertEquals("b", result.chunks().get(0).chunk().id());
         assertEquals(2, result.chunks().get(0).bm25Rank());
         assertEquals(1, result.chunks().get(0).vectorRank());
+        assertEquals(2, result.diagnostics().bm25CandidateCount());
+        assertEquals(1, result.diagnostics().vectorCandidateCount());
     }
 
     @Test
@@ -66,6 +68,7 @@ class HybridRetrieverTest {
                 .retrieveWithDecision(UUID.randomUUID(), UUID.randomUUID(), "q", new RetrievalOptions(30, 1, true));
         assertTrue(!result.refused());
         assertEquals("only", result.chunks().get(0).chunk().id());
+        assertTrue(result.diagnostics().rerankFallback());
     }
 
     @Test
@@ -89,6 +92,7 @@ class HybridRetrieverTest {
 
         assertTrue(!result.refused());
         assertEquals("bm25-only", result.chunks().get(0).chunk().id());
+        assertTrue(result.diagnostics().embeddingFallback());
     }
 
     @Test

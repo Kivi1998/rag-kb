@@ -17,6 +17,6 @@ public interface Retriever {
                                                 RetrievalOptions options) {
         List<RetrievedChunk> chunks = retrieve(organizationId, knowledgeBaseId, query, options);
         return chunks.isEmpty() ? RetrievalResult.refuse("未在当前知识库中检索到足够依据")
-                : new RetrievalResult(chunks, null);
+                : new RetrievalResult(chunks, null, new RetrievalDiagnostics(chunks.size(), 0, chunks.size(), false, false));
     }
 }
