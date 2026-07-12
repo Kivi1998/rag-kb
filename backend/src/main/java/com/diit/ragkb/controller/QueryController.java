@@ -1,8 +1,15 @@
 package com.diit.ragkb.controller;
 
 import com.diit.ragkb.config.RagQueryProperties;
+import com.diit.ragkb.model.QueryAuditStatus;
+import com.diit.ragkb.ragcore.audit.QueryAuditSnapshot;
+import com.diit.ragkb.ragcore.generation.GenerationMetrics;
+import com.diit.ragkb.ragcore.model.ModelClientException;
 import com.diit.ragkb.ragcore.model.QueryEvent;
+import com.diit.ragkb.security.TenantContext;
+import com.diit.ragkb.service.QueryAuditService;
 import com.diit.ragkb.service.QueryService;
+import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotNull;
 import lombok.Data;
@@ -17,6 +24,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
+import org.slf4j.MDC;
 
 import java.io.IOException;
 import java.util.List;
@@ -37,23 +45,43 @@ public class QueryController {
     @Qualifier("ragQueryExecutor")
     private final ExecutorService ragQueryExecutor;
     private final RagQueryProperties properties;
+    private final QueryAuditService queryAuditService;
 
     @PostMapping(value = "/{kbId}/query", consumes = MediaType.APPLICATION_JSON_VALUE,
             produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    public SseEmitter query(@PathVariable UUID kbId, @Valid @RequestBody QueryRequest request) {
-        QueryService.PreparedQuery prepared = queryService.prepare(kbId, request.getQuestion());
+    public SseEmitter query(@PathVariable UUID kbId, @Valid @RequestBody QueryRequest request,
+                            HttpServletResponse response) {
+        String traceId = UUID.randomUUID().toString();
+        response.setHeader("X-RAG-Trace-Id", traceId);
+        QueryService.PreparedQuery prepared;
+        try {
+            prepared = queryService.prepare(kbId, request.getQuestion(), traceId);
+        } catch (RuntimeException ex) {
+            recordPreRetrievalFailure(traceId, kbId, ex);
+            throw ex;
+        }
         SseEmitter emitter = new SseEmitter(properties.getStreamTimeoutMs());
         CompletableFuture.runAsync(() -> writeStream(emitter, prepared), ragQueryExecutor);
         return emitter;
     }
 
     private void writeStream(SseEmitter emitter, QueryService.PreparedQuery prepared) {
-        try {
-            queryService.stream(prepared, event -> send(emitter, event));
+        long generationStartedAt = System.nanoTime();
+        try (MDC.MDCCloseable ignored = MDC.putCloseable("ragTraceId", prepared.audit().traceId())) {
+            GenerationMetrics metrics = queryService.stream(prepared, event -> send(emitter, event));
             send(emitter, QueryEvent.done());
             emitter.complete();
+            long generationLatencyMs = elapsedMs(generationStartedAt);
+            queryAuditService.recordSafely(prepared.audit(), prepared.refusalReason() == null
+                    ? QueryAuditStatus.COMPLETED : QueryAuditStatus.REFUSED, metrics, generationLatencyMs,
+                    prepared.audit().retrievalLatencyMs() + generationLatencyMs, null);
         } catch (Exception ex) {
-            log.warn("知识库 SSE 问答失败: {}", ex.getMessage());
+            QueryAuditStatus status = isClientDisconnected(ex) ? QueryAuditStatus.CANCELLED : QueryAuditStatus.FAILED;
+            log.warn("知识库 SSE 问答失败 traceId={} status={} errorCode={}", prepared.audit().traceId(), status,
+                    errorCode(ex));
+            long generationLatencyMs = elapsedMs(generationStartedAt);
+            queryAuditService.recordSafely(prepared.audit(), status, GenerationMetrics.none(), generationLatencyMs,
+                    prepared.audit().retrievalLatencyMs() + generationLatencyMs, errorCode(ex));
             try {
                 send(emitter, QueryEvent.error("问答服务暂时不可用，请稍后重试"));
             } catch (RuntimeException ignored) {
@@ -61,6 +89,40 @@ public class QueryController {
             }
             emitter.complete();
         }
+    }
+
+    private long elapsedMs(long startedAtNanos) {
+        return java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAtNanos);
+    }
+
+    private void recordPreRetrievalFailure(String traceId, UUID knowledgeBaseId, RuntimeException exception) {
+        UUID organizationId = TenantContext.getOrgId();
+        UUID memberId = TenantContext.getMemberId();
+        if (organizationId == null || memberId == null) {
+            log.warn("RAG 查询在租户上下文建立前失败 traceId={} errorCode={}", traceId, errorCode(exception));
+            return;
+        }
+        queryAuditService.recordSafely(QueryAuditSnapshot.beforeRetrieval(traceId, organizationId, knowledgeBaseId,
+                memberId), QueryAuditStatus.FAILED, GenerationMetrics.none(), 0, 0, errorCode(exception));
+    }
+
+    private boolean isClientDisconnected(Throwable exception) {
+        Throwable current = exception;
+        while (current != null) {
+            if (current instanceof IOException) return true;
+            current = current.getCause();
+        }
+        return false;
+    }
+
+    private String errorCode(Throwable exception) {
+        Throwable current = exception;
+        while (current != null) {
+            if (current instanceof ModelClientException) return "MODEL_UNAVAILABLE";
+            if (current instanceof IOException) return "CLIENT_DISCONNECTED";
+            current = current.getCause();
+        }
+        return "QUERY_INTERNAL_ERROR";
     }
 
     private void send(SseEmitter emitter, QueryEvent event) {

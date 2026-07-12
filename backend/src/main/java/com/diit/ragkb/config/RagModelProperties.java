@@ -39,6 +39,15 @@ public class RagModelProperties {
 
     /** OpenAI Chat Completions 兼容的流式生成端点。 */
     public static class Generation extends Endpoint {
+        private boolean includeUsage = true;
+
+        public boolean isIncludeUsage() {
+            return includeUsage;
+        }
+
+        public void setIncludeUsage(boolean includeUsage) {
+            this.includeUsage = includeUsage;
+        }
     }
 
     public abstract static class Endpoint {

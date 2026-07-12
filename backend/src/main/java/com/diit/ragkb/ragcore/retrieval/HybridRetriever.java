@@ -39,6 +39,7 @@ public class HybridRetriever implements Retriever {
         List<RetrievedChunk> bm25 = candidateSource.searchBm25(textRequest);
 
         List<RetrievedChunk> vector;
+        boolean embeddingFallback = false;
         try {
             EmbeddingResult embedding = embeddingClient.embed(List.of(query));
             if (embedding.vectors().size() != 1) {
@@ -50,22 +51,29 @@ public class HybridRetriever implements Retriever {
             // 向量模型短暂不可用时，保留关键词召回能力，避免整个检索入口不可用。
             log.warn("Embedding 不可用，降级为 BM25 结果: {}", ex.getMessage());
             vector = List.of();
+            embeddingFallback = true;
         }
         List<RetrievedChunk> fused = RrfFusion.fuse(bm25, vector);
+        RetrievalDiagnostics diagnostics = new RetrievalDiagnostics(bm25.size(), vector.size(), fused.size(),
+                embeddingFallback, false);
         if (fused.isEmpty() || fused.get(0).rrfScore() < MIN_RRF_SCORE) {
-            return RetrievalResult.refuse("未在当前知识库中检索到足够依据");
+            return RetrievalResult.refuse("未在当前知识库中检索到足够依据", diagnostics);
         }
 
         List<RetrievedChunk> selected = fused.stream().limit(options.resultLimit()).toList();
         RerankerClient reranker = rerankerProvider.getIfAvailable();
+        boolean rerankFallback = false;
         if (options.rerank() && reranker != null) {
             try {
                 selected = reranker.rerank(query, fused, options.resultLimit());
             } catch (RuntimeException ex) {
                 log.warn("Rerank 不可用，回退 RRF 结果: {}", ex.getMessage());
+                rerankFallback = true;
             }
         }
-        return selected.isEmpty() ? RetrievalResult.refuse("未在当前知识库中检索到足够依据")
-                : new RetrievalResult(selected, null);
+        RetrievalDiagnostics finalDiagnostics = new RetrievalDiagnostics(bm25.size(), vector.size(), fused.size(),
+                embeddingFallback, rerankFallback);
+        return selected.isEmpty() ? RetrievalResult.refuse("未在当前知识库中检索到足够依据", finalDiagnostics)
+                : new RetrievalResult(selected, null, finalDiagnostics);
     }
 }

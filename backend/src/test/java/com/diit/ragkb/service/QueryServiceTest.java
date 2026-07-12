@@ -3,6 +3,7 @@ package com.diit.ragkb.service;
 import com.diit.ragkb.model.KnowledgeBase;
 import com.diit.ragkb.model.KnowledgeDocument;
 import com.diit.ragkb.ragcore.generation.AnswerGenerator;
+import com.diit.ragkb.ragcore.generation.GenerationMetrics;
 import com.diit.ragkb.ragcore.model.Chunk;
 import com.diit.ragkb.ragcore.model.QueryEvent;
 import com.diit.ragkb.ragcore.model.RetrievedChunk;
@@ -54,13 +55,18 @@ class QueryServiceTest {
 
         QueryService.PreparedQuery prepared = service.prepare(kbId, "如何排查启动失败？");
         List<QueryEvent> events = new ArrayList<>();
-        service.stream(prepared, events::add);
+        GenerationMetrics metrics = service.stream(prepared, events::add);
 
         assertEquals(2, events.size());
         assertEquals("source", events.get(0).sseEventName());
         assertEquals("部署手册.md", events.get(0).citation().documentName());
         assertTrue(!events.get(0).citation().documentName().contains("org/"));
         assertEquals("chunk", events.get(1).sseEventName());
+        assertEquals("unknown", metrics.model());
+        assertEquals(9, metrics.outputCharacters());
+        assertTrue(!prepared.audit().chunkIds().isEmpty());
+        assertTrue(!prepared.audit().toString().contains("如何排查启动失败"));
+        assertTrue(!prepared.audit().toString().contains("数据库连接失败"));
     }
 
     @Test
@@ -76,11 +82,14 @@ class QueryServiceTest {
                 generator, kbService, documents);
 
         List<QueryEvent> events = new ArrayList<>();
-        service.stream(service.prepare(kbId, "不存在的问题"), events::add);
+        QueryService.PreparedQuery prepared = service.prepare(kbId, "不存在的问题");
+        GenerationMetrics metrics = service.stream(prepared, events::add);
 
         assertEquals(List.of("refusal"), events.stream().map(QueryEvent::sseEventName).toList());
         verify(generator, never()).stream(any(), any(), any());
         verify(documents, never()).findByKnowledgeBaseIdAndOrgIdOrderByCreatedAtDesc(any(), any());
+        assertEquals("none", metrics.model());
+        assertTrue(prepared.audit().refused());
     }
 
     @Test
