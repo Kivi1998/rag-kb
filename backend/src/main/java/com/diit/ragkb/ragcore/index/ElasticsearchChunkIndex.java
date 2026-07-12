@@ -7,21 +7,20 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.http.HttpEntity;
-import org.apache.http.entity.ContentType;
-import org.apache.http.entity.StringEntity;
 import org.elasticsearch.client.Request;
 import org.elasticsearch.client.Response;
 import org.elasticsearch.client.ResponseException;
 import org.elasticsearch.client.RestClient;
 
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * 共享 `rag_chunks_v1` 索引的原生 ES 适配器。
@@ -30,6 +29,10 @@ import java.util.UUID;
  * documentId 之外的数据。检索由 T201 专门实现，避免在索引层暴露无租户过滤的泛型 search。</p>
  */
 public class ElasticsearchChunkIndex implements ChunkIndex {
+
+    private static final Pattern SYMBOL = Pattern.compile("\\b(?:[A-Za-z_$][\\w$]*\\.)*[A-Za-z_$][\\w$]*\\b");
+    private static final Pattern CONFIG_KEY = Pattern.compile("(?m)^\\s*([A-Za-z][\\w.-]{1,})\\s*[:=]");
+    private static final Pattern ERROR_CODE = Pattern.compile("\\b(?:[A-Z][A-Z0-9_]{2,}|ERR(?:OR)?[-_]?\\d+)\\b");
 
     private final RestClient restClient;
     private final RagElasticsearchProperties properties;
@@ -161,6 +164,9 @@ public class ElasticsearchChunkIndex implements ChunkIndex {
         keyword(propertiesMap, "model_version");
         keyword(propertiesMap, "parser_version");
         keyword(propertiesMap, "chunk_version");
+        propertiesMap.put("symbol_names", Map.of("type", "keyword"));
+        propertiesMap.put("config_keys", Map.of("type", "keyword"));
+        propertiesMap.put("error_codes", Map.of("type", "keyword"));
         propertiesMap.put("metadata", Map.of("type", "object", "dynamic", true));
         return Map.of("mappings", Map.of("dynamic", "strict", "properties", propertiesMap));
     }
@@ -189,8 +195,21 @@ public class ElasticsearchChunkIndex implements ChunkIndex {
         source.put("model_version", modelVersion == null ? "unknown" : modelVersion);
         source.put("parser_version", chunk.metadata().getOrDefault("parserVersion", "v1"));
         source.put("chunk_version", chunk.metadata().getOrDefault("chunkVersion", "v1"));
+        source.put("symbol_names", extract(SYMBOL, chunk.content(), 128));
+        source.put("config_keys", extract(CONFIG_KEY, chunk.content(), 64));
+        source.put("error_codes", extract(ERROR_CODE, chunk.content(), 64));
         source.put("metadata", chunk.metadata());
         return source;
+    }
+
+    private List<String> extract(Pattern pattern, String content, int limit) {
+        LinkedHashSet<String> values = new LinkedHashSet<>();
+        Matcher matcher = pattern.matcher(content);
+        while (matcher.find() && values.size() < limit) {
+            String value = matcher.groupCount() > 0 && matcher.group(1) != null ? matcher.group(1) : matcher.group();
+            values.add(value);
+        }
+        return List.copyOf(values);
     }
 
     private void validateChunk(Chunk chunk, List<Float> vector) {

@@ -54,10 +54,14 @@ class ElasticsearchChunkIndexTest {
 
         assertTrue(mapping.get().contains("\"content_vector\""));
         assertTrue(mapping.get().contains("\"dims\":2"));
+        assertTrue(mapping.get().contains("\"symbol_names\""));
+        assertTrue(mapping.get().contains("\"config_keys\""));
+        assertTrue(mapping.get().contains("\"error_codes\""));
         assertTrue(bulk.get().contains("\"org_id\":\"" + chunk.organizationId() + "\""));
         assertTrue(bulk.get().contains("\"kb_id\":\"" + chunk.knowledgeBaseId() + "\""));
         assertTrue(bulk.get().contains("\"document_id\":\"" + chunk.documentId() + "\""));
         assertTrue(bulk.get().contains("\"model_version\":\"embedding-v1\""));
+        assertTrue(bulk.get().contains("\"symbol_names\""));
     }
 
     @Test
@@ -82,7 +86,7 @@ class ElasticsearchChunkIndexTest {
 
     private Chunk chunk() {
         return new Chunk("doc:0:hash", UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(), 0,
-                "class SearchService {}", List.of("Search"), "org/test/doc.md", 1, 1, 1,
+                "class SearchService {}\nspring.datasource.url=jdbc:postgresql://db\nERROR_404", List.of("Search"), "org/test/doc.md", 1, 1, 1,
                 "java", "hash", Map.of("parserVersion", "parser-v1", "chunkVersion", "chunk-v1"));
     }
 
