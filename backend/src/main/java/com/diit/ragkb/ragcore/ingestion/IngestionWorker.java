@@ -35,13 +35,13 @@ public class IngestionWorker {
     }
 
     private void process(IngestionJob candidate) {
-        lifecycleService.claim(candidate.getId()).ifPresent(job -> {
+        lifecycleService.claim(candidate.getId()).ifPresent(task -> {
             try {
-                pipeline.process(job);
+                pipeline.process(task);
             } catch (Exception ex) {
                 log.warn("摄取任务失败，jobId={}, documentId={}, attempt={}",
-                        job.getId(), job.getDocument().getId(), job.getAttempt(), ex);
-                lifecycleService.fail(job.getId(), ex);
+                        task.jobId(), task.documentId(), candidate.getAttempt() + 1, ex);
+                lifecycleService.fail(task.jobId(), ex);
             }
         });
     }

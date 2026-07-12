@@ -32,7 +32,7 @@ public class IngestionJobLifecycleService {
 
     /** 使用条件更新原子领取排队任务。 */
     @Transactional
-    public Optional<IngestionJob> claim(UUID jobId) {
+    public Optional<IngestionTask> claim(UUID jobId) {
         Instant now = Instant.now();
         int updated = jobRepository.claimIfQueued(jobId, IngestionStatus.QUEUED, IngestionStatus.PARSING, now);
         if (updated == 0) {
@@ -40,8 +40,11 @@ public class IngestionJobLifecycleService {
         }
         IngestionJob job = jobRepository.findById(jobId)
                 .orElseThrow(() -> new ResourceNotFoundException("摄取任务不存在"));
-        updateDocumentStatus(job.getDocument(), IngestionStatus.PARSING);
-        return Optional.of(job);
+        KnowledgeDocument document = job.getDocument();
+        updateDocumentStatus(document, IngestionStatus.PARSING);
+        return Optional.of(new IngestionTask(job.getId(), document.getId(), job.getOrg().getId(),
+                job.getKnowledgeBase().getId(), document.getName(), document.getContentType(),
+                document.getObjectStoragePath()));
     }
 
     /** Worker 在一个合法阶段完成后推进至下一阶段。 */
@@ -62,6 +65,10 @@ public class IngestionJobLifecycleService {
     @Transactional
     public IngestionJob fail(UUID jobId, Throwable cause) {
         IngestionJob job = requireJob(jobId);
+        // 删除请求具有更高优先级。Worker 已经拿到的旧快照不能把任务重新写回 FAILED。
+        if (job.getStatus() == IngestionStatus.DELETING) {
+            return job;
+        }
         if (job.getStatus() != IngestionStatus.FAILED) {
             IngestionStateMachine.requireTransition(job.getStatus(), IngestionStatus.FAILED);
             job.setStatus(IngestionStatus.FAILED);

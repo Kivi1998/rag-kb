@@ -40,4 +40,18 @@ public interface IngestionJobRepository extends JpaRepository<IngestionJob, UUID
                       @Param("expectedStatus") IngestionStatus expectedStatus,
                       @Param("nextStatus") IngestionStatus nextStatus,
                       @Param("now") Instant now);
+
+    /** 删除请求优先取消未完成任务，正在执行的 Pipeline 会在下一阶段迁移时停止。 */
+    @Modifying
+    @Query("""
+            update IngestionJob job
+               set job.status = :deletingStatus,
+                   job.updatedAt = :now
+             where job.document.id = :documentId
+               and job.status in :activeStatuses
+            """)
+    int markDeletingByDocumentId(@Param("documentId") UUID documentId,
+                                 @Param("activeStatuses") List<IngestionStatus> activeStatuses,
+                                 @Param("deletingStatus") IngestionStatus deletingStatus,
+                                 @Param("now") Instant now);
 }

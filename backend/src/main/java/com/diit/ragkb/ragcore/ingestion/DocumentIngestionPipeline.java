@@ -1,7 +1,5 @@
 package com.diit.ragkb.ragcore.ingestion;
 
-import com.diit.ragkb.model.IngestionJob;
-
 /**
  * Worker 领取任务后的实际处理端口。
  *
@@ -10,5 +8,5 @@ import com.diit.ragkb.model.IngestionJob;
  */
 public interface DocumentIngestionPipeline {
 
-    void process(IngestionJob job) throws Exception;
+    void process(IngestionTask task) throws Exception;
 }

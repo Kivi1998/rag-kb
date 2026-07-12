@@ -65,6 +65,9 @@ rag:
       # T107 接入 Parser → Chunker → Embedding → ES 后由部署环境显式开启，避免未完成管道误消费任务。
       enabled: ${RAG_INGESTION_WORKER_ENABLED:false}
       poll-interval-ms: ${RAG_INGESTION_POLL_INTERVAL_MS:1000}
+    cleanup:
+      enabled: ${RAG_INGESTION_CLEANUP_ENABLED:true}
+      poll-interval-ms: ${RAG_INGESTION_CLEANUP_POLL_INTERVAL_MS:30000}
   model:
     embedding:
       enabled: ${RAG_EMBEDDING_ENABLED:false}

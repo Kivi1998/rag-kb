@@ -9,6 +9,7 @@ import com.diit.ragkb.model.Member;
 import com.diit.ragkb.model.MemberRole;
 import com.diit.ragkb.ragcore.model.IngestionStatus;
 import com.diit.ragkb.ragcore.ingestion.IngestionJobLifecycleService;
+import com.diit.ragkb.ragcore.ingestion.DocumentDeletionService;
 import com.diit.ragkb.ragcore.storage.ObjectStorage;
 import com.diit.ragkb.repository.IngestionJobRepository;
 import com.diit.ragkb.repository.KnowledgeBaseRepository;
@@ -49,6 +50,7 @@ public class DocumentIngestionService {
     private final MemberRepository memberRepository;
     private final ObjectStorage objectStorage;
     private final IngestionJobLifecycleService lifecycleService;
+    private final DocumentDeletionService deletionService;
 
     /** 上传原文件并创建一个待消费的摄取任务。 */
     @Transactional
@@ -123,21 +125,13 @@ public class DocumentIngestionService {
     }
 
     /** 删除原文件、任务记录和文档元数据。向量索引删除将在 Worker 的删除补偿任务中接入。 */
-    @Transactional
     public void delete(UUID kbId, UUID documentId) {
         requireDocumentManager();
         findKnowledgeBase(kbId);
         KnowledgeDocument document = documentRepository.findByIdAndKnowledgeBaseIdAndOrgId(documentId, kbId, currentOrgId())
                 .orElseThrow(() -> new ResourceNotFoundException("文档不存在"));
-        try {
-            if (document.getObjectStoragePath() != null) {
-                objectStorage.delete(document.getObjectStoragePath());
-            }
-        } catch (IOException ex) {
-            throw new IllegalStateException("删除对象存储文件失败，请稍后重试", ex);
-        }
-        jobRepository.deleteByDocumentId(documentId);
-        documentRepository.delete(document);
+        deletionService.requestDeletion(document.getId());
+        deletionService.cleanup(document.getId());
     }
 
     private IngestionJob findJob(UUID jobId, UUID kbId) {

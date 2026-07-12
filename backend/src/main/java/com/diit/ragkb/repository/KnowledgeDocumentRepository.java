@@ -1,6 +1,7 @@
 package com.diit.ragkb.repository;
 
 import com.diit.ragkb.model.KnowledgeDocument;
+import com.diit.ragkb.ragcore.model.IngestionStatus;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 import java.util.List;
@@ -12,4 +13,6 @@ public interface KnowledgeDocumentRepository extends JpaRepository<KnowledgeDocu
     List<KnowledgeDocument> findByKnowledgeBaseIdAndOrgIdOrderByCreatedAtDesc(UUID knowledgeBaseId, UUID orgId);
 
     Optional<KnowledgeDocument> findByIdAndKnowledgeBaseIdAndOrgId(UUID id, UUID knowledgeBaseId, UUID orgId);
+
+    List<KnowledgeDocument> findByStatusOrderByUpdatedAtAsc(IngestionStatus status);
 }

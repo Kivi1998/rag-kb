@@ -32,6 +32,7 @@ import java.util.Comparator;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -171,6 +172,28 @@ class DocumentIngestionTest {
 
         assertEquals(IngestionStatus.QUEUED, jobRepository.findById(job.getId()).orElseThrow().getStatus());
         assertEquals(1, documentRepository.findById(document.getId()).orElseThrow().getRetryCount());
+    }
+
+    @Test
+    @DisplayName("删除文档会清理对象、任务与文档元数据")
+    void deleteDocument_cleansJobAndMetadata() throws Exception {
+        mockMvc.perform(multipart("/api/v1/documents/upload")
+                        .file(new MockMultipartFile("file", "remove.md", "text/markdown", "# remove".getBytes()))
+                        .param("kbId", knowledgeBase.getId().toString())
+                        .header("Authorization", "Bearer " + ownerToken)
+                        .header("X-Org-Id", org.getId().toString()))
+                .andExpect(status().isCreated());
+        var document = documentRepository.findByKnowledgeBaseIdAndOrgIdOrderByCreatedAtDesc(knowledgeBase.getId(), org.getId()).get(0);
+
+        mockMvc.perform(delete("/api/v1/documents/{documentId}", document.getId())
+                        .param("kbId", knowledgeBase.getId().toString())
+                        .header("Authorization", "Bearer " + ownerToken)
+                        .header("X-Org-Id", org.getId().toString()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+
+        assertTrue(documentRepository.findById(document.getId()).isEmpty());
+        assertTrue(jobRepository.findFirstByDocumentIdOrderByCreatedAtDesc(document.getId()).isEmpty());
     }
 
     private void cleanDatabaseAndObjects() throws IOException {
