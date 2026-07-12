@@ -1,6 +1,6 @@
 # rag-kb 自研 RAG 核心重构架构设计
 
-> 状态：待实施设计
+> 状态：P1 摄取与索引代码已实现，待真实 ES/模型环境验收；P2 检索问答待实施。
 >
 > 读者：项目经理、技术经理、后端/前端/算法开发 Agent、测试 Agent
 >
@@ -186,20 +186,20 @@ sequenceDiagram
 
   C->>A: 上传文档
   A->>O: 保存原始文件
-  A->>P: document=UPLOADING，创建 ingestion_job=PENDING
+  A->>P: document=QUEUED，创建 ingestion_job=QUEUED
   A-->>C: 返回 documentId
-  W->>P: 领取任务，document=PARSING
+  W->>P: 原子领取任务，document/job=PARSING
   W->>O: 读取原始文件
-  W->>W: 解析、规范化、结构切块
-  W->>E: 批量 Embedding
-  W->>S: Bulk 写入 chunks
-  W->>P: document=READY，job=SUCCEEDED
+  W->>W: 解析、规范化、结构切块（CHUNKING）
+  W->>E: 批量 Embedding（EMBEDDING）
+  W->>S: Bulk 写入 chunks（INDEXING）
+  W->>P: document/job=READY
 ```
 
 ### 8.1 状态与失败处理
 
-- 文档状态：`UPLOADING`、`QUEUED`、`PARSING`、`INDEXING`、`READY`、`FAILED`、`DELETING`。
-- 任务状态：`PENDING`、`RUNNING`、`RETRYABLE_FAILED`、`SUCCEEDED`、`DEAD_LETTER`。
+- 文档与任务共用状态：`QUEUED`、`PARSING`、`CHUNKING`、`EMBEDDING`、`INDEXING`、`READY`、`FAILED`、`DELETING`。
+- `attempt` 在原子领取任务时递增；达到 `max_attempts` 的 `FAILED` 任务视为死信，必须由运维确认后处理。
 - 解析、Embedding、ES 写入任何一步失败都保存错误类型和简短错误信息；可由管理员重试。
 - 同一文档版本重试必须幂等：先按 `document_id` 删除旧 chunks，再 Bulk 写入新 chunks，最终再标记 READY。
 - 删除流程：先标记 `DELETING`，删除 ES chunks 与对象存储，再删除/归档数据库记录；失败进入对账任务。

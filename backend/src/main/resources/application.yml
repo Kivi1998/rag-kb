@@ -51,6 +51,47 @@ spring:
       port: ${REDIS_PORT:6379}
       password: ${REDIS_PASSWORD:}
 
+rag:
+  storage:
+    # local 仅用于本地开发与测试；生产环境设置为 minio 并配置 endpoint / bucket / access-key / secret-key
+    type: ${RAG_STORAGE_TYPE:local}
+    local-root: ${RAG_LOCAL_STORAGE_ROOT:./data/rag-objects}
+    endpoint: ${MINIO_ENDPOINT:}
+    bucket: ${MINIO_BUCKET:rag-kb}
+    access-key: ${MINIO_ACCESS_KEY:}
+    secret-key: ${MINIO_SECRET_KEY:}
+  ingestion:
+    worker:
+      # T107 接入 Parser → Chunker → Embedding → ES 后由部署环境显式开启，避免未完成管道误消费任务。
+      enabled: ${RAG_INGESTION_WORKER_ENABLED:false}
+      poll-interval-ms: ${RAG_INGESTION_POLL_INTERVAL_MS:1000}
+    cleanup:
+      enabled: ${RAG_INGESTION_CLEANUP_ENABLED:true}
+      poll-interval-ms: ${RAG_INGESTION_CLEANUP_POLL_INTERVAL_MS:30000}
+  model:
+    embedding:
+      enabled: ${RAG_EMBEDDING_ENABLED:false}
+      endpoint: ${RAG_EMBEDDING_ENDPOINT:}
+      api-key: ${RAG_EMBEDDING_API_KEY:}
+      model: ${RAG_EMBEDDING_MODEL:}
+      batch-size: ${RAG_EMBEDDING_BATCH_SIZE:32}
+      timeout-ms: ${RAG_EMBEDDING_TIMEOUT_MS:15000}
+    rerank:
+      enabled: ${RAG_RERANK_ENABLED:false}
+      endpoint: ${RAG_RERANK_ENDPOINT:}
+      api-key: ${RAG_RERANK_API_KEY:}
+      model: ${RAG_RERANK_MODEL:}
+      timeout-ms: ${RAG_RERANK_TIMEOUT_MS:15000}
+  elasticsearch:
+    # 只有 T107 管道与 ES 均完成部署后开启；向量维度必须与 Embedding 模型完全一致。
+    enabled: ${RAG_ES_ENABLED:false}
+    endpoint: ${RAG_ES_ENDPOINT:}
+    api-key: ${RAG_ES_API_KEY:}
+    index-name: ${RAG_ES_INDEX_NAME:rag_chunks_v1}
+    vector-dimensions: ${RAG_ES_VECTOR_DIMENSIONS:0}
+    connect-timeout-ms: ${RAG_ES_CONNECT_TIMEOUT_MS:3000}
+    socket-timeout-ms: ${RAG_ES_SOCKET_TIMEOUT_MS:30000}
+
 # Actuator
 management:
   endpoints:

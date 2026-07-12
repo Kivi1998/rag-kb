@@ -146,6 +146,20 @@
             <version>2.18.0</version>
         </dependency>
 
+        <!-- 对象存储：生产使用 MinIO / S3 兼容接口 -->
+        <dependency>
+            <groupId>io.minio</groupId>
+            <artifactId>minio</artifactId>
+            <version>8.5.12</version>
+        </dependency>
+
+        <!-- Elasticsearch 官方 Java REST Client：8.17 与目标 ES 8.x 集群版本线对齐 -->
+        <dependency>
+            <groupId>org.elasticsearch.client</groupId>
+            <artifactId>elasticsearch-rest-client</artifactId>
+            <version>8.17.7</version>
+        </dependency>
+
         <!-- 测试 -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
