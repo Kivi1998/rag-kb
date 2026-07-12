@@ -29,6 +29,7 @@ public class HybridRetriever implements Retriever {
         return retrieveWithDecision(organizationId, knowledgeBaseId, query, options).chunks();
     }
 
+    @Override
     public RetrievalResult retrieveWithDecision(UUID organizationId, UUID knowledgeBaseId, String query,
                                                 RetrievalOptions options) {
         if (query == null || query.isBlank()) {

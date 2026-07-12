@@ -8,6 +8,7 @@ public class RagModelProperties {
 
     private final Embedding embedding = new Embedding();
     private final Rerank rerank = new Rerank();
+    private final Generation generation = new Generation();
 
     public Embedding getEmbedding() {
         return embedding;
@@ -15,6 +16,10 @@ public class RagModelProperties {
 
     public Rerank getRerank() {
         return rerank;
+    }
+
+    public Generation getGeneration() {
+        return generation;
     }
 
     public static class Embedding extends Endpoint {
@@ -30,6 +35,10 @@ public class RagModelProperties {
     }
 
     public static class Rerank extends Endpoint {
+    }
+
+    /** OpenAI Chat Completions 兼容的流式生成端点。 */
+    public static class Generation extends Endpoint {
     }
 
     public abstract static class Endpoint {

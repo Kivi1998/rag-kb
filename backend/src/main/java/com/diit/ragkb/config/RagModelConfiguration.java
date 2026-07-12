@@ -2,6 +2,9 @@ package com.diit.ragkb.config;
 
 import com.diit.ragkb.ragcore.embedding.EmbeddingClient;
 import com.diit.ragkb.ragcore.embedding.OpenAiCompatibleEmbeddingClient;
+import com.diit.ragkb.ragcore.generation.AnswerGenerator;
+import com.diit.ragkb.ragcore.generation.OpenAiCompatibleAnswerGenerator;
+import com.diit.ragkb.ragcore.generation.PromptAssembler;
 import com.diit.ragkb.ragcore.rerank.OpenAiCompatibleRerankerClient;
 import com.diit.ragkb.ragcore.rerank.RerankerClient;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -25,5 +28,12 @@ public class RagModelConfiguration {
     @ConditionalOnProperty(prefix = "rag.model.rerank", name = "enabled", havingValue = "true")
     public RerankerClient rerankerClient(RagModelProperties properties, ObjectMapper objectMapper) {
         return new OpenAiCompatibleRerankerClient(properties.getRerank(), objectMapper);
+    }
+
+    @Bean
+    @ConditionalOnProperty(prefix = "rag.model.generation", name = "enabled", havingValue = "true")
+    public AnswerGenerator answerGenerator(RagModelProperties properties, ObjectMapper objectMapper,
+                                           PromptAssembler promptAssembler) {
+        return new OpenAiCompatibleAnswerGenerator(properties.getGeneration(), objectMapper, promptAssembler);
     }
 }

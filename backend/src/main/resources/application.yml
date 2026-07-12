@@ -82,6 +82,12 @@ rag:
       api-key: ${RAG_RERANK_API_KEY:}
       model: ${RAG_RERANK_MODEL:}
       timeout-ms: ${RAG_RERANK_TIMEOUT_MS:15000}
+    generation:
+      enabled: ${RAG_GENERATION_ENABLED:false}
+      endpoint: ${RAG_GENERATION_ENDPOINT:}
+      api-key: ${RAG_GENERATION_API_KEY:}
+      model: ${RAG_GENERATION_MODEL:}
+      timeout-ms: ${RAG_GENERATION_TIMEOUT_MS:60000}
   elasticsearch:
     # 只有 T107 管道与 ES 均完成部署后开启；向量维度必须与 Embedding 模型完全一致。
     enabled: ${RAG_ES_ENABLED:false}
@@ -94,6 +100,11 @@ rag:
   retrieval:
     # T201/T202 完成后显式开启；缺少 Embedding 或 ES Bean 时启动应失败而非走未过滤检索。
     enabled: ${RAG_RETRIEVAL_ENABLED:false}
+  query:
+    # 开启后必须同时配置 retrieval、embedding、ES 与 generation；缺少 Bean 会 fail-fast。
+    enabled: ${RAG_QUERY_ENABLED:false}
+    stream-timeout-ms: ${RAG_QUERY_STREAM_TIMEOUT_MS:120000}
+    worker-threads: ${RAG_QUERY_WORKER_THREADS:8}
 
 # Actuator
 management:
