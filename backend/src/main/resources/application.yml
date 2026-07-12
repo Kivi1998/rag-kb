@@ -91,6 +91,9 @@ rag:
     vector-dimensions: ${RAG_ES_VECTOR_DIMENSIONS:0}
     connect-timeout-ms: ${RAG_ES_CONNECT_TIMEOUT_MS:3000}
     socket-timeout-ms: ${RAG_ES_SOCKET_TIMEOUT_MS:30000}
+  retrieval:
+    # T201/T202 完成后显式开启；缺少 Embedding 或 ES Bean 时启动应失败而非走未过滤检索。
+    enabled: ${RAG_RETRIEVAL_ENABLED:false}
 
 # Actuator
 management:
