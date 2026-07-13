@@ -57,6 +57,7 @@ def _parse_pdf(path: Path) -> dict[str, Any]:
 
 def _parse_docx(path: Path) -> dict[str, Any]:
     from docx import Document
+    from docx.opc.constants import RELATIONSHIP_TYPE as RT
 
     document = Document(path)
     sections: list[dict[str, Any]] = []
@@ -77,9 +78,22 @@ def _parse_docx(path: Path) -> dict[str, Any]:
         text = "\n".join(row for row in rows if row.strip())
         if text:
             sections.append(_section(text, metadata={"type": "table", "tableIndex": str(table_index)}))
+    ocr_images = 0
+    seen_parts: set[str] = set()
+    for relationship in document.part.rels.values():
+        if relationship.reltype != RT.IMAGE:
+            continue
+        part_name = str(relationship.target_part.partname)
+        if part_name in seen_parts:
+            continue
+        seen_parts.add(part_name)
+        image_text = _ocr_bytes(relationship.target_part.blob)
+        if image_text:
+            ocr_images += 1
+            sections.append(_section(image_text, metadata={"type": "image", "ocr": "true"}))
     if not sections:
         raise ParseError("DOCX contains no extractable text")
-    return {"sections": sections, "metadata": {"format": "docx"}}
+    return {"sections": sections, "metadata": {"format": "docx", "ocrImageCount": str(ocr_images)}}
 
 
 def _parse_pptx(path: Path) -> dict[str, Any]:
@@ -126,15 +140,28 @@ _ocr_engine: Any = None
 _ocr_lock = threading.Lock()
 
 
-def _ocr_bytes(value: bytes) -> str:
+def ensure_ocr_ready() -> str:
     global _ocr_engine
     try:
         from rapidocr_onnxruntime import RapidOCR
     except ImportError as exc:
-        raise ParseError("OCR runtime is not installed") from exc
+        raise ParserUnavailableError("OCR runtime is not installed") from exc
     with _ocr_lock:
         if _ocr_engine is None:
-            _ocr_engine = RapidOCR()
+            try:
+                _ocr_engine = RapidOCR()
+            except Exception as exc:
+                raise ParserUnavailableError("OCR model is unavailable") from exc
+    return "rapidocr-onnxruntime"
+
+
+def ocr_is_loaded() -> bool:
+    return _ocr_engine is not None
+
+
+def _ocr_bytes(value: bytes) -> str:
+    ensure_ocr_ready()
+    with _ocr_lock:
         result, _ = _ocr_engine(value)
     if not result:
         return ""

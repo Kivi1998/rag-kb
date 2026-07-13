@@ -13,12 +13,14 @@
 - PostgreSQL `ingestion_job`、文档对象键、失败信息和重试次数迁移；
 - 本地文件系统与 MinIO/S3 兼容对象存储；
 - MinIO/S3 预签名直传会话、幂等键、有效期、对象大小回调校验和过期对象分批清理；
+- 大文件 complete 两阶段校验：数据库短事务领取校验 token，对象流在事务外完成魔数与 SHA-256 校验，超时校验可安全恢复；
 - 管理员/Owner 上传、查询任务、重试和删除 API；
 - 数据库条件更新领取任务、租约故障接管和长任务心跳，避免多 Worker 重复处理同一 `QUEUED` 任务；
 - Markdown、TXT、代码、YAML/JSON/XML、DOCX、文本型 PDF 的解析与结构化切块；
 - 独立非 root 多模态解析网关：扫描 PDF/图片 OCR、PPTX 文本与图片 OCR、Word 段落/标题/表格、音视频 ASR 和字幕时间戳；
 - 解析产物版本化保存到对象存储，后续 Embedding/索引重试不重复执行高成本 OCR/ASR；
 - OpenAI 兼容 Embedding/Rerank/Chat Completions HTTP 客户端；
+- Embedding 对连接异常、HTTP 429/5xx 有界重试，参数类 4xx 不重试；
 - 共享 ES 索引 `rag_chunks_v1` 的 mapping、Bulk Upsert、按 org/kb/document 三重过滤删除；
 - `DELETING` 删除补偿：优先删除 ES chunk，再删除对象与数据库元数据，失败自动重试。
 - ES 原生 BM25 与 kNN 双路召回、RRF 融合、可选 Rerank、低置信度拒答；
@@ -30,18 +32,19 @@
 
 | 范围 | 状态 | 可以对外宣称 | 不可以宣称 |
 |---|---|---|---|
-| MinIO/S3 预签名上传、大小/魔数/SHA-256 校验、幂等完成 | 已通过本机真实依赖技术验收 | 直传能力已实现并通过 5000 次对象生命周期测试 | 生产环境网络/TLS/CORS 已签字 |
-| Parser Gateway 与 Java 后端解析集成 | 已通过本机真实依赖技术验收 | 5000 份 DOCX 网关调度测试、单样本 OCR/Office/ASR 功能验证已通过 | 5000 份多格式长文档或 OCR/ASR 生产容量已通过 |
-| 解析产物缓存、任务租约/心跳/失败重试 | 已实现并有自动化回归 | 高成本 OCR/ASR 可在后续阶段重试时复用 | 多节点生产故障演练已签字 |
-| `QUEUED → READY` 与完整 RAG 问答 | 已实现，尚未完成真实依赖全链路验收 | 可进入下一阶段联调 | 完整 RAG 已达生产级 |
+| MinIO/S3 预签名上传、大小/魔数/SHA-256 校验、幂等完成 | 生产同构本机验收通过 | 5000/5000 真实 HTTP 直传成功，两阶段 complete 无长事务 | 生产网络的 TLS/CORS 已签字 |
+| Parser Gateway 与 Java 后端解析集成 | 生产同构本机验收通过 | 19 类、5000 份混合文档全部解析完成，OCR/ASR 真实加载 | 5000 份均为生产真实长文档或 GPU 容量已签字 |
+| 解析产物缓存、任务租约/心跳/失败重试 | 故障注入验收通过 | 双 Worker 中断后过期租约被接管，旧 Worker 写入受 fencing 阻断 | 跨机房灾备或 24 小时稳定性已签字 |
+| `QUEUED → READY` 摄取与索引 | 生产同构本机验收通过 | 5000/5000 `READY`、0 失败、10000 个对象、8625 个 chunk | 真实 Embedding 检索质量已签字 |
+| 完整 RAG 问答 | 不在本轮范围 | 上传与解析可交付下一阶段 | 日均 5000 次查询已经完成质量和容量验收 |
 
-因此，本轮的结论是“上传与多模态解析完成本机真实依赖技术验收”，不是“完整 RAG 生产验收”。
+因此，本轮的结论是“上传与多模态解析代码达到生产验收基线，并通过本机生产同构 5000 份全链路验收”，不是“完整 RAG 问答已生产验收”。生产集群上线仍需完成 TLS/CORS、真实文档分层抽样和持续稳定性门禁。
 
 ## 2. 运行依赖
 
 | 组件 | 用途 | 最小要求 |
 |---|---|---|
-| PostgreSQL | 文档、上传会话、任务、解析产物元数据与查询审计 | 已执行 Flyway V001–V010 |
+| PostgreSQL | 文档、上传会话、任务、解析产物元数据与查询审计 | 已执行 Flyway V001–V011 |
 | MinIO/S3 | 原始文件与版本化解析产物 | Bucket 已创建，应用账号可读写该 Bucket |
 | Parser Gateway | OCR、PPTX/Word 深度解析、音视频 ASR | `parser-gateway` 镜像 `/ready` 为 `UP` |
 | Elasticsearch 8.x | `rag_chunks_v1` 与向量/BM25 索引 | 向量维度与 Embedding 模型一致 |
@@ -65,6 +68,7 @@ MINIO_SECRET_KEY=...
 
 # 上传与解析必需
 RAG_DIRECT_UPLOAD_TTL_SECONDS=900
+RAG_DIRECT_UPLOAD_VERIFICATION_TIMEOUT_MS=900000
 RAG_UPLOAD_MAX_SIZE_BYTES=536870912
 RAG_MULTIMODAL_PARSER_ENABLED=true
 RAG_MULTIMODAL_PARSER_ENDPOINT=http://parser-gateway:8081/v1/parse
@@ -72,13 +76,15 @@ RAG_MULTIMODAL_PARSER_API_KEY=...
 RAG_MULTIMODAL_PARSER_TIMEOUT_MS=600000
 RAG_METRICS_TOKEN=...
 
-# 索引阶段必需（本轮验收不开启）
+# 索引阶段必需（5000 份完整摄取验收已开启）
 RAG_EMBEDDING_ENABLED=true
 RAG_EMBEDDING_ENDPOINT=https://model.example.internal/v1/embeddings
 RAG_EMBEDDING_API_KEY=...
 RAG_EMBEDDING_MODEL=bge-m3
 RAG_EMBEDDING_BATCH_SIZE=32
 RAG_EMBEDDING_TIMEOUT_MS=15000
+RAG_EMBEDDING_MAX_ATTEMPTS=3
+RAG_EMBEDDING_RETRY_BACKOFF_MS=200
 
 # ES（向量维度必须与 bge-m3/实际模型输出完全一致）
 RAG_ES_ENABLED=true
@@ -199,7 +205,7 @@ docker compose -f compose.production.yml exec parser-gateway id
 
 #### 6.1.2 后端迁移与启动
 
-1. 备份数据库，检查 `flyway_schema_history`，并确认本版本使用 V001–V010。
+1. 备份数据库，检查 `flyway_schema_history`，并确认本版本使用 V001–V011。
 2. 先以 `RAG_INGESTION_WORKER_ENABLED=false`、`RAG_QUERY_ENABLED=false` 启动后端，确认迁移和健康检查通过。
 
 **终端 A（保持运行）：**
@@ -261,9 +267,9 @@ curl -fsS "$API_BASE/api/v1/documents/jobs/$JOB_ID?kbId=$KB_ID" \
 
 另外必须在环境中负向复验：过期 URL、实际大小与声明不一致、PDF 扩展名伪装非 PDF 内容、重复幂等键、并发 complete。前三类不得创建文档或任务，并发 complete 最终只能存在一份文档和一个任务。
 
-> **状态警示：6.2、6.3 是后续 `QUEUED → READY` 完整索引链路的验收步骤，本轮未执行、不参与“上传/解析”签字。**
+> **当前状态：6.2、6.3 已被 `acceptance/runner` 自动化覆盖；以下手工步骤保留给生产环境单文档复验。**
 
-### 6.2 后续完整索引链路：Markdown 验收（未执行）
+### 6.2 Markdown 完整索引链路验收（已执行）
 
 上传一份包含标题、代码围栏、类名和配置项的脱敏 Markdown。
 
@@ -283,62 +289,62 @@ curl -H "Authorization: ApiKey $RAG_ES_API_KEY" \
 
 预期至少有一个 chunk，且每条包含正确的 `org_id`、`kb_id`、`document_id`、`content_vector`、定位 metadata 和模型版本。
 
-### 6.3 后续完整索引链路：PDF 验收（未执行）
+### 6.3 PDF 验收（已纳入 5000 份全量验收）
 
 上传一份文本型 PDF，确认 `READY` 后检查 chunk 中至少有 `page_no`。再上传一份扫描 PDF：它必须经 OCR 返回正文，并在解析 metadata 中标记 `ocr=true`、`ocrPageCount>=1`；OCR 无文本时必须明确失败，不能静默标记 `READY`。
 
-### 6.4 上传与解析技术验收结果（2026-07-13）
+### 6.4 上传与解析生产同构验收结果（2026-07-13）
 
-本轮在本机 Docker 真实依赖上完成，不是 Mock 或接口占位。这是技术验收，不等于生产集群签字。
+本轮在本机 Docker 真实 PostgreSQL、Redis、MinIO、Elasticsearch、双 Worker、OCR 与 ASR 网关上完成。Embedding 仅使用带故障注入的协议替身，因此不包含检索质量签字。
 
 | 环境项 | 值 |
 |---|---|
-| 机器 | Apple M1 Pro，10 CPU，16 GiB RAM，arm64 |
-| 容器引擎 | Docker 28.1.1 |
-| Parser 镜像 | `sha256:c262f36185744b2e749b0c56666d6cf14970af7f084a608edb7948fcdf8d9f6a` |
-| 解析压测并发 | 4 |
-| MinIO 压测并发 | 8 |
-| 样本 | DOCX 36,829 bytes；MinIO 对象 4,096 bytes；OCR/ASR 为单功能脱敏样本 |
+| 执行平台 | Docker Linux arm64（Apple Silicon 宿主机） |
+| 上传并发 | 24 |
+| 摄取 Worker | 2 个实例，每实例并发 2 |
+| Parser | OCR 与 ASR 均在 `/ready` 返回已加载 |
+| 数据迁移 | Flyway V011 |
+| 样本 | 19 类共 5000 份合成脱敏文档；包含真实 OOXML、扫描 PDF、图片、语音和视频容器 |
 
 | 验收项 | 数据集/操作 | 结果 | 性能证据 |
 |---|---:|---:|---:|
-| MinIO 对象生命周期 | 5000 个预签名 PUT + stat + delete | 5000/5000，成功率 100% | 5.184s，964.463 次/s，P95 12ms，P99 16ms |
-| Parser Gateway 调度与 DOCX 解析 | 5000 份含标题、正文、表格的 DOCX | 5000/5000，成功率 100% | 35.933s，139.147 份/s，P95 49.397ms，P99 61.017ms |
-| 扫描 PDF OCR | 图片型 PDF | 识别 `RAG PRODUCTION OCR ACCEPTANCE 2026` | metadata 含 `ocr=true` |
-| PPTX | 标题、正文 | 页码、标题路径和正文返回正确 | 真实容器通过 |
-| Word | 标题、段落、表格 | 结构化 section 返回正确 | 真实容器通过 |
-| 音频 ASR | WAV 英文语音 | 文本完整，带字幕时间戳 | `00:00:00.000 --> 00:00:04.760` |
-| Java → Parser Gateway | HTTP/1.1 二进制流 | 真实扫描 PDF 解析通过 | 集成测试通过 |
+| 真实 HTTP 直传 | `initiate → presigned PUT → complete` | 5000/5000，0 失败 | 51.718s，96.677 份/s；P95 585.752ms，P99 882.265ms |
+| 完整摄取 | 上传后至解析、切块、Embedding 协议和 ES | 5000/5000 `READY`，0 失败 | 上传后 1118.787s，总计 1172.246s |
+| 格式与内容 | Markdown、代码、JSON、DOCX/PPTX/PDF、图片、字幕、音视频 | 19 类代表样本均恢复出预期正文 | DOCX/PPTX/扫描 PDF/图片含 OCR 计数；音视频含时间戳 |
+| 完整性与产物 | PostgreSQL + MinIO | 5000 个唯一 SHA-256、5000 个解析时间、5000 个产物路径 | MinIO 共 10000 个对象 |
+| 索引写入 | Elasticsearch | 8625 个 chunk | 每份文档至少一个 chunk |
+| Embedding 瞬时故障 | 前两次请求强制返回 503 | 后续 200，最终 0 失败 | 仅 429、5xx 与连接异常有界重试 |
+| Worker 故障转移 | 强制终止处理扫描 PDF 的 worker-a | worker-b 恢复 2 个过期租约，两任务 `attempt=2` 且 `READY` | 旧租约由 attempt + owner + expiry fencing |
+| 资源与进程 | 验收结束快照 | 无 OOM，无非预期重启 | Parser 约 1.023GiB；ES 约 1.029GiB；MinIO 约 593.3MiB |
 
-准确结论：系统已具备 5000+ 文档的对象存储与解析队列工程基础，已证明 5000 份 DOCX 网关调度能力和单样本多格式功能。当前没有证明“5000 份多格式长文档已全部通过生产容量测试”。
+准确结论：系统已证明 5000 份混合多模态文档通过真实上传入口并全部进入 `READY`，也证明单 Worker 中断与模型瞬时 503 不造成最终失败。该结果足以签收上传与解析模块的生产代码基线；由于样本为小型脱敏夹具，不能替代生产真实长文档分层容量测试。
 
-生产签字前还需完成：
+生产集群发布门禁仍需完成：
 
-- 经后端 `/uploads → PUT → complete → 解析产物` 的多格式混合数据集容量测试；
-- 仅含图片文字的 PPTX OCR 样本、MP4/MOV/MKV 真实视频容器与编解码兼容测试；
-- 按真实页数、分辨率、音视频时长与生产 CPU/GPU 分层的 OCR/ASR 容量测试；
-- 生产同构环境的 TLS/CORS、多 Worker 故障接管、日志脱敏、告警与 24 小时稳定性测试。
+- 从公司真实文档中脱敏抽样，按页数、分辨率、文件大小与音视频时长分层复验；
+- 在目标网络验证 TLS、浏览器 CORS、对象存储出口与密钥轮换；
+- 接入生产 Prometheus/日志平台并验证告警路由；
+- 在目标 CPU/GPU 配额上执行至少 24 小时稳定性与积压恢复测试。
 
 可复验命令：
 
 ```bash
-# 真实 MinIO：5000 次 PUT/stat/delete
-cd backend
-JAVA_HOME=$(/usr/libexec/java_home -v 17) \
-RAG_MINIO_TEST_ENDPOINT=http://127.0.0.1:19000 \
-RAG_MINIO_TEST_ACCESS_KEY="$RAG_MINIO_TEST_ACCESS_KEY" \
-RAG_MINIO_TEST_SECRET_KEY="$RAG_MINIO_TEST_SECRET_KEY" \
-RAG_MINIO_LOAD_TEST_COUNT=5000 RAG_MINIO_LOAD_TEST_CONCURRENCY=8 \
-mvn -q -Dtest=MinioObjectStorageIT test
-
-# Parser Gateway：5000 份 DOCX
-cd ../parser-gateway
-python3 scripts/load_test.py --endpoint http://127.0.0.1:8081/v1/parse \
-  --api-key "$PARSER_API_KEY" --file /absolute/path/to/load-sample.docx \
-  --total 5000 --concurrency 4
+cd acceptance
+docker volume create rag-parser-model-cache
+export JAVA_HOME=$(/usr/libexec/java_home -v 17)
+export PATH="$JAVA_HOME/bin:$PATH"
+mvn -f ../backend/pom.xml test package
+docker compose -f compose.yml config -q
+docker compose -f compose.yml --profile acceptance build
+docker compose -f compose.yml --profile acceptance down -v --remove-orphans
+ACCEPTANCE_MODE=full ACCEPTANCE_DOCUMENT_COUNT=5000 ACCEPTANCE_UPLOAD_CONCURRENCY=24 \
+  docker compose -f compose.yml --profile acceptance up \
+  --abort-on-container-exit --exit-code-from runner runner
 ```
 
-> **状态警示：6.5–6.7 依赖真实 ES、Embedding 和 Generation，均是下一阶段验收方案，本轮未执行。**
+原始机器可读结果见 `acceptance/reports/full-5000-report.json`，故障注入结果见 `acceptance/reports/failover-evidence.json`，汇总结论见 `docs/文档上传与多模态解析生产验收报告.md`。
+
+> **状态警示：真实 Elasticsearch 写入已执行；Embedding 只完成协议与容错验收，Generation 和问答质量仍是下一阶段。**
 
 ### 6.5 后续完整 RAG：删除验收（未执行）
 
@@ -425,7 +431,7 @@ Prometheus 需使用支持自定义 HTTP Header 的密钥注入方式；若所�
 | ES 不可用 | 暂停 Worker 避免重复失败；ES 恢复后先筛选 `status='FAILED'` 且 `error_message` 为索引阶段的任务，调用管理员 retry，再开启 Worker |
 | ES mapping 配错 | 新建版本索引（如 `rag_chunks_v2`）并修改 `RAG_ES_INDEX_NAME`，完成重建与评测后再切换查询 |
 | 删除补偿堆积 | 查 `document.status='DELETING'` 与日志；修复 ES/MinIO 后保持 cleanup worker 开启直到清空 |
-| 回退应用版本 | 关闭 Worker；Flyway V006–V010 为向前兼容的表/字段/索引增量变更，不在事故中直接删列回滚。旧应用必须已验证可忽略新列；否则不允许回退，只能向前修复 |
+| 回退应用版本 | 关闭 Worker；Flyway V006–V011 为向前兼容的表/字段/索引增量变更，不在事故中直接删列回滚。旧应用必须已验证可忽略新列；否则不允许回退，只能向前修复 |
 
 ## 8. 自动化验证
 
@@ -449,4 +455,4 @@ mvn -q -Dtest=MinioObjectStorageIT test
 
 当前覆盖：上传权限和白名单、预签名直传幂等与完成回调、字节数/魔数/SHA-256 完整性、真实 MinIO 生命周期与容量、任务原子领取/租约/心跳、失败与手动重试、解析产物版本缓存、删除清理、Parser/Chunker、真实 OCR/ASR 网关联调、Prometheus 密钥、模型客户端分批/超时、ES mapping/Bulk/三重过滤、RRF 与两类模型降级、五类 SSE 载荷、引用构造、空召回拒答、审计字段与现有认证/租户回归。
 
-本轮可以宣告“文档上传与多模态解析完成本机真实依赖技术验收”；生产同构环境签字和“完整 RAG 问答链路”验收仍需按本手册的未验收清单继续执行。
+本轮可以宣告“文档上传与多模态解析达到生产代码基线，并完成本机生产同构 5000 份全链路验收”；目标生产集群发布门禁和“完整 RAG 问答链路”验收仍需按本手册的未验收清单执行。

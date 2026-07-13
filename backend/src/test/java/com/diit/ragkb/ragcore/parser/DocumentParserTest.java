@@ -7,6 +7,8 @@ import com.diit.ragkb.ragcore.parser.MultimodalDocumentParser;
 import com.diit.ragkb.ragcore.parser.NeedsMultimodalParsingException;
 import com.diit.ragkb.ragcore.parser.impl.*;
 import org.apache.poi.xslf.usermodel.XMLSlideShow;
+import org.apache.poi.xwpf.usermodel.XWPFDocument;
+import org.apache.poi.xwpf.usermodel.Document;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.DisplayName;
@@ -15,6 +17,8 @@ import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.awt.image.BufferedImage;
+import javax.imageio.ImageIO;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
@@ -404,6 +408,28 @@ class DocumentParserTest {
         assertTrue(parser.supports("application/vnd.openxmlformats-officedocument.wordprocessingml.document", "doc.docx"));
         assertFalse(parser.supports(null, "report.doc"));
         assertFalse(parser.supports(null, "data.json"));
+    }
+
+    @Test
+    @DisplayName("包含内嵌图片的 DOCX 必须转交多模态网关，不能静默漏掉截图文字")
+    void docxWithImageRequiresMultimodalParsing() throws IOException {
+        byte[] bytes;
+        try (XWPFDocument document = new XWPFDocument();
+             ByteArrayOutputStream image = new ByteArrayOutputStream();
+             ByteArrayOutputStream output = new ByteArrayOutputStream()) {
+            ImageIO.write(new BufferedImage(10, 10, BufferedImage.TYPE_INT_RGB), "png", image);
+            document.createParagraph().createRun().addPicture(
+                    new ByteArrayInputStream(image.toByteArray()), Document.PICTURE_TYPE_PNG,
+                    "screenshot.png", 100_000, 100_000);
+            document.write(output);
+            bytes = output.toByteArray();
+        } catch (org.apache.poi.openxml4j.exceptions.InvalidFormatException ex) {
+            throw new IOException(ex);
+        }
+
+        assertThrows(NeedsMultimodalParsingException.class,
+                () -> new DocxParser().parse(inputOfBytes("screenshots.docx",
+                        "application/vnd.openxmlformats-officedocument.wordprocessingml.document", bytes)));
     }
 
     // ── PdfParser ──

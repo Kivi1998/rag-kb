@@ -14,12 +14,16 @@ import org.springframework.context.annotation.Import;
 import org.springframework.context.annotation.Primary;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.io.*;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.hamcrest.Matchers.containsString;
@@ -109,7 +113,47 @@ class DocumentDirectUploadTest {
         assertEquals("application/pdf", document.getContentType());
         assertNotNull(document.getContentSha256());
         assertEquals(64, document.getContentSha256().length());
+        assertFalse(storage.transactionActiveDuringOpen,
+                "对象全量读取不得长时间占用数据库事务");
         assertEquals(UploadSessionStatus.COMPLETED, sessionRepository.findById(java.util.UUID.fromString(sessionId)).orElseThrow().getStatus());
+    }
+
+    @Test
+    @DisplayName("并发 complete 使用校验 token 串行化且只创建一份文档")
+    void concurrentCompleteOnlyCreatesOneDocument() throws Exception {
+        String body = "{\"kbId\":\"" + kb.getId() + "\",\"fileName\":\"concurrent.pdf\",\"sizeBytes\":8}";
+        String response = mockMvc.perform(post("/api/v1/documents/uploads")
+                        .header("Authorization", "Bearer " + token)
+                        .header("X-Org-Id", org.getId().toString())
+                        .header("Idempotency-Key", "concurrent-complete")
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isCreated()).andReturn().getResponse().getContentAsString();
+        String sessionId = response.replaceAll(".*\\\"sessionId\\\":\\\"([^\\\"]+)\\\".*", "$1");
+        storage.finishLastUpload("%PDF-123".getBytes(), "application/pdf");
+        storage.blockReads();
+
+        CompletableFuture<Integer> first = CompletableFuture.supplyAsync(() -> {
+            try {
+                return mockMvc.perform(post("/api/v1/documents/uploads/{sessionId}/complete", sessionId)
+                                .header("Authorization", "Bearer " + token)
+                                .header("X-Org-Id", org.getId().toString()))
+                        .andReturn().getResponse().getStatus();
+            } catch (Exception ex) {
+                throw new RuntimeException(ex);
+            }
+        });
+        assertTrue(storage.awaitReadStarted(), "第一个 complete 未进入对象校验");
+
+        mockMvc.perform(post("/api/v1/documents/uploads/{sessionId}/complete", sessionId)
+                        .header("Authorization", "Bearer " + token)
+                        .header("X-Org-Id", org.getId().toString()))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.message").value(containsString("正在校验")));
+
+        storage.releaseReads();
+        assertEquals(200, first.get(10, TimeUnit.SECONDS));
+        assertEquals(1, documentRepository.count());
+        assertEquals(1, jobRepository.count());
     }
 
     @Test
@@ -203,6 +247,30 @@ class DocumentDirectUploadTest {
         assertFalse(storage.contains(session.getObjectStoragePath()));
     }
 
+    @Test
+    @DisplayName("校验 Worker 崩溃后超时 VERIFYING 会话可恢复为 PENDING")
+    void cleanupRecoversStaleVerificationLease() throws Exception {
+        String body = "{\"kbId\":\"" + kb.getId() + "\",\"fileName\":\"recover.pdf\",\"sizeBytes\":8}";
+        mockMvc.perform(post("/api/v1/documents/uploads")
+                        .header("Authorization", "Bearer " + token)
+                        .header("X-Org-Id", org.getId().toString())
+                        .header("Idempotency-Key", "recover-verification")
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isCreated());
+        DocumentUploadSession session = sessionRepository.findAll().get(0);
+        session.setStatus(UploadSessionStatus.VERIFYING);
+        session.setVerificationToken(java.util.UUID.randomUUID());
+        session.setVerificationStartedAt(Instant.now().minus(Duration.ofMinutes(20)));
+        sessionRepository.saveAndFlush(session);
+
+        directUploadService.cleanupExpiredSessions();
+
+        DocumentUploadSession recovered = sessionRepository.findById(session.getId()).orElseThrow();
+        assertEquals(UploadSessionStatus.PENDING, recovered.getStatus());
+        assertNull(recovered.getVerificationToken());
+        assertNull(recovered.getVerificationStartedAt());
+    }
+
     private void clean() {
         sessionRepository.deleteAll();
         jobRepository.deleteAll();
@@ -227,12 +295,25 @@ class DocumentDirectUploadTest {
         private final Map<String, byte[]> objects = new ConcurrentHashMap<>();
         private String lastKey;
         private String lastContentType;
+        private volatile boolean transactionActiveDuringOpen;
+        private volatile CountDownLatch readStarted = new CountDownLatch(0);
+        private volatile CountDownLatch releaseRead = new CountDownLatch(0);
 
         @Override public void put(String objectKey, InputStream input, long sizeBytes, String contentType) throws IOException {
             objects.put(objectKey, input.readAllBytes());
             lastContentType = contentType;
         }
-        @Override public InputStream open(String objectKey) { return new ByteArrayInputStream(objects.get(objectKey)); }
+        @Override public InputStream open(String objectKey) {
+            transactionActiveDuringOpen = TransactionSynchronizationManager.isActualTransactionActive();
+            readStarted.countDown();
+            try {
+                if (!releaseRead.await(10, TimeUnit.SECONDS)) throw new IllegalStateException("等待释放校验超时");
+            } catch (InterruptedException ex) {
+                Thread.currentThread().interrupt();
+                throw new IllegalStateException("校验线程被中断", ex);
+            }
+            return new ByteArrayInputStream(objects.get(objectKey));
+        }
         @Override public void delete(String objectKey) { objects.remove(objectKey); }
         @Override public boolean supportsDirectUpload() { return true; }
         @Override public PresignedUpload presignPut(String objectKey, String contentType, Duration ttl) {
@@ -246,7 +327,16 @@ class DocumentDirectUploadTest {
             return new StoredObject(value.length, lastContentType, "test-etag");
         }
         void finishLastUpload(byte[] value, String contentType) { objects.put(lastKey, value); lastContentType = contentType; }
+        void blockReads() { readStarted = new CountDownLatch(1); releaseRead = new CountDownLatch(1); }
+        boolean awaitReadStarted() throws InterruptedException { return readStarted.await(10, TimeUnit.SECONDS); }
+        void releaseReads() { releaseRead.countDown(); }
         boolean contains(String key) { return objects.containsKey(key); }
-        void clear() { objects.clear(); lastKey = null; }
+        void clear() {
+            objects.clear();
+            lastKey = null;
+            transactionActiveDuringOpen = false;
+            readStarted = new CountDownLatch(0);
+            releaseRead = new CountDownLatch(0);
+        }
     }
 }

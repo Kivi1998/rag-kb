@@ -15,6 +15,7 @@ import java.time.Instant;
 import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
+import java.util.Objects;
 import java.util.UUID;
 
 /**
@@ -54,7 +55,8 @@ public class IngestionJobLifecycleService {
                 .orElseThrow(() -> new ResourceNotFoundException("摄取任务不存在"));
         KnowledgeDocument document = job.getDocument();
         updateDocumentStatus(document, IngestionStatus.PARSING);
-        return Optional.of(new IngestionTask(job.getId(), document.getId(), job.getOrg().getId(),
+        return Optional.of(new IngestionTask(job.getId(), job.getAttempt(), job.getLeaseOwner(),
+                document.getId(), job.getOrg().getId(),
                 job.getKnowledgeBase().getId(), document.getName(), document.getContentType(),
                 document.getObjectStoragePath(), document.getParseArtifactPath(), document.getParserVersion()));
     }
@@ -63,6 +65,18 @@ public class IngestionJobLifecycleService {
     @Transactional
     public void recordParsedArtifact(UUID jobId, String artifactPath, String parserName, String parserVersion) {
         KnowledgeDocument document = requireJob(jobId).getDocument();
+        recordParsedArtifact(document, artifactPath, parserName, parserVersion);
+    }
+
+    /** 只允许当前租约的 Worker 记录解析产物。 */
+    @Transactional
+    public void recordParsedArtifact(IngestionTask task, String artifactPath, String parserName, String parserVersion) {
+        KnowledgeDocument document = requireOwnedJob(task).getDocument();
+        recordParsedArtifact(document, artifactPath, parserName, parserVersion);
+    }
+
+    private void recordParsedArtifact(KnowledgeDocument document, String artifactPath,
+                                      String parserName, String parserVersion) {
         document.setParseArtifactPath(artifactPath);
         document.setParserName(parserName);
         document.setParserVersion(parserVersion);
@@ -71,9 +85,10 @@ public class IngestionJobLifecycleService {
 
     /** 活跃 Worker 定期续租；返回 false 表示任务已被删除、取消或接管。 */
     @Transactional
-    public boolean heartbeat(UUID jobId, String workerId, Duration leaseDuration) {
+    public boolean heartbeat(IngestionTask task, Duration leaseDuration) {
         Instant now = Instant.now();
-        return jobRepository.heartbeat(jobId, workerId, ACTIVE_STATUSES, now, now.plus(leaseDuration)) == 1;
+        return jobRepository.heartbeat(task.jobId(), task.leaseOwner(), task.attempt(),
+                ACTIVE_STATUSES, now, now.plus(leaseDuration)) == 1;
     }
 
     /** 仅回收明确已过期的任务，超过最大尝试次数的任务转 FAILED，避免无限重试。 */
@@ -103,6 +118,16 @@ public class IngestionJobLifecycleService {
     @Transactional
     public IngestionJob advance(UUID jobId, IngestionStatus nextStatus) {
         IngestionJob job = requireJob(jobId);
+        return advance(job, nextStatus);
+    }
+
+    /** 带 attempt + leaseOwner 的 fencing，阻止租约丢失后的旧 Worker 继续推进状态。 */
+    @Transactional
+    public IngestionJob advance(IngestionTask task, IngestionStatus nextStatus) {
+        return advance(requireOwnedJob(task), nextStatus);
+    }
+
+    private IngestionJob advance(IngestionJob job, IngestionStatus nextStatus) {
         IngestionStateMachine.requireTransition(job.getStatus(), nextStatus);
         job.setStatus(nextStatus);
         if (nextStatus == IngestionStatus.READY) {
@@ -117,7 +142,16 @@ public class IngestionJobLifecycleService {
     /** 任意处理中阶段失败均进入 FAILED；已超最大尝试次数的任务即为死信状态。 */
     @Transactional
     public IngestionJob fail(UUID jobId, Throwable cause) {
-        IngestionJob job = requireJob(jobId);
+        return fail(requireJob(jobId), cause);
+    }
+
+    /** 只允许当前租约将自己的任务置为失败。 */
+    @Transactional
+    public IngestionJob fail(IngestionTask task, Throwable cause) {
+        return fail(requireOwnedJob(task), cause);
+    }
+
+    private IngestionJob fail(IngestionJob job, Throwable cause) {
         // 删除请求具有更高优先级。Worker 已经拿到的旧快照不能把任务重新写回 FAILED。
         if (job.getStatus() == IngestionStatus.DELETING) {
             return job;
@@ -166,6 +200,18 @@ public class IngestionJobLifecycleService {
     private IngestionJob requireJob(UUID jobId) {
         return jobRepository.findById(jobId)
                 .orElseThrow(() -> new ResourceNotFoundException("摄取任务不存在"));
+    }
+
+    private IngestionJob requireOwnedJob(IngestionTask task) {
+        IngestionJob job = jobRepository.findByIdForUpdate(task.jobId())
+                .orElseThrow(() -> new ResourceNotFoundException("摄取任务不存在"));
+        if (job.getAttempt() != task.attempt()
+                || !Objects.equals(job.getLeaseOwner(), task.leaseOwner())
+                || job.getLeaseExpiresAt() == null
+                || !job.getLeaseExpiresAt().isAfter(Instant.now())) {
+            throw new StaleIngestionLeaseException("摄取任务租约已被新 Worker 接管: jobId=" + task.jobId());
+        }
+        return job;
     }
 
     private void updateDocumentStatus(KnowledgeDocument document, IngestionStatus status) {

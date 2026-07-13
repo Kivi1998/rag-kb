@@ -53,6 +53,9 @@ public class DocumentDirectUploadService {
     @Value("${rag.upload.direct.ttl-seconds:900}")
     private long ttlSeconds;
 
+    @Value("${rag.upload.direct.verification-timeout-ms:900000}")
+    private long verificationTimeoutMs;
+
     @Transactional
     public UploadSessionView initiate(UUID kbId, String fileName, long sizeBytes, String idempotencyKey) {
         requireDocumentManager();
@@ -88,33 +91,94 @@ public class DocumentDirectUploadService {
         return withPresignedUrl(session);
     }
 
-    @Transactional
     public CompletedUploadView complete(UUID sessionId) {
         requireDocumentManager();
-        DocumentUploadSession session = sessionRepository.findForUpdate(sessionId, currentOrgId())
+        UUID orgId = currentOrgId();
+        validateVerificationTimeout();
+        VerificationStart start = transaction().execute(status -> beginVerification(sessionId, orgId));
+        if (start == null) {
+            throw new IllegalStateException("无法创建上传校验事务");
+        }
+        if (start.completed() != null) {
+            return start.completed();
+        }
+
+        VerifiedObject verified;
+        try {
+            verified = verifyUploadedObject(start.snapshot());
+        } catch (RuntimeException ex) {
+            resetVerification(start.snapshot(), ex);
+            throw ex;
+        }
+
+        CompletedUploadView completed = transaction().execute(status -> finalizeVerification(start.snapshot(), verified));
+        if (completed == null) {
+            throw new IllegalStateException("无法提交上传校验事务");
+        }
+        return completed;
+    }
+
+    private VerificationStart beginVerification(UUID sessionId, UUID orgId) {
+        DocumentUploadSession session = sessionRepository.findForUpdate(sessionId, orgId)
                 .orElseThrow(() -> new ResourceNotFoundException("上传会话不存在"));
         if (session.getStatus() == UploadSessionStatus.COMPLETED) {
-            return completedView(session);
+            return new VerificationStart(null, completedView(session));
+        }
+        if (session.getStatus() == UploadSessionStatus.VERIFYING) {
+            throw new BusinessConflictException("上传对象正在校验，请稍后重试");
         }
         if (session.getStatus() != UploadSessionStatus.PENDING) {
             throw new BusinessConflictException("上传会话已失效");
         }
         if (!session.getExpiresAt().isAfter(Instant.now())) {
-            expireSession(session);
             throw new BusinessConflictException("上传会话已过期，请重新发起上传");
         }
 
+        UUID token = UUID.randomUUID();
+        session.setStatus(UploadSessionStatus.VERIFYING);
+        session.setVerificationToken(token);
+        session.setVerificationStartedAt(Instant.now());
+        return new VerificationStart(new VerificationSnapshot(session.getId(), token, session.getFileName(),
+                session.getObjectStoragePath(), session.getExpectedSizeBytes()), null);
+    }
+
+    private VerifiedObject verifyUploadedObject(VerificationSnapshot snapshot) {
         ObjectStorage.StoredObject object;
         try {
-            object = objectStorage.stat(session.getObjectStoragePath());
+            object = objectStorage.stat(snapshot.objectStoragePath());
         } catch (IOException ex) {
             throw new BusinessConflictException("尚未检测到已上传对象，请完成 PUT 后重试");
         }
-        if (object.sizeBytes() != session.getExpectedSizeBytes()) {
+        if (object.sizeBytes() != snapshot.expectedSizeBytes()) {
             throw new BusinessConflictException("对象大小与上传会话声明不一致");
         }
 
-        VerifiedObject verifiedObject = verifyUploadedObject(session);
+        try (BufferedInputStream input = new BufferedInputStream(
+                objectStorage.open(snapshot.objectStoragePath()))) {
+            input.mark(CONTENT_SNIFF_BYTES);
+            byte[] prefix = input.readNBytes(CONTENT_SNIFF_BYTES);
+            input.reset();
+            String detectedContentType = UploadContentInspector.inspect(snapshot.fileName(), prefix);
+
+            MessageDigest digest = sha256();
+            try (DigestInputStream digestInput = new DigestInputStream(input, digest)) {
+                digestInput.transferTo(OutputStream.nullOutputStream());
+            }
+            return new VerifiedObject(detectedContentType, HexFormat.of().formatHex(digest.digest()), object.sizeBytes());
+        } catch (IllegalArgumentException ex) {
+            throw ex;
+        } catch (IOException ex) {
+            throw new IllegalStateException("校验直传对象失败，请稍后重试", ex);
+        }
+    }
+
+    private CompletedUploadView finalizeVerification(VerificationSnapshot snapshot, VerifiedObject verifiedObject) {
+        DocumentUploadSession session = sessionRepository.findForUpdate(snapshot.sessionId(), currentOrgId())
+                .orElseThrow(() -> new ResourceNotFoundException("上传会话不存在"));
+        if (session.getStatus() == UploadSessionStatus.COMPLETED) {
+            return completedView(session);
+        }
+        requireVerificationToken(session, snapshot.verificationToken());
 
         KnowledgeDocument document = new KnowledgeDocument();
         document.setKnowledgeBase(session.getKnowledgeBase());
@@ -122,7 +186,7 @@ public class DocumentDirectUploadService {
         document.setCreatedBy(session.getCreatedBy());
         document.setName(session.getFileName());
         document.setContentType(verifiedObject.contentType());
-        document.setSizeBytes(object.sizeBytes());
+        document.setSizeBytes(verifiedObject.sizeBytes());
         document.setObjectStoragePath(session.getObjectStoragePath());
         document.setContentSha256(verifiedObject.sha256());
         document.setStatus(IngestionStatus.QUEUED);
@@ -140,31 +204,24 @@ public class DocumentDirectUploadService {
         session.setDocument(document);
         session.setStatus(UploadSessionStatus.COMPLETED);
         session.setCompletedAt(Instant.now());
+        clearVerification(session);
         metrics.uploadCompleted();
         return new CompletedUploadView(session.getId(), document.getId(), job.getId(), IngestionStatus.QUEUED);
     }
 
-    /**
-     * 直传完成后由服务端重新读取对象：文件魔数防止扩展名伪装，SHA-256 用于后续去重和完整性追踪。
-     * 该校验在会话行锁内执行，避免并发 complete 创建重复文档。
-     */
-    private VerifiedObject verifyUploadedObject(DocumentUploadSession session) {
-        try (BufferedInputStream input = new BufferedInputStream(
-                objectStorage.open(session.getObjectStoragePath()))) {
-            input.mark(CONTENT_SNIFF_BYTES);
-            byte[] prefix = input.readNBytes(CONTENT_SNIFF_BYTES);
-            input.reset();
-            String detectedContentType = UploadContentInspector.inspect(session.getFileName(), prefix);
-
-            MessageDigest digest = sha256();
-            try (DigestInputStream digestInput = new DigestInputStream(input, digest)) {
-                digestInput.transferTo(OutputStream.nullOutputStream());
-            }
-            return new VerifiedObject(detectedContentType, HexFormat.of().formatHex(digest.digest()));
-        } catch (IllegalArgumentException ex) {
-            throw ex;
-        } catch (IOException ex) {
-            throw new IllegalStateException("校验直传对象失败，请稍后重试", ex);
+    private void resetVerification(VerificationSnapshot snapshot, RuntimeException original) {
+        try {
+            transaction().executeWithoutResult(status -> {
+                DocumentUploadSession session = sessionRepository.findForUpdate(snapshot.sessionId(), currentOrgId())
+                        .orElse(null);
+                if (session != null && session.getStatus() == UploadSessionStatus.VERIFYING
+                        && snapshot.verificationToken().equals(session.getVerificationToken())) {
+                    session.setStatus(UploadSessionStatus.PENDING);
+                    clearVerification(session);
+                }
+            });
+        } catch (RuntimeException resetError) {
+            original.addSuppressed(resetError);
         }
     }
 
@@ -178,6 +235,7 @@ public class DocumentDirectUploadService {
 
     @Scheduled(fixedDelayString = "${rag.upload.direct.cleanup-interval-ms:60000}")
     public void cleanupExpiredSessions() {
+        recoverStaleVerifications();
         while (true) {
             var candidates = sessionRepository.findExpiredSessionRefs(
                     UploadSessionStatus.PENDING, Instant.now(), PageRequest.of(0, 100));
@@ -197,6 +255,30 @@ public class DocumentDirectUploadService {
         }
     }
 
+    private void recoverStaleVerifications() {
+        Instant cutoff = Instant.now().minusMillis(verificationTimeoutMs);
+        while (true) {
+            var candidates = sessionRepository.findStaleVerificationRefs(
+                    UploadSessionStatus.VERIFYING, cutoff, PageRequest.of(0, 100));
+            if (candidates.isEmpty()) return;
+            for (DocumentUploadSessionRepository.ExpiredSessionRef candidate : candidates) {
+                transaction().executeWithoutResult(ignored -> {
+                    DocumentUploadSession session = sessionRepository.findForUpdate(
+                            candidate.getSessionId(), candidate.getOrgId()).orElse(null);
+                    if (session == null || session.getStatus() != UploadSessionStatus.VERIFYING
+                            || session.getVerificationStartedAt() == null
+                            || !session.getVerificationStartedAt().isBefore(cutoff)) return;
+                    if (session.getExpiresAt().isAfter(Instant.now())) {
+                        session.setStatus(UploadSessionStatus.PENDING);
+                        clearVerification(session);
+                    } else {
+                        expireSession(session);
+                    }
+                });
+            }
+        }
+    }
+
     public void cleanupExpiredSession(UUID sessionId, UUID orgId) {
         DocumentUploadSession session = sessionRepository.findForUpdate(sessionId, orgId).orElse(null);
         if (session == null || session.getStatus() != UploadSessionStatus.PENDING
@@ -211,12 +293,17 @@ public class DocumentDirectUploadService {
             throw new IllegalStateException("清理过期上传对象失败", ex);
         }
         session.setStatus(UploadSessionStatus.EXPIRED);
+        clearVerification(session);
         metrics.uploadExpired();
     }
 
     private UploadSessionView existingView(DocumentUploadSession session) {
         if (session.getStatus() == UploadSessionStatus.PENDING && session.getExpiresAt().isAfter(Instant.now())) {
             return withPresignedUrl(session);
+        }
+        if (session.getStatus() == UploadSessionStatus.VERIFYING) {
+            return new UploadSessionView(session.getId(), session.getStatus(), null, null, null,
+                    session.getExpiresAt(), null);
         }
         if (session.getStatus() == UploadSessionStatus.PENDING || session.getStatus() == UploadSessionStatus.EXPIRED) {
             throw new BusinessConflictException("该幂等键对应的上传会话已过期，请使用新的 Idempotency-Key");
@@ -265,6 +352,28 @@ public class DocumentDirectUploadService {
         }
     }
 
+    private void validateVerificationTimeout() {
+        if (verificationTimeoutMs < 1_000 || verificationTimeoutMs > 3_600_000) {
+            throw new IllegalStateException("rag.upload.direct.verification-timeout-ms 必须在 1000-3600000 之间");
+        }
+    }
+
+    private void requireVerificationToken(DocumentUploadSession session, UUID expectedToken) {
+        if (session.getStatus() != UploadSessionStatus.VERIFYING
+                || !expectedToken.equals(session.getVerificationToken())) {
+            throw new BusinessConflictException("上传校验权已过期，请重试 complete");
+        }
+    }
+
+    private void clearVerification(DocumentUploadSession session) {
+        session.setVerificationToken(null);
+        session.setVerificationStartedAt(null);
+    }
+
+    private TransactionTemplate transaction() {
+        return new TransactionTemplate(transactionManager);
+    }
+
     private KnowledgeBase findKnowledgeBase(UUID kbId) {
         return kbRepository.findByIdAndOrgId(kbId, currentOrgId())
                 .orElseThrow(() -> new ResourceNotFoundException("知识库不存在"));
@@ -298,5 +407,10 @@ public class DocumentDirectUploadService {
 
     public record CompletedUploadView(UUID sessionId, UUID documentId, UUID jobId, IngestionStatus status) { }
 
-    private record VerifiedObject(String contentType, String sha256) { }
+    private record VerificationSnapshot(UUID sessionId, UUID verificationToken, String fileName,
+                                        String objectStoragePath, long expectedSizeBytes) { }
+
+    private record VerificationStart(VerificationSnapshot snapshot, CompletedUploadView completed) { }
+
+    private record VerifiedObject(String contentType, String sha256, long sizeBytes) { }
 }

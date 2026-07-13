@@ -52,7 +52,7 @@ class ParsedArtifactStoreTest {
     private IngestionTask task(String artifactPath, String version) {
         UUID documentId = UUID.fromString("11111111-1111-1111-1111-111111111111");
         return new IngestionTask(
-                UUID.fromString("22222222-2222-2222-2222-222222222222"), documentId,
+                UUID.fromString("22222222-2222-2222-2222-222222222222"), 1, "worker-test", documentId,
                 UUID.fromString("33333333-3333-3333-3333-333333333333"),
                 UUID.fromString("44444444-4444-4444-4444-444444444444"),
                 "test.pdf", "application/pdf", "source/test.pdf", artifactPath, version);

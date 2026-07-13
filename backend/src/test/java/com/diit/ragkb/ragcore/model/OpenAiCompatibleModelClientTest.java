@@ -81,6 +81,44 @@ class OpenAiCompatibleModelClientTest {
     }
 
     @Test
+    void embedding_retriesTransientServerFailuresButNotForever() {
+        AtomicInteger requestCount = new AtomicInteger();
+        server.createContext("/transient", exchange -> {
+            if (requestCount.incrementAndGet() < 3) {
+                writeJson(exchange, 503, "{\"error\":\"temporary\"}");
+            } else {
+                writeJson(exchange, 200,
+                        "{\"model\":\"embedding-v1\",\"data\":[{\"index\":0,\"embedding\":[1,0]}]}");
+            }
+        });
+        RagModelProperties.Embedding properties = embeddingProperties("/transient");
+        properties.setMaxAttempts(3);
+        properties.setRetryBackoffMs(1);
+
+        var result = new OpenAiCompatibleEmbeddingClient(properties, objectMapper).embed(List.of("retry"));
+
+        assertEquals(3, requestCount.get());
+        assertEquals(List.of(1.0f, 0.0f), result.vectors().get(0));
+    }
+
+    @Test
+    void embedding_doesNotRetryClientConfigurationErrors() {
+        AtomicInteger requestCount = new AtomicInteger();
+        server.createContext("/bad-request", exchange -> {
+            requestCount.incrementAndGet();
+            writeJson(exchange, 400, "{\"error\":\"invalid model\"}");
+        });
+        RagModelProperties.Embedding properties = embeddingProperties("/bad-request");
+        properties.setMaxAttempts(4);
+        properties.setRetryBackoffMs(1);
+
+        assertThrows(ModelClientException.class,
+                () -> new OpenAiCompatibleEmbeddingClient(properties, objectMapper).embed(List.of("bad")));
+
+        assertEquals(1, requestCount.get());
+    }
+
+    @Test
     void rerank_usesServiceScoreAndHonorsTopK() {
         server.createContext("/rerank", exchange ->
                 writeJson(exchange, 200, "{\"results\":[{\"index\":1,\"relevance_score\":0.9},{\"index\":0,\"relevance_score\":0.3}]}"));

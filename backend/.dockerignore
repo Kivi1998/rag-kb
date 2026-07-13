@@ -1,0 +1,8 @@
+target/
+!target/
+target/*
+!target/*.jar
+.idea/
+*.iml
+data/
+src/test/

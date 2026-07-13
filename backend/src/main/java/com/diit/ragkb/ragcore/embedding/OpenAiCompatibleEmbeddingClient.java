@@ -62,27 +62,60 @@ public class OpenAiCompatibleEmbeddingClient implements EmbeddingClient {
     }
 
     private BatchResponse embedBatch(List<String> texts) {
+        String body;
         try {
-            String body = objectMapper.writeValueAsString(new EmbeddingRequest(properties.getModel(), texts));
-            HttpRequest.Builder builder = HttpRequest.newBuilder(URI.create(properties.getEndpoint()))
-                    .timeout(Duration.ofMillis(properties.getTimeoutMs()))
-                    .header("Content-Type", "application/json")
-                    .POST(HttpRequest.BodyPublishers.ofString(body));
-            if (properties.getApiKey() != null && !properties.getApiKey().isBlank()) {
-                builder.header("Authorization", "Bearer " + properties.getApiKey());
-            }
-            HttpResponse<String> response = httpClient.send(builder.build(), HttpResponse.BodyHandlers.ofString());
-            if (response.statusCode() < 200 || response.statusCode() >= 300) {
-                throw new ModelClientException("Embedding 服务返回 HTTP " + response.statusCode());
-            }
-            return parseResponse(response.body(), texts.size());
+            body = objectMapper.writeValueAsString(new EmbeddingRequest(properties.getModel(), texts));
         } catch (IOException ex) {
-            throw new ModelClientException("调用 Embedding 服务失败", ex);
+            throw new ModelClientException("序列化 Embedding 请求失败", ex);
+        }
+        IOException lastIoError = null;
+        for (int attempt = 1; attempt <= properties.getMaxAttempts(); attempt++) {
+            try {
+                HttpRequest.Builder builder = HttpRequest.newBuilder(URI.create(properties.getEndpoint()))
+                        .timeout(Duration.ofMillis(properties.getTimeoutMs()))
+                        .header("Content-Type", "application/json")
+                        .POST(HttpRequest.BodyPublishers.ofString(body));
+                if (properties.getApiKey() != null && !properties.getApiKey().isBlank()) {
+                    builder.header("Authorization", "Bearer " + properties.getApiKey());
+                }
+                HttpResponse<String> response = httpClient.send(
+                        builder.build(), HttpResponse.BodyHandlers.ofString());
+                if (response.statusCode() < 200 || response.statusCode() >= 300) {
+                    if (isRetryableStatus(response.statusCode()) && attempt < properties.getMaxAttempts()) {
+                        backoff(attempt);
+                        continue;
+                    }
+                    throw new ModelClientException("Embedding 服务返回 HTTP " + response.statusCode());
+                }
+                return parseResponse(response.body(), texts.size());
+            } catch (IOException ex) {
+                lastIoError = ex;
+                if (attempt < properties.getMaxAttempts()) {
+                    backoff(attempt);
+                    continue;
+                }
+            } catch (InterruptedException ex) {
+                Thread.currentThread().interrupt();
+                throw new ModelClientException("调用 Embedding 服务被中断", ex);
+            } catch (IllegalArgumentException ex) {
+                throw new ModelClientException("Embedding 服务配置或响应不合法", ex);
+            }
+        }
+        throw new ModelClientException("调用 Embedding 服务失败", lastIoError);
+    }
+
+    private boolean isRetryableStatus(int status) {
+        return status == 429 || status >= 500;
+    }
+
+    private void backoff(int completedAttempt) {
+        long delay = Math.min(5_000L, properties.getRetryBackoffMs() * completedAttempt);
+        if (delay <= 0) return;
+        try {
+            Thread.sleep(delay);
         } catch (InterruptedException ex) {
             Thread.currentThread().interrupt();
-            throw new ModelClientException("调用 Embedding 服务被中断", ex);
-        } catch (IllegalArgumentException ex) {
-            throw new ModelClientException("Embedding 服务配置或响应不合法", ex);
+            throw new ModelClientException("Embedding 重试等待被中断", ex);
         }
     }
 
@@ -121,8 +154,10 @@ public class OpenAiCompatibleEmbeddingClient implements EmbeddingClient {
     private static void validate(RagModelProperties.Embedding properties) {
         if (properties.getEndpoint() == null || properties.getEndpoint().isBlank()
                 || properties.getModel() == null || properties.getModel().isBlank()
-                || properties.getBatchSize() <= 0) {
-            throw new IllegalArgumentException("Embedding endpoint/model/batch-size 必须配置");
+                || properties.getBatchSize() <= 0
+                || properties.getMaxAttempts() < 1 || properties.getMaxAttempts() > 10
+                || properties.getRetryBackoffMs() < 0 || properties.getRetryBackoffMs() > 60_000) {
+            throw new IllegalArgumentException("Embedding endpoint/model/batch-size/max-attempts/retry-backoff-ms 配置不合法");
         }
         requirePositiveTimeout(properties);
     }

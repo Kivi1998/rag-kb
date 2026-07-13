@@ -1,0 +1,278 @@
+{
+  "result": "PASS",
+  "mode": "smoke",
+  "scope": "HTTP initiate -> presigned PUT -> complete -> PostgreSQL worker -> parser -> artifact -> embedding protocol -> Elasticsearch",
+  "documents": 19,
+  "formats": {
+    "markdown": 1,
+    "code": 1,
+    "structured": 1,
+    "docx": 1,
+    "docx-ocr": 1,
+    "pptx-text": 1,
+    "pdf-text": 1,
+    "pdf-ocr": 1,
+    "pptx-ocr": 1,
+    "image-png": 1,
+    "image-jpg": 1,
+    "image-tiff": 1,
+    "subtitle-srt": 1,
+    "subtitle-vtt": 1,
+    "audio-wav": 1,
+    "audio-mp3": 1,
+    "video-mp4": 1,
+    "video-mov": 1,
+    "video-mkv": 1
+  },
+  "environment": {
+    "platform": "Linux-6.10.14-linuxkit-aarch64-with-glibc2.41",
+    "python": "3.11.15",
+    "uploadConcurrency": 24,
+    "parserReady": {
+      "status": "UP",
+      "asrLoaded": true,
+      "ocrLoaded": true
+    }
+  },
+  "upload": {
+    "success": 19,
+    "failed": 0,
+    "elapsedSeconds": 0.96,
+    "documentsPerSecond": 19.787,
+    "latencyMs": {
+      "mean": 898.291,
+      "p95": 939.021,
+      "p99": 939.021,
+      "max": 948.883
+    }
+  },
+  "ingestion": {
+    "counts": {
+      "READY": 19
+    },
+    "waitSecondsAfterUpload": 25.108
+  },
+  "database": {
+    "documents": 19,
+    "uniqueHashes": 19,
+    "artifactPaths": 19,
+    "parsedTimestamps": 19,
+    "failed": 0,
+    "flywayVersion": "011",
+    "maxAttempt": 1,
+    "retriedJobs": 0
+  },
+  "artifacts": {
+    "representatives": {
+      "subtitle-vtt": {
+        "parser": "local-java-parser",
+        "sections": 1,
+        "metadata": {
+          "cueCount": "1",
+          "format": "vtt"
+        }
+      },
+      "pptx-text": {
+        "parser": "local-java-parser",
+        "sections": 1,
+        "metadata": {
+          "format": "pptx",
+          "slideCount": "1"
+        }
+      },
+      "audio-mp3": {
+        "parser": "rag-multimodal-gateway",
+        "sections": 1,
+        "metadata": {
+          "sourcePath": "org/aad9cbac-ade1-488a-a23f-7c55ccdde074/kb/5d2bf523-f7b7-4037-875b-9807f43b6c92/uploads/d90b43e7-7f5b-4fbc-9aee-2f97d678b9d8.mp3",
+          "parserVersion": "1.0.0",
+          "documentId": "0643fb28-69ba-4916-95c0-07f9a82085ae",
+          "segmentCount": "1",
+          "language": "en",
+          "parser": "rag-multimodal-gateway",
+          "format": "mp3"
+        }
+      },
+      "image-png": {
+        "parser": "rag-multimodal-gateway",
+        "sections": 1,
+        "metadata": {
+          "ocrPageCount": "1",
+          "parserVersion": "1.0.0",
+          "sourcePath": "org/aad9cbac-ade1-488a-a23f-7c55ccdde074/kb/5d2bf523-f7b7-4037-875b-9807f43b6c92/uploads/1cc6015b-276b-4b1f-aac1-df25f296ac3c.png",
+          "parser": "rag-multimodal-gateway",
+          "format": "png",
+          "documentId": "f1289003-ee0b-45b4-bebe-d26e15fc0f43"
+        }
+      },
+      "audio-wav": {
+        "parser": "rag-multimodal-gateway",
+        "sections": 2,
+        "metadata": {
+          "segmentCount": "2",
+          "language": "en",
+          "parser": "rag-multimodal-gateway",
+          "format": "wav",
+          "sourcePath": "org/aad9cbac-ade1-488a-a23f-7c55ccdde074/kb/5d2bf523-f7b7-4037-875b-9807f43b6c92/uploads/5b60d54d-7514-4b78-a862-32499926faef.wav",
+          "parserVersion": "1.0.0",
+          "documentId": "59c772bc-6ff7-4cba-b916-0d9017e885b3"
+        }
+      },
+      "pptx-ocr": {
+        "parser": "rag-multimodal-gateway",
+        "sections": 1,
+        "metadata": {
+          "sourcePath": "org/aad9cbac-ade1-488a-a23f-7c55ccdde074/kb/5d2bf523-f7b7-4037-875b-9807f43b6c92/uploads/6fb22aac-7f38-471c-a24a-7f4966a4b25d.pptx",
+          "parserVersion": "1.0.0",
+          "documentId": "29e4a12a-e3c8-400d-aea4-55a452b51e82",
+          "ocrImageCount": "1",
+          "slideCount": "1",
+          "parser": "rag-multimodal-gateway",
+          "format": "pptx"
+        }
+      },
+      "markdown": {
+        "parser": "local-java-parser",
+        "sections": 2,
+        "metadata": {
+          "filename": "guide-00000.md",
+          "format": "markdown"
+        }
+      },
+      "structured": {
+        "parser": "local-java-parser",
+        "sections": 2,
+        "metadata": {
+          "filename": "config-00002.json",
+          "format": "json"
+        }
+      },
+      "docx-ocr": {
+        "parser": "rag-multimodal-gateway",
+        "sections": 1,
+        "metadata": {
+          "parserVersion": "1.0.0",
+          "sourcePath": "org/aad9cbac-ade1-488a-a23f-7c55ccdde074/kb/5d2bf523-f7b7-4037-875b-9807f43b6c92/uploads/99d20752-ddbe-4eac-97cb-07290ea6c238.docx",
+          "parser": "rag-multimodal-gateway",
+          "documentId": "b5d660cf-e73a-462a-9390-bf60ad3867bf",
+          "format": "docx",
+          "ocrImageCount": "1"
+        }
+      },
+      "code": {
+        "parser": "local-java-parser",
+        "sections": 2,
+        "metadata": {
+          "language": "Java",
+          "format": "code",
+          "filename": "service-00001.java"
+        }
+      },
+      "image-jpg": {
+        "parser": "rag-multimodal-gateway",
+        "sections": 1,
+        "metadata": {
+          "documentId": "d1c38673-4e57-47e4-aefd-5cd428d53f3a",
+          "ocrPageCount": "1",
+          "parserVersion": "1.0.0",
+          "sourcePath": "org/aad9cbac-ade1-488a-a23f-7c55ccdde074/kb/5d2bf523-f7b7-4037-875b-9807f43b6c92/uploads/96d1591e-e297-4ce9-b057-8ad3d93dfd2c.jpg",
+          "parser": "rag-multimodal-gateway",
+          "format": "jpg"
+        }
+      },
+      "subtitle-srt": {
+        "parser": "local-java-parser",
+        "sections": 1,
+        "metadata": {
+          "format": "srt",
+          "cueCount": "1"
+        }
+      },
+      "video-mkv": {
+        "parser": "rag-multimodal-gateway",
+        "sections": 2,
+        "metadata": {
+          "sourcePath": "org/aad9cbac-ade1-488a-a23f-7c55ccdde074/kb/5d2bf523-f7b7-4037-875b-9807f43b6c92/uploads/327f54d5-3213-47e4-9572-c0e399dd0cb1.mkv",
+          "parserVersion": "1.0.0",
+          "documentId": "c9814d72-ffd6-44e2-8b47-6cf66658f845",
+          "segmentCount": "2",
+          "language": "en",
+          "parser": "rag-multimodal-gateway",
+          "format": "mkv"
+        }
+      },
+      "video-mp4": {
+        "parser": "rag-multimodal-gateway",
+        "sections": 2,
+        "metadata": {
+          "segmentCount": "2",
+          "language": "en",
+          "parser": "rag-multimodal-gateway",
+          "format": "mp4",
+          "sourcePath": "org/aad9cbac-ade1-488a-a23f-7c55ccdde074/kb/5d2bf523-f7b7-4037-875b-9807f43b6c92/uploads/2b08d79f-e922-4452-9fa0-f38020f1d0e2.mp4",
+          "parserVersion": "1.0.0",
+          "documentId": "180eb914-6a20-42f5-8ef6-aee167aa692b"
+        }
+      },
+      "docx": {
+        "parser": "local-java-parser",
+        "sections": 2,
+        "metadata": {
+          "format": "docx",
+          "filename": "technical-00003.docx"
+        }
+      },
+      "pdf-text": {
+        "parser": "local-java-parser",
+        "sections": 1,
+        "metadata": {
+          "format": "pdf",
+          "numPages": "1"
+        }
+      },
+      "video-mov": {
+        "parser": "rag-multimodal-gateway",
+        "sections": 2,
+        "metadata": {
+          "sourcePath": "org/aad9cbac-ade1-488a-a23f-7c55ccdde074/kb/5d2bf523-f7b7-4037-875b-9807f43b6c92/uploads/9bd2f561-10d4-4270-a0d9-52b997bb2055.mov",
+          "parserVersion": "1.0.0",
+          "documentId": "f692a9ad-1e3b-46a0-9198-9d8eb59789b3",
+          "segmentCount": "2",
+          "language": "en",
+          "parser": "rag-multimodal-gateway",
+          "format": "mov"
+        }
+      },
+      "image-tiff": {
+        "parser": "rag-multimodal-gateway",
+        "sections": 1,
+        "metadata": {
+          "ocrPageCount": "1",
+          "parserVersion": "1.0.0",
+          "sourcePath": "org/aad9cbac-ade1-488a-a23f-7c55ccdde074/kb/5d2bf523-f7b7-4037-875b-9807f43b6c92/uploads/1607a4aa-64b7-4a6a-abe6-01bd24b0c433.tiff",
+          "parser": "rag-multimodal-gateway",
+          "format": "tiff",
+          "documentId": "cc68ccad-e850-47e1-88be-cdef14953d99"
+        }
+      },
+      "pdf-ocr": {
+        "parser": "rag-multimodal-gateway",
+        "sections": 1,
+        "metadata": {
+          "pageCount": "1",
+          "ocrPageCount": "1",
+          "parser": "rag-multimodal-gateway",
+          "format": "pdf",
+          "sourcePath": "org/aad9cbac-ade1-488a-a23f-7c55ccdde074/kb/5d2bf523-f7b7-4037-875b-9807f43b6c92/uploads/c61f1f69-e5d9-4f65-8c48-9811ff0fb448.pdf",
+          "parserVersion": "1.0.0",
+          "documentId": "8f53312f-9657-4224-9426-b34dbc02fb28"
+        }
+      }
+    },
+    "objectCount": 38
+  },
+  "elasticsearch": {
+    "chunks": 27
+  },
+  "totalElapsedSeconds": 26.676
+}

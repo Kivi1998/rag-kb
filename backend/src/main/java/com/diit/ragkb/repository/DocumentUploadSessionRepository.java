@@ -31,6 +31,12 @@ public interface DocumentUploadSessionRepository extends JpaRepository<DocumentU
                                                    @Param("now") Instant now,
                                                    Pageable pageable);
 
+    @Query("select session.id as sessionId, session.org.id as orgId from DocumentUploadSession session " +
+            "where session.status = :status and session.verificationStartedAt < :cutoff")
+    List<ExpiredSessionRef> findStaleVerificationRefs(@Param("status") UploadSessionStatus status,
+                                                      @Param("cutoff") Instant cutoff,
+                                                      Pageable pageable);
+
     interface ExpiredSessionRef {
         UUID getSessionId();
         UUID getOrgId();

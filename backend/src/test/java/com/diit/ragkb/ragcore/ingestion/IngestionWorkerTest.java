@@ -30,7 +30,8 @@ class IngestionWorkerTest {
         IngestionJob job = new IngestionJob();
         job.setId(jobId);
         job.setAttempt(0);
-        IngestionTask task = new IngestionTask(jobId, UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(),
+        IngestionTask task = new IngestionTask(jobId, 1, "worker-test",
+                UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(),
                 "scan.pdf", "application/pdf", "source/scan.pdf", null, null);
         when(repository.countByStatus(IngestionStatus.QUEUED)).thenReturn(1L);
         when(repository.findByStatusOrderByCreatedAtAsc(eq(IngestionStatus.QUEUED), any()))

@@ -1,0 +1,46 @@
+{
+  "result": "PASS",
+  "scenario": "双 Worker 摄取期间强制停止 worker-a，验证租约超时后由 worker-b 接管",
+  "failureInjection": {
+    "action": "docker stop -t 1 rag-kb-acceptance-worker-a-1",
+    "affectedJobs": [
+      {
+        "jobId": "2d50ef51-6706-4caf-80cf-ec37df6c7fc9",
+        "fileName": "scanned-04431.pdf",
+        "attemptBefore": 1,
+        "ownerBefore": "acceptance-worker-a",
+        "attemptAfter": 2,
+        "statusAfter": "READY"
+      },
+      {
+        "jobId": "2d29661c-dcfe-4efd-bc7e-1d0f123fccb4",
+        "fileName": "scanned-04433.pdf",
+        "attemptBefore": 1,
+        "ownerBefore": "acceptance-worker-a",
+        "attemptAfter": 2,
+        "statusAfter": "READY"
+      }
+    ]
+  },
+  "recovery": {
+    "worker": "acceptance-worker-b",
+    "expiredLeasesRecovered": 2,
+    "recoveryLogTimesUtc": [
+      "2026-07-13T16:25:46.851Z",
+      "2026-07-13T16:25:48.158Z"
+    ],
+    "jobsWithAttemptGreaterThanOne": 2,
+    "failedJobsAtCompletion": 0,
+    "finalReadyDocuments": 5000
+  },
+  "modelTransientFailure": {
+    "injectedResponses": [503, 503],
+    "nextResponse": 200,
+    "finalFailedJobs": 0,
+    "conclusion": "Embedding 客户端仅对连接异常、HTTP 429 和 5xx 执行有界重试，并在两次 503 后恢复"
+  },
+  "processHealthAtCompletion": {
+    "oomKilled": false,
+    "unexpectedContainerRestarts": 0
+  }
+}

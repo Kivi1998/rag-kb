@@ -5,6 +5,7 @@ import com.diit.ragkb.ragcore.model.IngestionStatus;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.repository.query.Param;
 
 import java.util.List;
@@ -12,12 +13,18 @@ import java.util.Optional;
 import java.util.UUID;
 import java.time.Instant;
 import org.springframework.data.domain.Pageable;
+import jakarta.persistence.LockModeType;
 
 public interface IngestionJobRepository extends JpaRepository<IngestionJob, UUID> {
 
     Optional<IngestionJob> findFirstByDocumentIdOrderByCreatedAtDesc(UUID documentId);
 
     Optional<IngestionJob> findByIdAndKnowledgeBaseIdAndOrgId(UUID id, UUID knowledgeBaseId, UUID orgId);
+
+    /** 阶段推进时锁定任务行，与租约回收/接管串行化。 */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select job from IngestionJob job where job.id = :jobId")
+    Optional<IngestionJob> findByIdForUpdate(@Param("jobId") UUID jobId);
 
     List<IngestionJob> findByStatusOrderByCreatedAtAsc(IngestionStatus status);
 
@@ -61,10 +68,13 @@ public interface IngestionJobRepository extends JpaRepository<IngestionJob, UUID
                    job.updatedAt = :now
              where job.id = :jobId
                and job.leaseOwner = :leaseOwner
+               and job.attempt = :attempt
                and job.status in :activeStatuses
+               and job.leaseExpiresAt >= :now
             """)
     int heartbeat(@Param("jobId") UUID jobId,
                   @Param("leaseOwner") String leaseOwner,
+                  @Param("attempt") int attempt,
                   @Param("activeStatuses") List<IngestionStatus> activeStatuses,
                   @Param("now") Instant now,
                   @Param("leaseExpiresAt") Instant leaseExpiresAt);

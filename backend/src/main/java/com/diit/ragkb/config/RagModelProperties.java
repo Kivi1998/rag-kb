@@ -24,6 +24,8 @@ public class RagModelProperties {
 
     public static class Embedding extends Endpoint {
         private int batchSize = 32;
+        private int maxAttempts = 3;
+        private long retryBackoffMs = 200;
 
         public int getBatchSize() {
             return batchSize;
@@ -31,6 +33,22 @@ public class RagModelProperties {
 
         public void setBatchSize(int batchSize) {
             this.batchSize = batchSize;
+        }
+
+        public int getMaxAttempts() {
+            return maxAttempts;
+        }
+
+        public void setMaxAttempts(int maxAttempts) {
+            this.maxAttempts = maxAttempts;
+        }
+
+        public long getRetryBackoffMs() {
+            return retryBackoffMs;
+        }
+
+        public void setRetryBackoffMs(long retryBackoffMs) {
+            this.retryBackoffMs = retryBackoffMs;
         }
     }
 

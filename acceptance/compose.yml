@@ -1,0 +1,312 @@
+name: rag-kb-acceptance
+
+x-backend-common: &backend-common
+  build:
+    context: ../backend
+    dockerfile: Dockerfile.acceptance
+  image: rag-kb-backend:acceptance
+  restart: unless-stopped
+  init: true
+  environment: &backend-environment
+    DB_URL: jdbc:postgresql://postgres:5432/ragkb
+    DB_USERNAME: ragkb
+    DB_PASSWORD: ragkb-acceptance
+    REDIS_HOST: redis
+    REDIS_PORT: 6379
+    JWT_SECRET: acceptance-only-jwt-secret-at-least-32-bytes-2026
+    RAG_METRICS_TOKEN: backend-acceptance-metrics-key
+    RAG_STORAGE_TYPE: minio
+    MINIO_ENDPOINT: http://minio:9000
+    MINIO_BUCKET: rag-kb
+    MINIO_ACCESS_KEY: ragacceptance
+    MINIO_SECRET_KEY: ragacceptance-secret
+    RAG_MULTIMODAL_PARSER_ENABLED: "true"
+    RAG_MULTIMODAL_PARSER_ENDPOINT: http://parser-gateway:8081/v1/parse
+    RAG_MULTIMODAL_PARSER_API_KEY: parser-acceptance-key
+    RAG_MULTIMODAL_PARSER_TIMEOUT_MS: 600000
+    RAG_UPLOAD_MAX_SIZE_BYTES: 2147483648
+    RAG_UPLOAD_MAX_FILE_SIZE: 2048MB
+    RAG_UPLOAD_MAX_REQUEST_SIZE: 2050MB
+    RAG_ES_HEALTH_ENABLED: "false"
+  read_only: true
+  tmpfs:
+    - /tmp:size=2g,mode=1777
+  cap_drop:
+    - ALL
+  security_opt:
+    - no-new-privileges:true
+  pids_limit: 512
+  cpus: 2.0
+  mem_limit: 1536m
+  stop_grace_period: 60s
+  depends_on:
+    postgres:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+    minio-init:
+      condition: service_completed_successfully
+    parser-gateway:
+      condition: service_healthy
+
+x-worker-environment: &worker-environment
+  <<: *backend-environment
+  RAG_INGESTION_WORKER_ENABLED: "true"
+  RAG_INGESTION_WORKER_CONCURRENCY: 2
+  RAG_INGESTION_WORKER_BATCH_SIZE: 8
+  RAG_INGESTION_POLL_INTERVAL_MS: 250
+  RAG_INGESTION_WORKER_LEASE_DURATION_MS: 120000
+  RAG_EMBEDDING_ENABLED: "true"
+  RAG_EMBEDDING_ENDPOINT: http://model-stub:8082/v1/embeddings
+  RAG_EMBEDDING_MODEL: acceptance-embedding-v1
+  RAG_EMBEDDING_BATCH_SIZE: 32
+  RAG_EMBEDDING_TIMEOUT_MS: 30000
+  RAG_EMBEDDING_MAX_ATTEMPTS: 4
+  RAG_EMBEDDING_RETRY_BACKOFF_MS: 100
+  RAG_ES_ENABLED: "true"
+  RAG_ES_ENDPOINT: http://elasticsearch:9200
+  RAG_ES_INDEX_NAME: rag_chunks_acceptance
+  RAG_ES_VECTOR_DIMENSIONS: 8
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ragkb
+      POSTGRES_USER: ragkb
+      POSTGRES_PASSWORD: ragkb-acceptance
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ragkb -d ragkb"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 256
+    mem_limit: 512m
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru"]
+    user: "999:999"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    read_only: true
+    tmpfs:
+      - /data:size=300m,mode=1777,uid=999,gid=999
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 128
+
+  minio:
+    image: minio/minio:RELEASE.2025-09-07T16-13-09Z
+    restart: unless-stopped
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: ragacceptance
+      MINIO_ROOT_PASSWORD: ragacceptance-secret
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:9000/minio/health/live"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 256
+    mem_limit: 1g
+
+  minio-init:
+    image: minio/mc:RELEASE.2025-08-13T08-35-41Z
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "-ec"]
+    environment:
+      MC_CONFIG_DIR: /tmp/.mc
+    command:
+      - >-
+        mc alias set acceptance http://minio:9000 ragacceptance ragacceptance-secret
+        && mc mb --ignore-existing acceptance/rag-kb
+        && mc anonymous set none acceptance/rag-kb
+    cap_drop:
+      - ALL
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.13.4
+    restart: unless-stopped
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: "false"
+      xpack.ml.enabled: "false"
+      ES_JAVA_OPTS: -Xms512m -Xmx512m
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:9200/_cluster/health?wait_for_status=yellow || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 60
+      start_period: 30s
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 1024
+    mem_limit: 1536m
+
+  model-stub:
+    build:
+      context: ./model-stub
+    image: rag-acceptance-model:1.0.0
+    restart: unless-stopped
+    init: true
+    environment:
+      # 验收客户端必须在这两个 503 后自动恢复，证明有界瞬时错误重试生效。
+      MODEL_STUB_FAIL_FIRST_N: 2
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 128
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8082/health', timeout=3)"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  parser-gateway:
+    build:
+      context: ../parser-gateway
+    image: rag-parser-gateway:acceptance
+    restart: unless-stopped
+    init: true
+    environment:
+      PARSER_API_KEY: parser-acceptance-key
+      PARSER_METRICS_KEY: parser-acceptance-metrics-key
+      PARSER_MAX_FILE_BYTES: 2147483648
+      PARSER_MAX_CONCURRENCY: 2
+      PARSER_WHISPER_MODEL: tiny.en
+      PARSER_WHISPER_DEVICE: cpu
+      PARSER_WHISPER_COMPUTE_TYPE: int8
+      PARSER_PRELOAD_WHISPER: "true"
+      PARSER_REQUIRE_ASR_READY: "true"
+      PARSER_PRELOAD_OCR: "true"
+      PARSER_REQUIRE_OCR_READY: "true"
+    volumes:
+      - parser_models:/models
+    tmpfs:
+      - /tmp:size=4g,mode=1777
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 512
+    cpus: 4.0
+    mem_limit: 4g
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8081/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 60
+      start_period: 10m
+
+  api:
+    <<: *backend-common
+    environment:
+      <<: *backend-environment
+      RAG_INGESTION_WORKER_ENABLED: "false"
+      RAG_EMBEDDING_ENABLED: "false"
+      RAG_ES_ENABLED: "false"
+    ports:
+      - "127.0.0.1:${ACCEPTANCE_API_PORT:-18090}:8090"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8090/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
+
+  worker-a:
+    <<: *backend-common
+    environment:
+      <<: *worker-environment
+      RAG_INGESTION_WORKER_ID: acceptance-worker-a
+    depends_on:
+      api:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
+      model-stub:
+        condition: service_healthy
+
+  worker-b:
+    <<: *backend-common
+    environment:
+      <<: *worker-environment
+      RAG_INGESTION_WORKER_ID: acceptance-worker-b
+    depends_on:
+      api:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
+      model-stub:
+        condition: service_healthy
+
+  fixture-generator:
+    build:
+      context: ./fixtures
+    image: rag-acceptance-fixtures:1.0.0
+    volumes:
+      - acceptance_fixtures:/fixtures
+
+  runner:
+    build:
+      context: ./runner
+    image: rag-acceptance-runner:1.0.0
+    profiles: ["acceptance"]
+    environment:
+      ACCEPTANCE_MODE: ${ACCEPTANCE_MODE:-full}
+      ACCEPTANCE_DOCUMENT_COUNT: ${ACCEPTANCE_DOCUMENT_COUNT:-5000}
+      ACCEPTANCE_UPLOAD_CONCURRENCY: ${ACCEPTANCE_UPLOAD_CONCURRENCY:-24}
+      ACCEPTANCE_TIMEOUT_SECONDS: ${ACCEPTANCE_TIMEOUT_SECONDS:-7200}
+    volumes:
+      - acceptance_fixtures:/fixtures:ro
+      - acceptance_reports:/reports
+    depends_on:
+      fixture-generator:
+        condition: service_completed_successfully
+      api:
+        condition: service_healthy
+      worker-a:
+        condition: service_started
+      worker-b:
+        condition: service_started
+      elasticsearch:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
+  minio_data:
+  elasticsearch_data:
+  parser_models:
+    name: ${PARSER_MODEL_VOLUME:-rag-parser-model-cache}
+    external: true
+  acceptance_fixtures:
+  acceptance_reports:

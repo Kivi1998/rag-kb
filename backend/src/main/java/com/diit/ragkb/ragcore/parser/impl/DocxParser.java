@@ -4,6 +4,7 @@ import com.diit.ragkb.ragcore.model.DocumentInput;
 import com.diit.ragkb.ragcore.model.DocumentSection;
 import com.diit.ragkb.ragcore.model.ParsedDocument;
 import com.diit.ragkb.ragcore.parser.DocumentParser;
+import com.diit.ragkb.ragcore.parser.NeedsMultimodalParsingException;
 
 import org.apache.poi.xwpf.usermodel.*;
 
@@ -41,6 +42,10 @@ public class DocxParser implements DocumentParser {
     @Override
     public ParsedDocument parse(DocumentInput input) throws IOException {
         try (InputStream stream = input.openStream(); XWPFDocument doc = new XWPFDocument(stream)) {
+            // 技术文档中的报错截图、架构图和代码截图不能静默丢失；交给多模态网关统一抽正文、表格和图片 OCR。
+            if (!doc.getAllPictures().isEmpty()) {
+                throw new NeedsMultimodalParsingException("DOCX 包含内嵌图片，需要 OCR 以保证内容完整性");
+            }
             List<DocumentSection> sections = new ArrayList<>();
 
             Deque<String> headingStack = new ArrayDeque<>();
@@ -92,6 +97,10 @@ public class DocxParser implements DocumentParser {
                 }
             }
             flushBlock(currentBlock, headingStack, blockStartPage, sections);
+
+            if (sections.isEmpty()) {
+                throw new NeedsMultimodalParsingException("DOCX 中未提取到可索引文本，需要 OCR 或版面解析服务");
+            }
 
             return new ParsedDocument(
                     input.documentId(), input.contentType(), input.sourcePath(),

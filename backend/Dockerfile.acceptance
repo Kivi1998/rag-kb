@@ -1,0 +1,14 @@
+# 本地生产同构验收镜像：JAR 必须先由宿主机 Java 17 完成全量测试和 package。
+# 这样既不绕过编译门禁，也规避 Docker Desktop 内容缓存损坏时无法解析 JRE manifest。
+FROM maven:3.9-eclipse-temurin-17
+
+RUN groupadd --gid 10001 rag \
+    && useradd --uid 10001 --gid 10001 --no-create-home --shell /usr/sbin/nologin rag
+WORKDIR /app
+COPY target/*.jar /app/app.jar
+RUN chown -R 10001:10001 /app
+
+USER 10001:10001
+EXPOSE 8090
+ENV JAVA_TOOL_OPTIONS="-XX:MaxRAMPercentage=75 -XX:+ExitOnOutOfMemoryError -Djava.io.tmpdir=/tmp"
+ENTRYPOINT ["java", "-jar", "/app/app.jar"]

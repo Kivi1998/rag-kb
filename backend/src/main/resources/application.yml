@@ -60,6 +60,8 @@ rag:
     max-size-bytes: ${RAG_UPLOAD_MAX_SIZE_BYTES:536870912}
     direct:
       ttl-seconds: ${RAG_DIRECT_UPLOAD_TTL_SECONDS:900}
+      # complete 使用短事务领取校验 token，对象读取超时后可由其他实例重试。
+      verification-timeout-ms: ${RAG_DIRECT_UPLOAD_VERIFICATION_TIMEOUT_MS:900000}
       cleanup-interval-ms: ${RAG_DIRECT_UPLOAD_CLEANUP_INTERVAL_MS:60000}
   observability:
     # Prometheus 使用 X-Metrics-Key 请求头；生产环境必须通过 Secret 注入。
@@ -100,6 +102,9 @@ rag:
       model: ${RAG_EMBEDDING_MODEL:}
       batch-size: ${RAG_EMBEDDING_BATCH_SIZE:32}
       timeout-ms: ${RAG_EMBEDDING_TIMEOUT_MS:15000}
+      # 仅重试连接异常、429 和 5xx；参数错误等 4xx 不重试。
+      max-attempts: ${RAG_EMBEDDING_MAX_ATTEMPTS:3}
+      retry-backoff-ms: ${RAG_EMBEDDING_RETRY_BACKOFF_MS:200}
     rerank:
       enabled: ${RAG_RERANK_ENABLED:false}
       endpoint: ${RAG_RERANK_ENDPOINT:}

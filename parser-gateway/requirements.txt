@@ -8,3 +8,4 @@ pillow==11.3.0
 rapidocr-onnxruntime==1.4.4
 faster-whisper==1.2.0
 requests==2.32.4
+prometheus-client==0.21.1

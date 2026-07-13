@@ -7,7 +7,6 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.core.task.TaskExecutor;
 import org.springframework.data.domain.PageRequest;
@@ -28,7 +27,6 @@ import java.util.concurrent.TimeUnit;
 @Slf4j
 @Component
 @RequiredArgsConstructor
-@ConditionalOnBean(DocumentIngestionPipeline.class)
 @ConditionalOnProperty(prefix = "rag.ingestion.worker", name = "enabled", havingValue = "true")
 public class IngestionWorker {
 
@@ -83,15 +81,18 @@ public class IngestionWorker {
                     heartbeat = startHeartbeat(task);
                 } catch (RuntimeException ex) {
                     log.error("无法启动摄取任务心跳，任务转失败，jobId={}", task.jobId(), ex);
-                    lifecycleService.fail(task.jobId(), ex);
+                    failIfStillOwned(task, ex);
                     return;
                 }
                 try {
                     pipeline.process(task);
+                } catch (StaleIngestionLeaseException ex) {
+                    log.warn("摄取任务租约已被接管，旧 Worker 停止写入，jobId={}, attempt={}, workerId={}",
+                            task.jobId(), task.attempt(), task.leaseOwner());
                 } catch (Exception ex) {
                     log.warn("摄取任务失败，jobId={}, documentId={}, attempt={}",
-                            task.jobId(), task.documentId(), candidate.getAttempt() + 1, ex);
-                    lifecycleService.fail(task.jobId(), ex);
+                            task.jobId(), task.documentId(), task.attempt(), ex);
+                    failIfStillOwned(task, ex);
                 } finally {
                     heartbeat.cancel(false);
                 }
@@ -101,11 +102,19 @@ public class IngestionWorker {
         }
     }
 
+    private void failIfStillOwned(IngestionTask task, Throwable cause) {
+        try {
+            lifecycleService.fail(task, cause);
+        } catch (StaleIngestionLeaseException stale) {
+            log.warn("任务失败时租约已被接管，不覆盖新 Worker 状态，jobId={}", task.jobId());
+        }
+    }
+
     private ScheduledFuture<?> startHeartbeat(IngestionTask task) {
         long intervalMs = Math.max(1_000, leaseDurationMs / 3);
         return heartbeatExecutor.scheduleAtFixedRate(() -> {
             try {
-                if (!lifecycleService.heartbeat(task.jobId(), workerId, Duration.ofMillis(leaseDurationMs))) {
+                if (!lifecycleService.heartbeat(task, Duration.ofMillis(leaseDurationMs))) {
                     log.warn("摄取任务续租失败，任务可能已被取消或接管，jobId={}", task.jobId());
                 }
             } catch (RuntimeException ex) {

@@ -60,6 +60,13 @@ public class DocumentUploadSession {
     @Column(name = "completed_at")
     private Instant completedAt;
 
+    /** 大文件完整性校验在数据库事务外进行，token 用于防止超时校验者误提交。 */
+    @Column(name = "verification_token")
+    private UUID verificationToken;
+
+    @Column(name = "verification_started_at")
+    private Instant verificationStartedAt;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 

@@ -37,7 +37,7 @@ class DefaultDocumentIngestionPipelineTest {
         UUID orgId = UUID.randomUUID();
         UUID kbId = UUID.randomUUID();
         UUID documentId = UUID.randomUUID();
-        IngestionTask task = new IngestionTask(UUID.randomUUID(), documentId, orgId, kbId,
+        IngestionTask task = new IngestionTask(UUID.randomUUID(), 1, "worker-test", documentId, orgId, kbId,
                 "guide.md", "text/markdown", "org/x/kb/y/doc.md", null, null);
 
         DocumentParser parser = new DocumentParser() {
@@ -67,11 +67,11 @@ class DefaultDocumentIngestionPipelineTest {
         new DefaultDocumentIngestionPipeline(parserFactory, chunker, embedding, index, storage, lifecycle,
                 artifactStore, new IngestionMetrics(new SimpleMeterRegistry())).process(task);
 
-        verify(lifecycle).recordParsedArtifact(task.jobId(), "org/x/kb/y/doc.md.parsed-v1.json", "local-java-parser", "1");
-        verify(lifecycle).advance(task.jobId(), IngestionStatus.CHUNKING);
-        verify(lifecycle).advance(task.jobId(), IngestionStatus.EMBEDDING);
-        verify(lifecycle).advance(task.jobId(), IngestionStatus.INDEXING);
+        verify(lifecycle).recordParsedArtifact(task, "org/x/kb/y/doc.md.parsed-v1.json", "local-java-parser", "1");
+        verify(lifecycle).advance(task, IngestionStatus.CHUNKING);
+        verify(lifecycle).advance(task, IngestionStatus.EMBEDDING);
+        verify(lifecycle).advance(task, IngestionStatus.INDEXING);
         verify(index).upsert(eq(List.of(chunk)), eq(List.of(List.of(0.1f, 0.2f))), eq("embedding-v1"));
-        verify(lifecycle).advance(task.jobId(), IngestionStatus.READY);
+        verify(lifecycle).advance(task, IngestionStatus.READY);
     }
 }

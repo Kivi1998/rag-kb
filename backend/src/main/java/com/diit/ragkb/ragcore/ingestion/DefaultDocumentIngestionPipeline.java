@@ -34,14 +34,14 @@ public class DefaultDocumentIngestionPipeline implements DocumentIngestionPipeli
     public void process(IngestionTask task) throws Exception {
         requireStoragePath(task);
         ParsedDocument parsed = timed("parse", () -> loadOrParse(task));
-        lifecycleService.advance(task.jobId(), IngestionStatus.CHUNKING);
+        lifecycleService.advance(task, IngestionStatus.CHUNKING);
 
         var chunks = timed("chunk", () -> chunker.chunk(parsed,
                 new ChunkingContext(task.organizationId(), task.knowledgeBaseId()), ChunkingOptions.defaults()));
         if (chunks.isEmpty()) {
             throw new IllegalArgumentException("文档不含可索引的文本内容");
         }
-        lifecycleService.advance(task.jobId(), IngestionStatus.EMBEDDING);
+        lifecycleService.advance(task, IngestionStatus.EMBEDDING);
 
         EmbeddingResult embedding = timed("embedding",
                 () -> embeddingClient.embed(chunks.stream().map(chunk -> chunk.content()).toList()));
@@ -49,13 +49,13 @@ public class DefaultDocumentIngestionPipeline implements DocumentIngestionPipeli
         if (vectors.size() != chunks.size()) {
             throw new IllegalStateException("Embedding 返回向量数量与 chunk 数量不一致");
         }
-        lifecycleService.advance(task.jobId(), IngestionStatus.INDEXING);
+        lifecycleService.advance(task, IngestionStatus.INDEXING);
 
         timed("index", () -> {
             chunkIndex.upsert(chunks, vectors, embedding.modelVersion());
             return null;
         });
-        lifecycleService.advance(task.jobId(), IngestionStatus.READY);
+        lifecycleService.advance(task, IngestionStatus.READY);
     }
 
     private ParsedDocument loadOrParse(IngestionTask task) throws Exception {
@@ -63,7 +63,7 @@ public class DefaultDocumentIngestionPipeline implements DocumentIngestionPipeli
         if (parsed != null) return parsed;
         parsed = parserFactory.parse(new StoredDocumentInput(task, objectStorage));
         ParsedArtifactStore.SavedArtifact saved = artifactStore.save(task, parsed);
-        lifecycleService.recordParsedArtifact(task.jobId(), saved.path(), saved.parserName(), saved.parserVersion());
+        lifecycleService.recordParsedArtifact(task, saved.path(), saved.parserName(), saved.parserVersion());
         return parsed;
     }
 
