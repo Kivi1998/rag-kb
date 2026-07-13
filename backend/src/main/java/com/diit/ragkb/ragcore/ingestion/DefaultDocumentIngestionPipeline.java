@@ -27,29 +27,56 @@ public class DefaultDocumentIngestionPipeline implements DocumentIngestionPipeli
     private final ChunkIndex chunkIndex;
     private final ObjectStorage objectStorage;
     private final IngestionJobLifecycleService lifecycleService;
+    private final ParsedArtifactStore artifactStore;
+    private final IngestionMetrics metrics;
 
     @Override
     public void process(IngestionTask task) throws Exception {
         requireStoragePath(task);
-        ParsedDocument parsed = parserFactory.parse(new StoredDocumentInput(task, objectStorage));
+        ParsedDocument parsed = timed("parse", () -> loadOrParse(task));
         lifecycleService.advance(task.jobId(), IngestionStatus.CHUNKING);
 
-        var chunks = chunker.chunk(parsed, new ChunkingContext(task.organizationId(), task.knowledgeBaseId()),
-                ChunkingOptions.defaults());
+        var chunks = timed("chunk", () -> chunker.chunk(parsed,
+                new ChunkingContext(task.organizationId(), task.knowledgeBaseId()), ChunkingOptions.defaults()));
         if (chunks.isEmpty()) {
             throw new IllegalArgumentException("文档不含可索引的文本内容");
         }
         lifecycleService.advance(task.jobId(), IngestionStatus.EMBEDDING);
 
-        EmbeddingResult embedding = embeddingClient.embed(chunks.stream().map(chunk -> chunk.content()).toList());
+        EmbeddingResult embedding = timed("embedding",
+                () -> embeddingClient.embed(chunks.stream().map(chunk -> chunk.content()).toList()));
         List<List<Float>> vectors = embedding.vectors();
         if (vectors.size() != chunks.size()) {
             throw new IllegalStateException("Embedding 返回向量数量与 chunk 数量不一致");
         }
         lifecycleService.advance(task.jobId(), IngestionStatus.INDEXING);
 
-        chunkIndex.upsert(chunks, vectors, embedding.modelVersion());
+        timed("index", () -> {
+            chunkIndex.upsert(chunks, vectors, embedding.modelVersion());
+            return null;
+        });
         lifecycleService.advance(task.jobId(), IngestionStatus.READY);
+    }
+
+    private ParsedDocument loadOrParse(IngestionTask task) throws Exception {
+        ParsedDocument parsed = artifactStore.load(task).orElse(null);
+        if (parsed != null) return parsed;
+        parsed = parserFactory.parse(new StoredDocumentInput(task, objectStorage));
+        ParsedArtifactStore.SavedArtifact saved = artifactStore.save(task, parsed);
+        lifecycleService.recordParsedArtifact(task.jobId(), saved.path(), saved.parserName(), saved.parserVersion());
+        return parsed;
+    }
+
+    private <T> T timed(String stage, ThrowingSupplier<T> action) throws Exception {
+        long started = metrics.startNanos();
+        try {
+            T result = action.get();
+            metrics.stageFinished(stage, started, true);
+            return result;
+        } catch (Exception ex) {
+            metrics.stageFinished(stage, started, false);
+            throw ex;
+        }
     }
 
     private void requireStoragePath(IngestionTask task) {
@@ -64,5 +91,10 @@ public class DefaultDocumentIngestionPipeline implements DocumentIngestionPipeli
         @Override public String contentType() { return task.contentType(); }
         @Override public String sourcePath() { return task.objectStoragePath(); }
         @Override public InputStream openStream() throws IOException { return storage.open(task.objectStoragePath()); }
+    }
+
+    @FunctionalInterface
+    private interface ThrowingSupplier<T> {
+        T get() throws Exception;
     }
 }

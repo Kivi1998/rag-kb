@@ -7,6 +7,8 @@ import com.diit.ragkb.ragcore.index.ChunkIndex;
 import com.diit.ragkb.ragcore.ingestion.DefaultDocumentIngestionPipeline;
 import com.diit.ragkb.ragcore.ingestion.DocumentIngestionPipeline;
 import com.diit.ragkb.ragcore.ingestion.IngestionJobLifecycleService;
+import com.diit.ragkb.ragcore.ingestion.IngestionMetrics;
+import com.diit.ragkb.ragcore.ingestion.ParsedArtifactStore;
 import com.diit.ragkb.ragcore.parser.impl.DocumentParserFactory;
 import com.diit.ragkb.ragcore.parser.MultimodalDocumentParser;
 import com.diit.ragkb.ragcore.parser.impl.HttpMultimodalDocumentParser;
@@ -21,6 +23,9 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import org.springframework.beans.factory.annotation.Value;
+
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
 
 /** 自研 RAG 摄取管道装配，外部模型与 ES 未配置时不会误启动 Worker。 */
 @Configuration
@@ -65,14 +70,28 @@ public class RagIngestionConfiguration {
         return executor;
     }
 
+    /** 长耗时 OCR/ASR 使用独立线程续租，避免业务线程阻塞时任务被重复领取。 */
+    @Bean(name = "ingestionHeartbeatExecutor", destroyMethod = "shutdown")
+    @ConditionalOnProperty(prefix = "rag.ingestion.worker", name = "enabled", havingValue = "true")
+    public ScheduledExecutorService ingestionHeartbeatExecutor(
+            @Value("${rag.ingestion.worker.concurrency:4}") int concurrency) {
+        return Executors.newScheduledThreadPool(Math.min(Math.max(1, concurrency), 4), runnable -> {
+            Thread thread = new Thread(runnable, "rag-ingestion-heartbeat");
+            thread.setDaemon(true);
+            return thread;
+        });
+    }
+
     @Bean
     @ConditionalOnProperty(prefix = "rag.ingestion.worker", name = "enabled", havingValue = "true")
     public DocumentIngestionPipeline documentIngestionPipeline(DocumentParserFactory parserFactory, Chunker chunker,
                                                                EmbeddingClient embeddingClient, ChunkIndex chunkIndex,
                                                                ObjectStorage objectStorage,
-                                                               IngestionJobLifecycleService lifecycleService) {
+                                                               IngestionJobLifecycleService lifecycleService,
+                                                               ParsedArtifactStore artifactStore,
+                                                               IngestionMetrics metrics) {
         return new DefaultDocumentIngestionPipeline(parserFactory, chunker, embeddingClient, chunkIndex,
-                objectStorage, lifecycleService);
+                objectStorage, lifecycleService, artifactStore, metrics);
     }
 
     @Bean

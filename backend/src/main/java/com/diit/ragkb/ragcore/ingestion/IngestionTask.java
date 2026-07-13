@@ -10,6 +10,8 @@ public record IngestionTask(
         UUID knowledgeBaseId,
         String filename,
         String contentType,
-        String objectStoragePath
+        String objectStoragePath,
+        String parseArtifactPath,
+        String parserVersion
 ) {
 }

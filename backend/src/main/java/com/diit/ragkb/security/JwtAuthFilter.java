@@ -67,7 +67,8 @@ public class JwtAuthFilter extends OncePerRequestFilter {
         return path.equals("/api/v1/auth/register")
                 || path.equals("/api/v1/auth/login")
                 || path.equals("/actuator/health")
-                || path.startsWith("/actuator/health/");
+                || path.startsWith("/actuator/health/")
+                || path.equals("/actuator/prometheus");
     }
 
     /** 是否是免租户上下文但需 JWT 的端点(如改密) */

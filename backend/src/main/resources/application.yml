@@ -7,6 +7,9 @@ server:
 spring:
   application:
     name: rag-kb
+  autoconfigure:
+    # 本项目只使用 rag.elasticsearch.* 自研连接；禁止 Boot 按 localhost:9200 偷建第二个客户端。
+    exclude: org.springframework.boot.autoconfigure.elasticsearch.ElasticsearchRestClientAutoConfiguration
 
   # 数据库 — 从 application-secret.yml 或环境变量覆盖
   datasource:
@@ -53,6 +56,14 @@ spring:
       password: ${REDIS_PASSWORD:}
 
 rag:
+  upload:
+    max-size-bytes: ${RAG_UPLOAD_MAX_SIZE_BYTES:536870912}
+    direct:
+      ttl-seconds: ${RAG_DIRECT_UPLOAD_TTL_SECONDS:900}
+      cleanup-interval-ms: ${RAG_DIRECT_UPLOAD_CLEANUP_INTERVAL_MS:60000}
+  observability:
+    # Prometheus 使用 X-Metrics-Key 请求头；生产环境必须通过 Secret 注入。
+    metrics-token: ${RAG_METRICS_TOKEN:}
   parser:
     multimodal:
       # 独立 OCR/版面/ASR 服务；本地 Parser 遇到扫描 PDF 或图片型 PPTX 时才调用。
@@ -123,10 +134,16 @@ rag:
 
 # Actuator
 management:
+  health:
+    elasticsearch:
+      enabled: ${RAG_ES_HEALTH_ENABLED:${RAG_ES_ENABLED:false}}
   endpoints:
     web:
       exposure:
-        include: health
+        include: health,prometheus
   endpoint:
     health:
       show-details: never
+  metrics:
+    tags:
+      application: ${spring.application.name}

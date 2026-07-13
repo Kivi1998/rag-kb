@@ -242,7 +242,7 @@ class DocumentParserTest {
         };
 
         ParsedDocument parsed = new DocumentParserFactory(List.of(localParser), gateway)
-                .parse(inputOf("scan.pdf", "application/pdf", "placeholder"));
+                .parse(inputOf("scan.pdf", "application/pdf", "%PDF-placeholder"));
 
         assertEquals("OCR 识别到的正文", parsed.sections().get(0).text());
         assertEquals("multimodal-gateway", parsed.metadata().get("parser"));

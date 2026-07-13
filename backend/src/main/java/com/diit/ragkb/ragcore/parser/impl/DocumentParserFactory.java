@@ -5,8 +5,10 @@ import com.diit.ragkb.ragcore.model.ParsedDocument;
 import com.diit.ragkb.ragcore.parser.DocumentParser;
 import com.diit.ragkb.ragcore.parser.MultimodalDocumentParser;
 import com.diit.ragkb.ragcore.parser.NeedsMultimodalParsingException;
+import com.diit.ragkb.ragcore.upload.UploadContentInspector;
 
 import java.io.IOException;
+import java.io.BufferedInputStream;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -59,6 +61,7 @@ public class DocumentParserFactory {
      * @throws IOException 如果没有任何解析器支持该格式或解析过程中出错
      */
     public ParsedDocument parse(DocumentInput input) throws IOException {
+        verifySourceSignature(input);
         for (DocumentParser parser : parsers) {
             if (parser.supports(input.contentType(), input.filename())) {
                 try {
@@ -71,10 +74,23 @@ public class DocumentParserFactory {
                 }
             }
         }
+        if (multimodalParser != null && multimodalParser.supports(input)) {
+            return multimodalParser.parse(input);
+        }
         throw new IOException(
                 "不支持的文档格式: contentType=" + input.contentType()
                 + ", filename=" + input.filename()
                 + "。当前支持: Markdown, TXT, 源代码, YAML/JSON/XML, DOCX, PPTX, PDF（文本型）, SRT/VTT 字幕"
         );
+    }
+
+    /** 直传对象在进入任何高成本解析器之前先校验文件签名，阻断扩展名伪装。 */
+    private void verifySourceSignature(DocumentInput input) throws IOException {
+        try (BufferedInputStream stream = new BufferedInputStream(input.openStream())) {
+            byte[] prefix = stream.readNBytes(8 * 1024);
+            UploadContentInspector.inspect(input.filename(), prefix);
+        } catch (IllegalArgumentException ex) {
+            throw new IOException("源文件内容校验失败: " + ex.getMessage(), ex);
+        }
     }
 }

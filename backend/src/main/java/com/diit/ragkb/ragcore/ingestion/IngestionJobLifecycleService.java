@@ -56,7 +56,17 @@ public class IngestionJobLifecycleService {
         updateDocumentStatus(document, IngestionStatus.PARSING);
         return Optional.of(new IngestionTask(job.getId(), document.getId(), job.getOrg().getId(),
                 job.getKnowledgeBase().getId(), document.getName(), document.getContentType(),
-                document.getObjectStoragePath()));
+                document.getObjectStoragePath(), document.getParseArtifactPath(), document.getParserVersion()));
+    }
+
+    /** 解析成功后记录可复用产物，后续向量化/索引失败重试不重复 OCR/ASR。 */
+    @Transactional
+    public void recordParsedArtifact(UUID jobId, String artifactPath, String parserName, String parserVersion) {
+        KnowledgeDocument document = requireJob(jobId).getDocument();
+        document.setParseArtifactPath(artifactPath);
+        document.setParserName(parserName);
+        document.setParserVersion(parserVersion);
+        document.setParsedAt(Instant.now());
     }
 
     /** 活跃 Worker 定期续租；返回 false 表示任务已被删除、取消或接管。 */

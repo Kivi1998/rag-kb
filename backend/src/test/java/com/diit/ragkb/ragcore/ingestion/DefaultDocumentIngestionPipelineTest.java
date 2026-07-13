@@ -12,12 +12,14 @@ import com.diit.ragkb.ragcore.parser.DocumentParser;
 import com.diit.ragkb.ragcore.parser.impl.DocumentParserFactory;
 import com.diit.ragkb.ragcore.storage.ObjectStorage;
 import org.junit.jupiter.api.Test;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 
 import java.io.ByteArrayInputStream;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -25,6 +27,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 /** 验证 T107 的阶段顺序，防止无索引写入时被标记 READY。 */
 class DefaultDocumentIngestionPipelineTest {
@@ -35,7 +38,7 @@ class DefaultDocumentIngestionPipelineTest {
         UUID kbId = UUID.randomUUID();
         UUID documentId = UUID.randomUUID();
         IngestionTask task = new IngestionTask(UUID.randomUUID(), documentId, orgId, kbId,
-                "guide.md", "text/markdown", "org/x/kb/y/doc.md");
+                "guide.md", "text/markdown", "org/x/kb/y/doc.md", null, null);
 
         DocumentParser parser = new DocumentParser() {
             @Override public boolean supports(String contentType, String filename) { return true; }
@@ -56,9 +59,15 @@ class DefaultDocumentIngestionPipelineTest {
             @Override public void delete(String key) { }
         };
         IngestionJobLifecycleService lifecycle = mock(IngestionJobLifecycleService.class);
+        ParsedArtifactStore artifactStore = mock(ParsedArtifactStore.class);
+        when(artifactStore.load(task)).thenReturn(Optional.empty());
+        when(artifactStore.save(eq(task), any(ParsedDocument.class))).thenReturn(
+                new ParsedArtifactStore.SavedArtifact("org/x/kb/y/doc.md.parsed-v1.json", "local-java-parser", "1"));
 
-        new DefaultDocumentIngestionPipeline(parserFactory, chunker, embedding, index, storage, lifecycle).process(task);
+        new DefaultDocumentIngestionPipeline(parserFactory, chunker, embedding, index, storage, lifecycle,
+                artifactStore, new IngestionMetrics(new SimpleMeterRegistry())).process(task);
 
+        verify(lifecycle).recordParsedArtifact(task.jobId(), "org/x/kb/y/doc.md.parsed-v1.json", "local-java-parser", "1");
         verify(lifecycle).advance(task.jobId(), IngestionStatus.CHUNKING);
         verify(lifecycle).advance(task.jobId(), IngestionStatus.EMBEDDING);
         verify(lifecycle).advance(task.jobId(), IngestionStatus.INDEXING);

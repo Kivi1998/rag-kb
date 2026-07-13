@@ -25,6 +25,40 @@ public final class UploadContentInspector {
             require(isZip(prefix), "PPTX 必须是有效的 OOXML ZIP 文件");
             return "application/vnd.openxmlformats-officedocument.presentationml.presentation";
         }
+        if (extension.equals("png")) {
+            require(startsWith(prefix, new byte[]{(byte) 0x89, 'P', 'N', 'G'}), "PNG 文件头无效");
+            return "image/png";
+        }
+        if (extension.equals("jpg") || extension.equals("jpeg")) {
+            require(startsWith(prefix, new byte[]{(byte) 0xff, (byte) 0xd8, (byte) 0xff}), "JPEG 文件头无效");
+            return "image/jpeg";
+        }
+        if (extension.equals("tif") || extension.equals("tiff")) {
+            boolean littleEndian = startsWith(prefix, new byte[]{'I', 'I', 42, 0});
+            boolean bigEndian = startsWith(prefix, new byte[]{'M', 'M', 0, 42});
+            require(littleEndian || bigEndian, "TIFF 文件头无效");
+            return "image/tiff";
+        }
+        if (extension.equals("wav")) {
+            require(prefix.length >= 12 && startsWith(prefix, "RIFF".getBytes())
+                    && prefix[8] == 'W' && prefix[9] == 'A' && prefix[10] == 'V' && prefix[11] == 'E', "WAV 文件头无效");
+            return "audio/wav";
+        }
+        if (extension.equals("mp3")) {
+            boolean id3 = startsWith(prefix, "ID3".getBytes());
+            boolean frame = prefix.length >= 2 && (prefix[0] & 0xff) == 0xff && ((prefix[1] & 0xe0) == 0xe0);
+            require(id3 || frame, "MP3 文件头无效");
+            return "audio/mpeg";
+        }
+        if (extension.equals("mp4") || extension.equals("mov")) {
+            require(prefix.length >= 12 && prefix[4] == 'f' && prefix[5] == 't' && prefix[6] == 'y' && prefix[7] == 'p',
+                    "MP4/MOV 文件头无效");
+            return extension.equals("mov") ? "video/quicktime" : "video/mp4";
+        }
+        if (extension.equals("mkv")) {
+            require(startsWith(prefix, new byte[]{0x1a, 0x45, (byte) 0xdf, (byte) 0xa3}), "MKV 文件头无效");
+            return "video/x-matroska";
+        }
         if (isTextual(extension)) {
             require(!containsNul(prefix), "文本或代码文件包含二进制空字节");
             return switch (extension) {

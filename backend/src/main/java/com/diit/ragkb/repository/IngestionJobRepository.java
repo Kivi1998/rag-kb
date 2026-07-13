@@ -23,6 +23,8 @@ public interface IngestionJobRepository extends JpaRepository<IngestionJob, UUID
 
     List<IngestionJob> findByStatusOrderByCreatedAtAsc(IngestionStatus status, Pageable pageable);
 
+    long countByStatus(IngestionStatus status);
+
     List<IngestionJob> findByStatusInAndLeaseExpiresAtBefore(List<IngestionStatus> statuses, Instant expiresBefore);
 
     void deleteByDocumentId(UUID documentId);

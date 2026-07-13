@@ -4,6 +4,7 @@ import com.diit.ragkb.common.ApiResponse;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -82,11 +83,19 @@ public class GlobalExceptionHandler {
                 .body(ApiResponse.fail(409, ex.getMessage()));
     }
 
+    /** 数据库唯一约束或关联约束冲突(409)，避免并发幂等请求泄漏为 500。 */
+    @ExceptionHandler(DataIntegrityViolationException.class)
+    public ResponseEntity<ApiResponse<Void>> handleDataIntegrityViolation(DataIntegrityViolationException ex) {
+        log.info("数据完整性冲突", ex);
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(ApiResponse.fail(409, "请求与已有数据冲突，请使用相同参数重试或更换幂等键"));
+    }
+
     /** 文件超过大小限制(413 Payload Too Large) */
     @ExceptionHandler(MaxUploadSizeExceededException.class)
     public ResponseEntity<ApiResponse<Void>> handleMaxUploadSize(MaxUploadSizeExceededException ex) {
         return ResponseEntity.status(HttpStatus.PAYLOAD_TOO_LARGE)
-                .body(ApiResponse.fail(413, "文件大小超过限制(最大 50MB)"));
+                .body(ApiResponse.fail(413, "文件大小超过服务端上传限制"));
     }
 
     /** 服务端内部错误兜底(500) */

@@ -43,7 +43,14 @@ public class HttpMultimodalDocumentParser implements MultimodalDocumentParser {
         if (endpoint == null || endpoint.isBlank()) {
             throw new IllegalArgumentException("多模态解析已启用但未配置 rag.parser.multimodal.endpoint");
         }
-        this.client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
+        if (apiKey == null || apiKey.isBlank()) {
+            throw new IllegalArgumentException("多模态解析已启用但未配置 rag.parser.multimodal.api-key");
+        }
+        // Uvicorn 默认不支持 Java HttpClient 的明文 h2c 升级；固定 HTTP/1.1 以保证流式请求体不丢失。
+        this.client = HttpClient.newBuilder()
+                .version(HttpClient.Version.HTTP_1_1)
+                .connectTimeout(Duration.ofSeconds(10))
+                .build();
         this.objectMapper = objectMapper;
         this.endpoint = URI.create(endpoint);
         this.apiKey = apiKey;
@@ -73,13 +80,14 @@ public class HttpMultimodalDocumentParser implements MultimodalDocumentParser {
                         throw new IllegalStateException("无法读取待解析对象", ex);
                     }
                 }));
-        if (apiKey != null && !apiKey.isBlank()) {
-            builder.header("Authorization", "Bearer " + apiKey);
-        }
+        builder.header("Authorization", "Bearer " + apiKey);
         try {
             HttpResponse<String> response = client.send(builder.build(), HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
             if (response.statusCode() < 200 || response.statusCode() >= 300) {
-                throw new IOException("多模态解析网关返回 HTTP " + response.statusCode());
+                String body = response.body() == null ? "" : response.body().strip();
+                if (body.length() > 500) body = body.substring(0, 500);
+                throw new IOException("多模态解析网关返回 HTTP " + response.statusCode()
+                        + (body.isEmpty() ? "" : ": " + body));
             }
             return toParsedDocument(input, objectMapper.readTree(response.body()));
         } catch (InterruptedException ex) {

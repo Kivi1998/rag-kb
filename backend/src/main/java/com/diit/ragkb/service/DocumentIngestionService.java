@@ -12,6 +12,7 @@ import com.diit.ragkb.ragcore.ingestion.IngestionJobLifecycleService;
 import com.diit.ragkb.ragcore.ingestion.DocumentDeletionService;
 import com.diit.ragkb.ragcore.storage.ObjectStorage;
 import com.diit.ragkb.ragcore.upload.UploadContentInspector;
+import com.diit.ragkb.ragcore.upload.DocumentUploadPolicy;
 import com.diit.ragkb.repository.IngestionJobRepository;
 import com.diit.ragkb.repository.KnowledgeBaseRepository;
 import com.diit.ragkb.repository.KnowledgeDocumentRepository;
@@ -29,9 +30,7 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
 import java.util.List;
-import java.util.Locale;
 import java.util.HexFormat;
-import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -44,12 +43,7 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class DocumentIngestionService {
 
-    private static final int MAX_FILE_NAME_LENGTH = 500;
     private static final int CONTENT_SNIFF_BYTES = 8 * 1024;
-    private static final Set<String> ALLOWED_EXTENSIONS = Set.of(
-            "md", "markdown", "txt", "pdf", "docx", "pptx", "srt", "vtt", "json", "yaml", "yml", "xml",
-            "java", "py", "js", "ts", "tsx", "jsx", "go", "rs", "sql", "sh", "bash",
-            "properties", "conf", "ini", "gradle", "pom");
 
     private final KnowledgeBaseRepository kbRepository;
     private final KnowledgeDocumentRepository documentRepository;
@@ -58,6 +52,7 @@ public class DocumentIngestionService {
     private final ObjectStorage objectStorage;
     private final IngestionJobLifecycleService lifecycleService;
     private final DocumentDeletionService deletionService;
+    private final DocumentUploadPolicy uploadPolicy;
 
     /** 上传原文件并创建一个待消费的摄取任务。 */
     @Transactional
@@ -65,7 +60,8 @@ public class DocumentIngestionService {
         requireDocumentManager();
         KnowledgeBase kb = findKnowledgeBase(kbId);
         Member uploader = currentMember();
-        UploadFile uploadFile = validate(file);
+        DocumentUploadPolicy.ValidatedUpload uploadFile = uploadPolicy.validate(
+                file == null ? null : file.getOriginalFilename(), file == null ? 0 : file.getSize());
 
         KnowledgeDocument document = new KnowledgeDocument();
         document.setKnowledgeBase(kb);
@@ -190,30 +186,6 @@ public class DocumentIngestionService {
         }
     }
 
-    private UploadFile validate(MultipartFile file) {
-        if (file == null || file.isEmpty()) {
-            throw new IllegalArgumentException("请选择非空文件");
-        }
-        String original = file.getOriginalFilename();
-        if (original == null || original.isBlank()) {
-            throw new IllegalArgumentException("文件名不能为空");
-        }
-        String safeFileName = original.replace('\\', '/');
-        safeFileName = safeFileName.substring(safeFileName.lastIndexOf('/') + 1).trim();
-        if (safeFileName.isBlank() || safeFileName.length() > MAX_FILE_NAME_LENGTH || safeFileName.contains("\u0000")) {
-            throw new IllegalArgumentException("文件名不合法");
-        }
-        int dot = safeFileName.lastIndexOf('.');
-        if (dot <= 0 || dot == safeFileName.length() - 1) {
-            throw new IllegalArgumentException("文件必须带有受支持的扩展名");
-        }
-        String extension = safeFileName.substring(dot + 1).toLowerCase(Locale.ROOT);
-        if (!ALLOWED_EXTENSIONS.contains(extension)) {
-            throw new IllegalArgumentException("不支持的文件类型: " + extension);
-        }
-        return new UploadFile(safeFileName, extension);
-    }
-
     private MessageDigest sha256() {
         try {
             return MessageDigest.getInstance("SHA-256");
@@ -243,8 +215,6 @@ public class DocumentIngestionService {
                 job.getStatus() == IngestionStatus.FAILED && job.getAttempt() < job.getMaxAttempts(),
                 job.getCreatedAt(), job.getUpdatedAt());
     }
-
-    private record UploadFile(String safeFileName, String extension) { }
 
     public record UploadResult(DocumentView document, JobView job) { }
 

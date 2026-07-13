@@ -45,6 +45,18 @@ public class KnowledgeDocument {
     @Column(name = "content_sha256", length = 64)
     private String contentSha256;
 
+    @Column(name = "parse_artifact_path", length = 1000)
+    private String parseArtifactPath;
+
+    @Column(name = "parser_name", length = 200)
+    private String parserName;
+
+    @Column(name = "parser_version", length = 100)
+    private String parserVersion;
+
+    @Column(name = "parsed_at")
+    private Instant parsedAt;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 30)
     private IngestionStatus status = IngestionStatus.QUEUED;

@@ -66,6 +66,9 @@ public class DocumentDeletionService {
             if (document.getObjectStoragePath() != null && !document.getObjectStoragePath().isBlank()) {
                 objectStorage.delete(document.getObjectStoragePath());
             }
+            if (document.getParseArtifactPath() != null && !document.getParseArtifactPath().isBlank()) {
+                objectStorage.delete(document.getParseArtifactPath());
+            }
             jobRepository.deleteByDocumentId(document.getId());
             documentRepository.delete(document);
             return true;
