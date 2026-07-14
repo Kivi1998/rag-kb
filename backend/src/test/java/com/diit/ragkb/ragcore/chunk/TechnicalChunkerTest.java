@@ -291,19 +291,55 @@ class TechnicalChunkerTest {
     @Test
     @DisplayName("overlap 内容不应以半句话开头（必须对齐到完整句子）")
     void overlapNeverStartsWithPartialSentence() {
-        String text = ("这是关于理赔流程的完整说明，包含多个步骤和注意事项。"
-                + "首先需要提交申请材料，然后等待审核结果，审核通过后进行赔付。\n").repeat(30);
+        // 关键设计：句子长度必须各不相同（非周期性重复），否则 overlapCharacters
+        // 可能恰好凑成"句子单元长度的整数倍 + 常数"，导致哪怕 tailOverlap() 完全
+        // 不做句子边界对齐、只做裸的 substring 截断，也会因为数值巧合"意外"落在
+        // 句子边界上，使测试对回归失去判别力（详见 task-4-report.md Fix Round 1）。
+        List<String> sentences = List.of(
+                "理赔流程需要提交完整的申请材料，包括身份证明和相关票据。",
+                "审核环节由专人负责，通常在五个工作日内完成初步审查。",
+                "审核通过后系统会自动生成赔付单据并转入财务部门处理。",
+                "如遇材料不全的情况，客服会主动联系客户补充所需文件。",
+                "赔付到账后客户可以在系统里随时查询详细的流水记录。",
+                "对于争议案件，公司设有专门的复核小组进行二次评估。",
+                "复核结论会在十个工作日内以书面形式通知申请人本人。",
+                "整个流程强调透明和可追溯，每个环节都有明确的时限。"
+        );
+        StringBuilder textBuilder = new StringBuilder();
+        for (int i = 0; i < 30; i++) {
+            textBuilder.append(sentences.get(i % sentences.size())).append("\n");
+        }
+        String text = textBuilder.toString();
+
         ParsedDocument doc = docWith(text);
         List<Chunk> chunks = chunksFor(doc, new ChunkingOptions(300, 60, false));
         assertTrue(chunks.size() > 1);
-        // 除第一块外，其余块要么以完整句首开头，要么是上一块结尾的整句重叠，
-        // 不应该以一个"半句片段+后续内容"的形式开头导致读起来断章取义。
+
+        // 悬空标点检查（原有的间接代理检查，保留作为快速信号）。
         for (int i = 1; i < chunks.size(); i++) {
             String content = chunks.get(i).content();
             assertFalse(content.startsWith("，") || content.startsWith(",")
                             || content.startsWith("、"),
                     "块不应以悬空标点开头（说明 overlap 从句子中间截断）: "
                             + content.substring(0, Math.min(20, content.length())));
+        }
+
+        // 正面结构断言：每个后续块的开头内容必须能在原文中找到，且其前一个
+        // 字符必须是真正的句子结束符（。！？；或换行），或者该内容本来就在
+        // 原文起始处（position == 0）。这直接编码"overlap 从句子边界后开始"
+        // 这个不变量，而不是"不以逗号开头"这种间接、易被巧合绕过的代理检查。
+        String sentenceEnders = "。！？；\n";
+        for (int i = 1; i < chunks.size(); i++) {
+            String content = chunks.get(i).content();
+            String probe = content.substring(0, Math.min(15, content.length()));
+            int pos = text.indexOf(probe);
+            assertTrue(pos >= 0,
+                    "块开头内容应能在原文中定位到: [" + probe + "]");
+            assertTrue(pos == 0 || sentenceEnders.indexOf(text.charAt(pos - 1)) >= 0,
+                    "块开头前一个字符必须是句子结束符（。！？；或换行），说明 overlap 是从"
+                            + "句子边界后开始的，而不是句子中间任意位置截断。块开头: [" + probe
+                            + "]，原文中前一字符: ["
+                            + (pos > 0 ? text.charAt(pos - 1) : "<start>") + "]");
         }
     }
 
