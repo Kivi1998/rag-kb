@@ -26,7 +26,10 @@ public class OpenAiCompatibleRerankerClient implements RerankerClient {
 
     public OpenAiCompatibleRerankerClient(RagModelProperties.Rerank properties, ObjectMapper objectMapper) {
         this(properties, objectMapper, HttpClient.newBuilder()
-                .connectTimeout(Duration.ofMillis(requirePositiveTimeout(properties))).build());
+                .connectTimeout(Duration.ofMillis(requirePositiveTimeout(properties)))
+                // 强制 HTTP/1.1：部分本地模型网关（如 Xinference）不支持明文 h2c 升级协商。
+                .version(HttpClient.Version.HTTP_1_1)
+                .build());
     }
 
     OpenAiCompatibleRerankerClient(RagModelProperties.Rerank properties, ObjectMapper objectMapper,

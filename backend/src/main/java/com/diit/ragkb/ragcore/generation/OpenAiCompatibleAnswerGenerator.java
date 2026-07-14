@@ -32,7 +32,10 @@ public class OpenAiCompatibleAnswerGenerator implements AnswerGenerator {
     public OpenAiCompatibleAnswerGenerator(RagModelProperties.Generation properties, ObjectMapper objectMapper,
                                            PromptAssembler promptAssembler) {
         this(properties, objectMapper, promptAssembler, HttpClient.newBuilder()
-                .connectTimeout(Duration.ofMillis(requirePositiveTimeout(properties))).build());
+                .connectTimeout(Duration.ofMillis(requirePositiveTimeout(properties)))
+                // 强制 HTTP/1.1：部分本地模型网关（如 Xinference）不支持明文 h2c 升级协商。
+                .version(HttpClient.Version.HTTP_1_1)
+                .build());
     }
 
     OpenAiCompatibleAnswerGenerator(RagModelProperties.Generation properties, ObjectMapper objectMapper,

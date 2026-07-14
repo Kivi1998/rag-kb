@@ -33,7 +33,8 @@ async function handleLogin() {
   <div class="login-container">
     <el-card class="login-card">
       <template #header>
-        <h2>rag-kb 登录</h2>
+        <h2>rag-kb</h2>
+        <p class="subtitle">企业技术文档知识库</p>
       </template>
       <el-form @submit.prevent="handleLogin">
         <el-form-item label="邮箱">
@@ -61,5 +62,16 @@ async function handleLogin() {
 }
 .login-card {
   width: 400px;
+  border-radius: 12px;
+}
+.login-card :deep(h2) {
+  margin: 0;
+  font-size: 22px;
+  color: var(--brand-ink);
+}
+.subtitle {
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: var(--brand-ink-soft);
 }
 </style>

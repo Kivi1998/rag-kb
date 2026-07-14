@@ -27,38 +27,51 @@ const isAdmin = computed(() => authStore.role === 'OWNER' || authStore.role === 
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 12px 20px;
-  background: #409eff;
-  color: white;
+  padding: 14px 24px;
+  background: var(--brand-surface);
+  color: var(--brand-ink);
+  border-bottom: 1px solid var(--brand-border);
 }
 .header-left {
   display: flex;
   align-items: center;
-  gap: 24px;
+  gap: 28px;
 }
 .logo {
-  font-size: 18px;
-  font-weight: bold;
+  font-family: var(--brand-font-serif);
+  font-size: 19px;
+  font-weight: 600;
+  color: var(--brand-ink);
 }
 .nav-links {
   display: flex;
-  gap: 16px;
+  gap: 20px;
 }
 .nav-link {
-  color: rgba(255, 255, 255, 0.85);
+  color: var(--brand-ink-soft);
   text-decoration: none;
   font-size: 14px;
+  padding-bottom: 4px;
+  border-bottom: 2px solid transparent;
 }
-.nav-link:hover,
+.nav-link:hover {
+  color: var(--brand-ink);
+}
 .nav-link.router-link-active {
-  color: white;
+  color: var(--brand-accent);
+  border-bottom-color: var(--brand-accent);
 }
 .user-info {
   display: flex;
   align-items: center;
   gap: 12px;
+  color: var(--brand-ink-soft);
+  font-size: 14px;
 }
 .user-info .el-button {
-  color: white;
+  color: var(--brand-ink-soft);
+}
+.user-info .el-button:hover {
+  color: var(--brand-accent);
 }
 </style>

@@ -130,8 +130,8 @@ watch(() => props.kbId, () => { messages.value = []; question.value = ''; cancel
 .panel-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
 .panel-header h2 { margin: 0; font-size: 18px; }
 .panel-header p { margin: 5px 0 0; color: var(--el-text-color-secondary); font-size: 13px; }
-.transcript { min-height: 280px; flex: 1; overflow: auto; border: 1px solid var(--el-border-color-light); border-radius: 8px; padding: 14px; background: #fafcff; }
-.message { max-width: 92%; margin: 0 0 14px; border-radius: 8px; padding: 10px 12px; background: white; border: 1px solid var(--el-border-color-lighter); }
+.transcript { min-height: 280px; flex: 1; overflow: auto; border: 1px solid var(--brand-border); border-radius: 8px; padding: 14px; background: var(--brand-surface-soft); }
+.message { max-width: 92%; margin: 0 0 14px; border-radius: 8px; padding: 10px 12px; background: var(--brand-surface); border: 1px solid var(--brand-border-soft); }
 .message-user { margin-left: auto; background: var(--el-color-primary-light-9); }
 .message-refusal { border-color: var(--el-color-warning-light-5); background: var(--el-color-warning-light-9); }
 .message-error { border-color: var(--el-color-danger-light-5); background: var(--el-color-danger-light-9); }
@@ -139,7 +139,7 @@ watch(() => props.kbId, () => { messages.value = []; question.value = ''; cancel
 .message-content { margin: 5px 0 0; white-space: pre-wrap; line-height: 1.6; }
 .citations { margin-top: 10px; border-top: 1px dashed var(--el-border-color); padding-top: 8px; }
 .citation-title { margin: 0 0 7px; color: var(--el-text-color-secondary); font-size: 12px; }
-.citation-card { margin: 6px 0; padding: 8px; border-radius: 5px; background: #f5f7fa; font-size: 13px; }
+.citation-card { margin: 6px 0; padding: 8px; border-radius: 5px; background: var(--brand-surface-soft); border: 1px solid var(--brand-border-soft); font-size: 13px; }
 .citation-card strong, .citation-card span, .citation-card small { display: block; }
 .citation-card p { margin: 5px 0; white-space: pre-wrap; }
 .citation-location, .citation-card small { color: var(--el-text-color-secondary); }

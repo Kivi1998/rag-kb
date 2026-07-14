@@ -21,5 +21,7 @@ import AppHeader from './components/AppHeader.vue'
 }
 .el-main {
   padding: 20px;
+  background: var(--brand-bg);
+  min-height: calc(100vh - 57px);
 }
 </style>

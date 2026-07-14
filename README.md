@@ -52,15 +52,22 @@ openspec/        需求规格与变更记录
 
 文档上传与解析已在本机生产同构环境完成 5000 份多模态文档全链路验收：5000/5000 最终 `READY`、0 失败，覆盖 OCR、ASR、MinIO、Elasticsearch、双 Worker 故障接管与 Embedding 瞬时 503 重试。
 
-完整 RAG 的真实模型召回质量、日均 5000 次查询容量、生产网络 TLS/CORS 和 24 小时稳定性仍应在目标环境单独验收。
+检索问答全链路（真实 Xinference Embedding/Rerank + DeepSeek 生成模型）已完成端到端人工验证：上传 → 解析 → 切块 → 向量化 → ES 索引 → BM25+kNN+RRF → Rerank → SSE 问答 → 引用，全部走通。
+
+以下仍需在目标环境单独验收：正式 Recall@5/MRR 评测（`eval/` 目前只有示例数据集）、日均 5000 次查询容量、拒答/降级/跨组织隔离的自动化用例、生产网络 TLS/CORS 和 24 小时稳定性。
 
 ## 文档入口
 
 - [总体架构](docs/architecture.md)
-- [自研 RAG 核心重构设计](docs/自研RAG核心重构架构设计.md)
+- [自研 RAG 核心重构设计](docs/自研RAG核心重构架构设计.md)（含各阶段完成状态）
 - [上传、解析与部署验收手册](docs/自研RAG摄取部署与验收手册.md)
 - [5000 份多模态文档生产验收报告](docs/文档上传与多模态解析生产验收报告.md)
 - [验收环境复现说明](acceptance/README.md)
+- [RAG 重构可复用资产清单](docs/RAG重构可复用资产清单.md)（第三方/内部代码复用与许可边界）
+- [离线评测工具](eval/README.md)
+- [变更记录](CHANGELOG.md)
+- [延后事项清单](TODOS.md)
+- `docs/archive/` — 已完成阶段的历史规划稿（任务分工、迁移设计），仅供追溯，不代表当前状态
 
 ## 开发流程
 

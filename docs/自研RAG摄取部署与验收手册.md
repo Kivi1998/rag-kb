@@ -356,7 +356,7 @@ ACCEPTANCE_MODE=full ACCEPTANCE_DOCUMENT_COUNT=5000 ACCEPTANCE_UPLOAD_CONCURRENC
 4. 最终 `document` 与关联 `ingestion_job` 记录被删除；
 5. 若任一步失败，记录保持 `DELETING`，等待下一次 cleanup，而不是返回伪成功。
 
-### 6.6 后续完整 RAG：混合检索与 SSE 验收（未执行）
+### 6.6 后续完整 RAG：混合检索与 SSE 验收（部分完成，2026-07-14）
 
 使用已完成摄取的脱敏 Markdown，包含类名、错误码、配置项和普通说明文字。
 
@@ -375,6 +375,14 @@ curl -N -D /tmp/rag-query.headers -X POST "http://localhost:8080/api/v1/knowledg
 4. 使用不存在的问题，预期收到 `refusal` 和 `done`，且 Generation 网关没有请求日志。
 5. 临时断开 Rerank，预期仍返回 RRF 结果；临时断开 Embedding，若 BM25 有命中则仍返回基于 BM25 的结果。两类降级均需记录告警但不得输出 Key、Prompt 或文档正文。
 6. 使用另一组织的 Token/`X-Org-Id` 查询相同 `KB_ID`，预期 HTTP 404；不得返回任何 `source`、文档名或分数。
+
+**2026-07-14 人工验证结果（覆盖第 2、3 点，第 4-6 点尚未验证）：**
+
+- 真实模型端点：Embedding/Rerank 用内网 Xinference（`bge-large-zh-v1.5`，1024 维；`bge-reranker-large`），生成模型用 DeepSeek 在线 API（`deepseek-chat`）。
+- 上传一份真实技术 PDF，摄取全链路（`QUEUED → PARSING → CHUNKING → EMBEDDING → INDEXING → READY`）一次通过，ES 写入 58 个 chunk。
+- 调用 `POST /api/v1/knowledge-bases/{kbId}/query` 收到多个 `source` 事件（相关度分数 0.97-0.99）、连续 `chunk` 事件，最终 `done`；生成的回答准确总结了 PDF 内容并带引用编号，符合第 3 点预期。
+- **发现的基础设施问题**：内网 Xinference 前面的网关对"HTTP 请求头与请求体分两次到达"处理有 bug——curl（单次写入）能通，Java `HttpClient`/Python `urllib`（分两次写入）必现 502。用本机 TCP 转发代理（`scripts/xinference-forward-proxy.py`，未提交仓库）中转后规律性地能绕开该时序问题，稳定跑通；根治需要检查该网关的请求体读取逻辑（是否未循环读满 `Content-Length`，或反向代理缺 `proxy_request_buffering on`）。
+- 第 4 点（拒答）、第 5 点（降级）、第 6 点（跨组织隔离）本轮未测试，仍待专项验证；正式 Recall@5/MRR 评测仍未执行（`eval/` 数据集只有示例样本）。
 
 ### 6.7 后续完整 RAG：审计与可观测性验收（未执行）
 

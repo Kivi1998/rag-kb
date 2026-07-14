@@ -40,7 +40,7 @@ onMounted(() => {
 }
 .sidebar {
   width: 220px;
-  border-right: 1px solid #e4e7ed;
+  border-right: 1px solid var(--brand-border);
   padding: 12px;
 }
 .main-content {
@@ -52,7 +52,7 @@ onMounted(() => {
 .workspace-title h1 { margin: 0; font-size: 22px; }
 .workspace-title span { color: var(--el-text-color-secondary); font-size: 13px; }
 .workspace-panels { display: grid; grid-template-columns: minmax(400px, 1fr) minmax(400px, 1.1fr); gap: 16px; min-height: calc(100vh - 190px); }
-.workspace-panels > * { min-width: 0; border: 1px solid var(--el-border-color-lighter); border-radius: 10px; padding: 16px; background: white; }
+.workspace-panels > * { min-width: 0; border: 1px solid var(--brand-border); border-radius: 10px; padding: 16px; background: var(--brand-surface); }
 @media (max-width: 980px) { .workspace-panels { grid-template-columns: 1fr; } }
 .empty-tip {
   display: flex;

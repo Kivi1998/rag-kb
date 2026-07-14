@@ -1,7 +1,11 @@
+@import './theme.css';
+
 /* 全局样式重置 */
 body {
   margin: 0;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  background: var(--brand-bg);
+  color: var(--brand-ink);
+  font-family: var(--brand-font-sans);
 }
 
 #app {
