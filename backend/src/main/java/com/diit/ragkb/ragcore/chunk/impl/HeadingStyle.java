@@ -15,10 +15,11 @@ import java.util.regex.Pattern;
 enum HeadingStyle {
 
     /** 正式合同/法规常见：第X编/章/节/条，(一)(二) */
+    // 顺序即层级：编/部分 最粗 → 章 → 节 → 条 → (一)(二)，Task 2 的递归降级依赖这个顺序对应真实嵌套深度
     CN_FORMAL(List.of(
+            Pattern.compile("^第[零一二三四五六七八九十百0-9]+(编|部分)"),
             Pattern.compile("^第[零一二三四五六七八九十百0-9]+章"),
             Pattern.compile("^第[零一二三四五六七八九十百0-9]+节"),
-            Pattern.compile("^第[零一二三四五六七八九十百0-9]+(编|部分)"),
             Pattern.compile("^第[零一二三四五六七八九十百0-9]+条"),
             Pattern.compile("^[（(][零一二三四五六七八九十0-9]+[）)]")
     )),

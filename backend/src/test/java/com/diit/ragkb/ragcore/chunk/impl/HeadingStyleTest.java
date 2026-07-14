@@ -72,7 +72,7 @@ class HeadingStyleTest {
     @Test
     @DisplayName("levelOf 返回正确的级别下标")
     void levelOfReturnsCorrectIndex() {
-        assertEquals(0, HeadingStyle.CN_FORMAL.levelOf("第一章 总则"));
+        assertEquals(1, HeadingStyle.CN_FORMAL.levelOf("第一章 总则"));
         assertEquals(3, HeadingStyle.CN_FORMAL.levelOf("第一条 定义"));
         assertEquals(-1, HeadingStyle.CN_FORMAL.levelOf("普通文字"));
     }
