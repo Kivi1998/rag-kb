@@ -58,3 +58,4 @@ frontend/*.d.ts
 __pycache__/
 *.py[cod]
 .gstack/
+.context/
