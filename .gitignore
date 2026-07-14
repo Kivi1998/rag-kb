@@ -59,3 +59,6 @@ __pycache__/
 *.py[cod]
 .gstack/
 .context/
+
+# ===== deepdoc rag_tokenizer 生成的 trie 缓存（可由 huqie.txt 重新构建，不入库）=====
+parser-gateway/app/deepdoc/res/*.trie
