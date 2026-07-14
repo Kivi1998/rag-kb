@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 import os
 import threading
 from pathlib import Path
@@ -31,6 +32,9 @@ def parse_document(path: Path, filename: str) -> dict[str, Any]:
 
 def _parse_pdf(path: Path) -> dict[str, Any]:
     import fitz
+    from PIL import Image
+
+    from .deepdoc.pipeline import parse_page as deepdoc_parse_page
 
     document = fitz.open(path)
     try:
@@ -38,14 +42,25 @@ def _parse_pdf(path: Path) -> dict[str, Any]:
         ocr_pages = 0
         for index, page in enumerate(document):
             text = page.get_text("text").strip()
-            metadata: dict[str, str] = {"type": "page", "ocr": "false"}
-            if len(text) < 100:
-                pixmap = page.get_pixmap(matrix=fitz.Matrix(2, 2), alpha=False)
-                text = _ocr_bytes(pixmap.tobytes("png"))
-                metadata["ocr"] = "true"
-                ocr_pages += 1
-            if text:
-                sections.append(_section(text, page_no=index + 1, metadata=metadata))
+            if len(text) >= 100:
+                # 可提取文本页：直接用原生文本，速度快、无需模型。
+                # 注：这条路径目前不做版面分析，多栏文本型 PDF 仍可能按行拼接；
+                # 后续如需修复，思路是改用 page.get_text("words") 取带位置信息
+                # 的文字框，复用下面 OCR 分支同样的 LayoutRecognizer 分组逻辑。
+                sections.append(_section(text, page_no=index + 1,
+                                         metadata={"type": "page", "ocr": "false"}))
+                continue
+
+            # 扫描页/低文本页：渲染成图片，走 deepdoc 的 OCR + 版面分析 + 表格结构
+            # 识别流水线（替代原来的 RapidOCR 纯文字识别），解决多栏错拼和无边框
+            # 表格错位的问题。
+            pixmap = page.get_pixmap(matrix=fitz.Matrix(2, 2), alpha=False)
+            image = Image.open(io.BytesIO(pixmap.tobytes("png")))
+            page_sections = deepdoc_parse_page(image)
+            ocr_pages += 1
+            for sec in page_sections:
+                sections.append(_section(sec["text"], page_no=index + 1,
+                                         metadata={"type": sec.get("layout_type") or "page", "ocr": "true"}))
         if not sections:
             raise ParseError("PDF contains no extractable text")
         return {"sections": sections, "metadata": {
@@ -129,43 +144,58 @@ def _parse_pptx(path: Path) -> dict[str, Any]:
 
 
 def _parse_image(path: Path) -> dict[str, Any]:
-    text = _ocr_bytes(path.read_bytes())
-    if not text:
+    from PIL import Image
+
+    from .deepdoc.pipeline import parse_page as deepdoc_parse_page
+
+    image = Image.open(path)
+    page_sections = deepdoc_parse_page(image)
+    if not page_sections:
         raise ParseError("image OCR produced no text")
-    return {"sections": [_section(text, page_no=1, metadata={"type": "image", "ocr": "true"})],
+    sections = [_section(sec["text"], page_no=1,
+                         metadata={"type": sec.get("layout_type") or "image", "ocr": "true"})
+                for sec in page_sections]
+    return {"sections": sections,
             "metadata": {"format": path.suffix.lower().lstrip("."), "ocrPageCount": "1"}}
 
 
-_ocr_engine: Any = None
 _ocr_lock = threading.Lock()
 
 
 def ensure_ocr_ready() -> str:
-    global _ocr_engine
-    try:
-        from rapidocr_onnxruntime import RapidOCR
-    except ImportError as exc:
-        raise ParserUnavailableError("OCR runtime is not installed") from exc
+    """确保 deepdoc OCR 模型已加载（供 /ready 健康检查探测，也被
+    _ocr_bytes 用于文档内嵌图片的纯文字识别，不做版面/表格分析）。"""
+    from .deepdoc import pipeline
     with _ocr_lock:
-        if _ocr_engine is None:
+        if pipeline._ocr is None:
             try:
-                _ocr_engine = RapidOCR()
+                from .deepdoc.vision import OCR
+                pipeline._ocr = OCR()
             except Exception as exc:
                 raise ParserUnavailableError("OCR model is unavailable") from exc
-    return "rapidocr-onnxruntime"
+    return "deepdoc-ocr"
 
 
 def ocr_is_loaded() -> bool:
-    return _ocr_engine is not None
+    from .deepdoc import pipeline
+    return pipeline._ocr is not None
 
 
 def _ocr_bytes(value: bytes) -> str:
+    """给 DOCX/PPTX 里内嵌的单张图片（截图、Logo 等）做纯文字识别。
+    这类图片一般不是多栏/表格版面，不需要跑版面分析和表格结构识别，
+    直接用 OCR 模型识别文字即可，比跑完整 parse_page 更快。"""
+    import numpy as np
+    from PIL import Image
+
     ensure_ocr_ready()
+    from .deepdoc import pipeline
     with _ocr_lock:
-        result, _ = _ocr_engine(value)
-    if not result:
+        np_image = np.array(Image.open(io.BytesIO(value)).convert("RGB"))
+        raw_boxes = pipeline._ocr(np_image)
+    if not raw_boxes:
         return ""
-    return "\n".join(str(item[1]).strip() for item in result if len(item) > 1 and str(item[1]).strip())
+    return "\n".join(text.strip() for _, (text, _score) in raw_boxes if text and text.strip())
 
 
 _whisper_model: Any = None
