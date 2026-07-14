@@ -9,3 +9,17 @@ rapidocr-onnxruntime==1.4.4
 faster-whisper==1.2.0
 requests==2.32.4
 prometheus-client==0.21.1
+
+# --- deepdoc（移植自 RAGFlow，Apache 2.0，见 app/deepdoc/LICENSE_THIRD_PARTY）---
+# 版面分析 + OCR + 表格结构识别；rapidocr-onnxruntime 暂时保留，
+# 待 _parse_pdf/_parse_image 完成向 deepdoc 的编排整合、验证通过后再移除。
+onnxruntime==1.27.0
+huggingface_hub==1.23.0
+opencv-python-headless==5.0.0.93
+shapely==2.1.2
+pyclipper==1.4.0
+six==1.17.0
+# rag_tokenizer（表格文本分词/命名实体粗判）依赖
+datrie==0.8.3
+hanziconv==0.3.2
+nltk==3.10.0
