@@ -96,6 +96,48 @@ class TechnicalChunkerTest {
         assertTrue(chunks.size() >= 2, "含中文条款的文档应切为多个块, 实际: " + chunks.size());
     }
 
+    // ── 递归级联切分（招式 2）──
+
+    @Test
+    @DisplayName("过长的「第X条」先按内部的（一）（二）细分，而不是直接按句子硬切")
+    void recursiveSplitPrefersFinerStructureBeforeSentence() {
+        StringBuilder article = new StringBuilder("第一条 责任范围\n");
+        for (int i = 1; i <= 6; i++) {
+            article.append("（").append(cnNum(i)).append("）本公司对被保险人在保险期间内因下列第")
+                    .append(i).append("项原因导致的损失承担赔偿责任，具体包括但不限于因意外事故、"
+                            + "疾病或其他约定情形所产生的医疗费用、误工损失及相关合理支出。\n");
+        }
+        ParsedDocument doc = docWith(article.toString());
+        ChunkingOptions tight = new ChunkingOptions(200, 30, true);
+        List<Chunk> chunks = chunksFor(doc, tight);
+
+        assertTrue(chunks.size() > 1, "过长条款应被切成多块");
+        // 每一块要么完整包含一个「（X）」小项，要么至少不是从「（X）」中间任意字符处硬切断
+        for (Chunk c : chunks) {
+            String content = c.content().strip();
+            assertFalse(content.matches("^[，,].*"), "不应该从子项中间开始，出现悬空的逗号开头: " + content);
+        }
+    }
+
+    private static String cnNum(int i) {
+        String[] cn = {"一", "二", "三", "四", "五", "六"};
+        return cn[i - 1];
+    }
+
+    @Test
+    @DisplayName("没有更细编号可用时降级到空行分段，而不是直接句子切")
+    void fallsBackToParagraphWhenNoFinerStructure() {
+        StringBuilder article = new StringBuilder("第一条 释义\n");
+        for (int i = 0; i < 4; i++) {
+            article.append("这是第").append(i).append("个自然段，描述与本条款相关的背景信息和适用范围，"
+                    + "内容较长以触发超长条款的降级切分逻辑。\n\n");
+        }
+        ParsedDocument doc = docWith(article.toString());
+        ChunkingOptions tight = new ChunkingOptions(150, 20, true);
+        List<Chunk> chunks = chunksFor(doc, tight);
+        assertTrue(chunks.size() > 1);
+    }
+
     // ── 代码块保护 ──
 
     @Test

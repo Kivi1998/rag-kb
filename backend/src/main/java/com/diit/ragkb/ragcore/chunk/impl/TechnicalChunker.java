@@ -61,9 +61,15 @@ public class TechnicalChunker implements Chunker {
     public List<Chunk> chunk(ParsedDocument document, ChunkingContext context, ChunkingOptions options) {
         List<Chunk> chunks = new ArrayList<>();
 
+        List<String> allLines = document.sections().stream()
+                .flatMap(s -> s.text() == null ? java.util.stream.Stream.<String>empty()
+                        : java.util.Arrays.stream(s.text().split("\n")))
+                .toList();
+        HeadingStyle style = HeadingStyle.detectDominant(allLines, 3).orElse(null);
+
         for (DocumentSection section : document.sections()) {
             List<Chunk> sectionChunks = chunkSection(
-                    section, document, context.organizationId(), context.knowledgeBaseId(), options);
+                    section, document, context.organizationId(), context.knowledgeBaseId(), options, style);
             chunks.addAll(sectionChunks);
         }
 
@@ -83,7 +89,7 @@ public class TechnicalChunker implements Chunker {
     }
 
     private List<Chunk> chunkSection(DocumentSection section, ParsedDocument document,
-                                      UUID orgId, UUID kbId, ChunkingOptions options) {
+                                      UUID orgId, UUID kbId, ChunkingOptions options, HeadingStyle style) {
         List<Chunk> chunks = new ArrayList<>();
         String text = section.text();
         if (text == null || text.isBlank()) return chunks;
@@ -139,24 +145,19 @@ public class TechnicalChunker implements Chunker {
             buf.append(unit);
             currentLine += unitLines;
 
-            // if single unit alone exceeds max, split at sentence boundaries
-            while (buf.length() > options.maxCharacters()) {
-                int splitAt = findSentenceSplit(buf.toString(), options.maxCharacters());
-                String head = buf.substring(0, splitAt);
-                int headLineEnd = bufferLineStart + countLines(head) - 1;
-                chunks.add(flushBuffer(new StringBuilder(head), section, document, orgId, kbId, chunks.size(),
-                        bufferLineStart, headLineEnd));
-
-                // carry overlap + remainder
-                String tailPart = buf.substring(splitAt);
-                String overlap = tailOverlap(head, options.overlapCharacters());
+            // if single unit alone exceeds max, recursively split at finer structure,
+            // then paragraph, then sentence boundaries (招式 2：多级递归降级)
+            if (buf.length() > options.maxCharacters()) {
+                String overlong = buf.toString();
                 buf.setLength(0);
-                if (!overlap.isEmpty()) buf.append(overlap);
-                buf.append(tailPart);
-                bufferLineStart = overlap.isEmpty()
-                        ? headLineEnd + 1
-                        : Math.max(section.lineStart() == null ? 1 : section.lineStart(),
-                                headLineEnd - countLines(overlap) + 1);
+                int unitLevel = style == null ? -1 : style.levelOf(overlong.lines().findFirst().orElse(""));
+                for (String piece : recursiveSplit(overlong, style, unitLevel, options)) {
+                    int pieceLineEnd = bufferLineStart + countLines(piece) - 1;
+                    chunks.add(flushBuffer(new StringBuilder(piece), section, document, orgId, kbId, chunks.size(),
+                            bufferLineStart, pieceLineEnd));
+                    bufferLineStart = pieceLineEnd + 1;
+                }
+                currentLine = bufferLineStart;
             }
         }
 
@@ -171,7 +172,7 @@ public class TechnicalChunker implements Chunker {
 
     /**
      * Split text at natural structure boundaries. Overlong units are split in
-     * {@link #chunkSection(DocumentSection, ParsedDocument, UUID, UUID, ChunkingOptions)}
+     * {@link #chunkSection(DocumentSection, ParsedDocument, UUID, UUID, ChunkingOptions, HeadingStyle)}
      * so that {@link ChunkingOptions#maxCharacters()} is the only length limit.
      */
     List<String> splitToUnits(String text, ChunkingOptions options) {
@@ -273,6 +274,75 @@ public class TechnicalChunker implements Chunker {
         int lastEnd = maxChars;
         while (m.find()) lastEnd = m.end();
         return lastEnd;
+    }
+
+    /**
+     * 递归地把一个过长的文本单元按"更细一级编号 → 空行分段 → 句子边界"逐级
+     * 降级切分，每一级都优先保住更大的语义单元，装不下才继续往下降级。
+     */
+    private List<String> recursiveSplit(String unit, HeadingStyle style, int level, ChunkingOptions options) {
+        if (unit.length() <= options.maxCharacters()) {
+            return List.of(unit);
+        }
+        if (style != null && level + 1 < style.levels().size()) {
+            List<String> finer = splitByLevel(unit, style, level + 1);
+            if (finer.size() > 1) {
+                List<String> result = new ArrayList<>();
+                for (String piece : finer) {
+                    result.addAll(recursiveSplit(piece, style, level + 1, options));
+                }
+                return result;
+            }
+        }
+        List<String> paragraphs = splitByBlankLine(unit);
+        if (paragraphs.size() > 1) {
+            List<String> result = new ArrayList<>();
+            for (String p : paragraphs) {
+                result.addAll(recursiveSplit(p, style, level, options));
+            }
+            return result;
+        }
+        return splitBySentenceWithOverlap(unit, options);
+    }
+
+    /** 按某个编号级别的正则，在行边界处把文本切成若干段（每段以命中该级别的行开头）。 */
+    private List<String> splitByLevel(String text, HeadingStyle style, int level) {
+        String[] lines = text.split("\n", -1);
+        List<String> pieces = new ArrayList<>();
+        StringBuilder current = new StringBuilder();
+        for (String line : lines) {
+            if (style.levelOf(line) == level && !current.isEmpty()) {
+                pieces.add(current.toString().strip());
+                current.setLength(0);
+            }
+            current.append(line).append('\n');
+        }
+        if (!current.isEmpty()) pieces.add(current.toString().strip());
+        return pieces.stream().filter(s -> !s.isEmpty()).toList();
+    }
+
+    /** 按连续空行把文本切成自然段。 */
+    private List<String> splitByBlankLine(String text) {
+        return java.util.Arrays.stream(text.split("\n\\s*\n"))
+                .map(String::strip)
+                .filter(s -> !s.isEmpty())
+                .toList();
+    }
+
+    /** 最后一级降级：按句子边界切分，沿用已有的 findSentenceSplit + tailOverlap。 */
+    private List<String> splitBySentenceWithOverlap(String text, ChunkingOptions options) {
+        List<String> pieces = new ArrayList<>();
+        StringBuilder remaining = new StringBuilder(text);
+        while (remaining.length() > options.maxCharacters()) {
+            int splitAt = findSentenceSplit(remaining.toString(), options.maxCharacters());
+            String head = remaining.substring(0, splitAt);
+            pieces.add(head);
+            String overlap = tailOverlap(head, options.overlapCharacters());
+            String tail = remaining.substring(splitAt);
+            remaining = new StringBuilder(overlap.isEmpty() ? tail : overlap + tail);
+        }
+        if (!remaining.isEmpty()) pieces.add(remaining.toString());
+        return pieces;
     }
 
     private Chunk flushBuffer(StringBuilder buf, DocumentSection section, ParsedDocument document,
