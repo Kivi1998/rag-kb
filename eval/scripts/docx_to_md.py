@@ -2,39 +2,32 @@
 """
 DOCX → Markdown 预处理（绕过 V3 DocxParser 对内嵌图片的拒答）。
 
-为什么需要：
-- V3 DocxParser 碰到含图片的 DOCX 会抛 NeedsMultimodalParsingException
-- 标 100+ 题的 QA 集，图片里信息往往不是关键，文本才是
-- 抽纯文本 → .md → MarkdownParser 接收
+用 python-docx 正确识别 heading（# ## ###）和样式，
+保证 TechnicalChunker 切出的 chunk heading_path 不为空。
 
 用法：python3 docx_to_md.py <input.docx> <output.md>
 """
 import sys
-import zipfile
-import re
 from pathlib import Path
 
+from docx import Document
+from docx.oxml.ns import qn
 
-def extract_text(docx_path: Path) -> str:
-    """从 DOCX 的 document.xml 抽可见文本（保留段落结构）。"""
-    with zipfile.ZipFile(docx_path) as z:
-        xml = z.read("word/document.xml").decode("utf-8", errors="ignore")
-    # 删 <w:p>...</w:p> 之外的标签干扰
-    # 段落以 </w:p> 分隔
-    text = xml
-    # 把段落结束符变成换行
-    text = re.sub(r"</w:p>", "\n", text)
-    # 表格行结束也加换行
-    text = re.sub(r"</w:tr>", "\n", text)
-    # 单元格用 | 分隔
-    text = re.sub(r"</w:tc>", " | ", text)
-    # 删所有其他 XML 标签
-    text = re.sub(r"<[^>]+>", "", text)
-    # XML 实体
-    text = text.replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&").replace("&quot;", '"').replace("&apos;", "'")
-    # 压缩连续空行
-    text = re.sub(r"\n{3,}", "\n\n", text)
-    return text.strip()
+
+def heading_level(style_name: str) -> int:
+    """从样式名解析 heading 级别（'Heading 1' → 1，'Heading 2' → 2 ...）。"""
+    if not style_name:
+        return 0
+    if "Heading" in style_name or "标题" in style_name:
+        for i in range(1, 7):
+            if str(i) in style_name:
+                return i
+    return 0
+
+
+def is_bold(run) -> bool:
+    """判断 run 是否加粗（粗体可能是非标准 heading）。"""
+    return bool(run.bold)
 
 
 def main():
@@ -46,10 +39,38 @@ def main():
     if not src.exists():
         print(f"❌ {src}")
         sys.exit(1)
-    body = extract_text(src)
+
+    doc = Document(str(src))
+    md_lines = [f"# {src.stem}", ""]
+
+    for para in doc.paragraphs:
+        text = para.text.strip()
+        if not text:
+            md_lines.append("")
+            continue
+        # 优先用 paragraph.style 解析 heading
+        style_name = para.style.name if para.style else ""
+        level = heading_level(style_name)
+        if level == 0 and para.runs and is_bold(para.runs[0]) and len(text) < 80:
+            # 粗体短文本可能是非标准 heading
+            level = 2
+        if level > 0:
+            md_lines.append("#" * level + " " + text)
+            md_lines.append("")
+        else:
+            md_lines.append(text)
+            md_lines.append("")
+
+    for table in doc.tables:
+        for row in table.rows:
+            cells = [c.text.strip().replace("\n", " ") for c in row.cells]
+            if any(cells):
+                md_lines.append("| " + " | ".join(cells) + " |")
+        md_lines.append("")
+
     dst.parent.mkdir(parents=True, exist_ok=True)
-    dst.write_text(f"# {src.stem}\n\n{body}\n", encoding="utf-8")
-    print(f"✅ {src.name} -> {dst.name} ({len(body)} chars)")
+    dst.write_text("\n".join(md_lines), encoding="utf-8")
+    print(f"✅ {src.name} -> {dst.name} ({len(doc.paragraphs)} paragraphs)")
 
 
 if __name__ == "__main__":

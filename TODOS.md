@@ -53,29 +53,23 @@
 - **Fix:** 在 `HybridRetriever.java`（约第 44 行 `embeddingClient.embed(List.of(query))`）调用前，按配置的 embedding 模型族决定是否拼接指令前缀。
 - **Context:** 2026-07-13 用真实 Xinference `bge-large-zh-v1.5` + DeepSeek 生成模型联调时发现，当时优先级是先跑通链路，此项留到下一轮检索质量优化。
 
-## 切分质量真实评测（2026-07-14 已测得 BM25-only 基线，后续项如下）
+## 切分/检索质量评测（2026-07-14 已完成 v2 权威基线，后续项如下）
 
-**已完成两轮实测**（工具：`eval/scripts/EvalRetrievalRunner.java`，产品真实检索代码）：
-
-| | Recall@5 | Recall@10 | MRR | 拒答 F1 |
-|---|---:|---:|---:|---:|
-| BM25-only 基线 | 0.094 | 0.189 | 0.073 | 0 |
-| 混合检索（bge-m3 kNN + bge-reranker-v2-m3） | 0.264 | 0.415 | 0.165 | 0 |
-
-报告：`eval/reports/eval-v3-bm25-real-20260714.md`（含根因诊断）、
-`eval-v3-hybrid-real-20260714.md`（含对比分析）。绝对值失真主因是评估集
-模板题 + ground truth 漏标（见诊断），解读勿脱离报告。
-模型服务已切换：内网 Xinference → 硅基流动在线 API（`.env`；embedding 用
-`BAAI/bge-m3`——bge-large-zh-v1.5 在硅基流动对 >512 token 报错 code 20015；
-rerank 用 `BAAI/bge-reranker-v2-m3`）。`scripts/xinference-forward-proxy.py` 不再需要。
+**权威基线已测得**（v2 人工标注集 × 完整混合检索，工具 `eval/scripts/EvalRetrievalRunner.java`）：
+**Recall@1 = 0.824 / Recall@5 = 0.912 / Recall@10 = 0.920 / MRR = 0.857 / 拒答 F1 = 0**。
+报告：`eval/reports/eval-v2-hybrid-real-20260714.md`（尾部含解读与方法论注记）。
+评估集 `eval/datasets/eval-set-v2.jsonl`（150 题，构建脚本 `eval/scripts/build_eval_set_v2.py`）。
+历史基线（骨架集时代 0.094 / 0.264）主因评估集假阴性，仅供追溯。
+模型服务：硅基流动在线 API（embedding=BAAI/bge-m3；rerank=BAAI/bge-reranker-v2-m3；
+bge-large-zh-v1.5 在硅基流动对 >512 token 报错 code 20015 不可用于 chunk 侧）。
 
 按预期收益排序的后续项：
 
-- **重建评估集（最高优先）**：按 `eval/datasets/标注指南.md`（出题四原则、150 题配额、多 chunk 标注规则、四类拒答题、SOP/验收门）重标；当前 61 题骨架集 46/53 是模板题且有 q-001 类假阴性。
-- **ES 中文分析器**：`content_search` 目前是 standard analyzer 字级切分，需加 IK/smartcn 并重建索引；`heading_path` 应参与 BM25 召回。
-- **V0 基线对比**：检出 `1fc29ab` 用同一工具重跑（V0 chunk_id 与现 ground truth 不同源，需按 content_hash 映射或重标）。此前一版"模拟对比数据"是随机数生成的，已删除，不可引用。
-- **拒答阈值**：`MIN_RRF_SCORE=0.01` 两轮实测拒答 F1 均为 0，需结合中文分词修复后重新校准。
-- **BGE query 指令前缀**：见上一节「RAG 检索质量」——bge-m3 密集检索模式对指令前缀不敏感，此项优先级降低，但换回 bge 非对称模型时必须做。
+- **拒答阈值校准（最高优先，产品端缺陷）**：`MIN_RRF_SCORE=0.01` 三轮实测拒答 F1 均为 0——混合召回总能凑出候选，25 道拒答题全部被给出结果。需引入分数校准或相关性下限（可用 v2 集的 25 道拒答题做校准集）。
+- **业务专家盲标复核**：v2 为 AI 单标注人构建（锚点定位+人工复核），按标注指南 §6 第③步抽 30% 双人独立标注，Jaccard ≥ 0.8 后补齐验收门 6。
+- **ES 中文分析器**：`content_search` 仍是 standard analyzer 字级切分，加 IK/smartcn 并让 `heading_path` 参与召回，观察 module/config 短板类（Recall@5 0.82-0.83）能否抬升。
+- **V0 切分基线对比**：检出 `1fc29ab` 在同一 v2 集组合下重跑（V0 chunk 边界不同，GT 需按锚点重定位——重跑 `build_eval_set_v2.py --report` 即可）。此前一版"模拟对比数据"是随机数生成的，已删除，不可引用。
+- **BGE query 指令前缀**：bge-m3 密集检索模式对指令前缀不敏感，优先级低；换回 bge 非对称模型时必须做。
 
 ## deepdoc 版面/表格识别集成的后续项（2026-07-14，`feat/deepdoc-parsing-foundation` 分支）
 
