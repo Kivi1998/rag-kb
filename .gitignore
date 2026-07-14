@@ -59,3 +59,6 @@ __pycache__/
 *.py[cod]
 .gstack/
 .context/
+
+# 本机联调用的临时工作区脚本（含内网地址，不进仓库）
+/scripts/
