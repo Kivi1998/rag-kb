@@ -55,21 +55,27 @@
 
 ## 切分质量真实评测（2026-07-14 已测得 BM25-only 基线，后续项如下）
 
-**已完成**：`eval/scripts/EvalRetrievalRunner.java` 用产品真实检索代码
-（`ElasticsearchChunkIndex` + `HybridRetriever`，embedding 不可达走产品 BM25-only
-降级）对 61 题跑出首个真实基线：**Recall@5 = 0.094，MRR = 0.073，拒答 F1 = 0**。
-报告与根因诊断：`eval/reports/eval-v3-bm25-real-20260714.md`。
-低分是"模板题与 BM25 错配 + ES 无中文分词 + 向量召回缺位"三因素叠加，
-不是 V3 切分质量的结论——解读务必看报告尾部诊断。
+**已完成两轮实测**（工具：`eval/scripts/EvalRetrievalRunner.java`，产品真实检索代码）：
+
+| | Recall@5 | Recall@10 | MRR | 拒答 F1 |
+|---|---:|---:|---:|---:|
+| BM25-only 基线 | 0.094 | 0.189 | 0.073 | 0 |
+| 混合检索（bge-m3 kNN + bge-reranker-v2-m3） | 0.264 | 0.415 | 0.165 | 0 |
+
+报告：`eval/reports/eval-v3-bm25-real-20260714.md`（含根因诊断）、
+`eval-v3-hybrid-real-20260714.md`（含对比分析）。绝对值失真主因是评估集
+模板题 + ground truth 漏标（见诊断），解读勿脱离报告。
+模型服务已切换：内网 Xinference → 硅基流动在线 API（`.env`；embedding 用
+`BAAI/bge-m3`——bge-large-zh-v1.5 在硅基流动对 >512 token 报错 code 20015；
+rerank 用 `BAAI/bge-reranker-v2-m3`）。`scripts/xinference-forward-proxy.py` 不再需要。
 
 按预期收益排序的后续项：
 
-- **评估集质量（最高优先）**：业务专家按 `eval/datasets/README.md` 复核清单精修 61 题——46/53 道是"这一节讲什么"模板题（BM25 词面零重叠），实体题存在 ground truth 漏标相邻 chunk 的假阴性（q-001 实锤）；拒答题多样化；扩到 200-300 题。
-- **ES 中文分析器**：`content_search` 目前是 standard analyzer 字级切分，需加 IK/smartcn 并重建索引；`heading_path` 应参与 BM25 召回（题目自带"[文档/章节]"提示目前完全没用上）。
-- **完整混合检索**：内网 Xinference 可达后（先起 `scripts/xinference-forward-proxy.py`），真实 embedding 重建向量、补跑 BM25+kNN+Rerank，与 BM25-only 基线对比。
-- **V0 基线对比**：检出 `1fc29ab` 用同一工具重跑（注意 V0 切块产物 chunk_id 与现 ground truth 不同源，需按 content_hash 映射或重标）。此前一版"模拟对比数据"是随机数生成的，已删除，不可引用。
-- **拒答阈值**：`MIN_RRF_SCORE=0.01` 对中文字级 BM25 无区分度（8 道拒答题全给了结果），需结合中文分词修复后重新校准。
-- （已解决）~~后端 JWT_SECRET 阻塞~~：`.env` 与 `application-secret.yml` 本就存在，之前启动失败是没带环境变量；且本轮评测经 EvalRetrievalRunner 直连 ES，不需要起后端。
+- **重建评估集（最高优先）**：按 `eval/datasets/标注指南.md`（出题四原则、150 题配额、多 chunk 标注规则、四类拒答题、SOP/验收门）重标；当前 61 题骨架集 46/53 是模板题且有 q-001 类假阴性。
+- **ES 中文分析器**：`content_search` 目前是 standard analyzer 字级切分，需加 IK/smartcn 并重建索引；`heading_path` 应参与 BM25 召回。
+- **V0 基线对比**：检出 `1fc29ab` 用同一工具重跑（V0 chunk_id 与现 ground truth 不同源，需按 content_hash 映射或重标）。此前一版"模拟对比数据"是随机数生成的，已删除，不可引用。
+- **拒答阈值**：`MIN_RRF_SCORE=0.01` 两轮实测拒答 F1 均为 0，需结合中文分词修复后重新校准。
+- **BGE query 指令前缀**：见上一节「RAG 检索质量」——bge-m3 密集检索模式对指令前缀不敏感，此项优先级降低，但换回 bge 非对称模型时必须做。
 
 ## deepdoc 版面/表格识别集成的后续项（2026-07-14，`feat/deepdoc-parsing-foundation` 分支）
 

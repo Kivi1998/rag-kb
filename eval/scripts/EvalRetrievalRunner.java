@@ -1,10 +1,13 @@
 import com.diit.ragkb.config.RagElasticsearchProperties;
+import com.diit.ragkb.config.RagModelProperties;
 import com.diit.ragkb.ragcore.embedding.EmbeddingClient;
+import com.diit.ragkb.ragcore.embedding.OpenAiCompatibleEmbeddingClient;
 import com.diit.ragkb.ragcore.index.ElasticsearchChunkIndex;
 import com.diit.ragkb.ragcore.model.Chunk;
 import com.diit.ragkb.ragcore.model.EmbeddingResult;
 import com.diit.ragkb.ragcore.model.ModelClientException;
 import com.diit.ragkb.ragcore.model.RetrievedChunk;
+import com.diit.ragkb.ragcore.rerank.OpenAiCompatibleRerankerClient;
 import com.diit.ragkb.ragcore.rerank.RerankerClient;
 import com.diit.ragkb.ragcore.retrieval.ElasticsearchHybridCandidateSource;
 import com.diit.ragkb.ragcore.retrieval.HybridRetriever;
@@ -76,32 +79,50 @@ public final class EvalRetrievalRunner {
             properties.setIndexName(INDEX_NAME);
             properties.setVectorDimensions(VECTOR_DIMS);
 
-            // ── 1. 重建独立评测索引（不触碰生产 rag_chunks_v1）──
+            // ── 1. 组装模型客户端：环境变量配置齐 → 完整混合检索；否则 BM25-only 降级 ──
+            EmbeddingClient embeddingClient = buildEmbeddingClient(mapper);
+            RerankerClient reranker = buildReranker(mapper);
+            boolean hybrid = embeddingClient != null;
+            System.out.println("[mode] " + (hybrid
+                    ? "完整混合检索（真实 embedding" + (reranker != null ? " + rerank）" : "，无 rerank）")
+                    : "BM25-only（embedding 未配置/不可达）"));
+
+            // ── 2. 重建独立评测索引（不触碰生产 rag_chunks_v1）──
             deleteIndexIfExists(restClient);
             List<Chunk> chunks = loadChunks(corpusIndex, mapper);
             System.out.println("[index] 读取 corpus-index：" + chunks.size() + " chunks");
             ElasticsearchChunkIndex chunkIndex = new ElasticsearchChunkIndex(restClient, properties, mapper);
-            List<Float> placeholder = placeholderVector();
-            int batch = 50;
+            int batch = 32;
             for (int i = 0; i < chunks.size(); i += batch) {
                 List<Chunk> slice = chunks.subList(i, Math.min(i + batch, chunks.size()));
-                chunkIndex.upsert(slice, java.util.Collections.nCopies(slice.size(), placeholder),
-                        "eval-placeholder(BM25-only)");
+                List<List<Float>> vectors;
+                String modelVersion;
+                if (hybrid) {
+                    EmbeddingResult result = embeddingClient.embed(
+                            slice.stream().map(Chunk::content).toList());
+                    vectors = result.vectors();
+                    modelVersion = result.modelVersion();
+                } else {
+                    vectors = java.util.Collections.nCopies(slice.size(), placeholderVector());
+                    modelVersion = "eval-placeholder(BM25-only)";
+                }
+                chunkIndex.upsert(slice, vectors, modelVersion);
+                System.out.println("[index] 已入库 " + Math.min(i + batch, chunks.size()) + "/" + chunks.size());
             }
             restClient.performRequest(new Request("POST", "/" + INDEX_NAME + "/_refresh"));
             System.out.println("[index] 已写入并 refresh 索引 " + INDEX_NAME);
 
-            // ── 2. 组装产品检索链（embedding 走真实降级路径）──
+            // ── 3. 组装产品检索链 ──
             ElasticsearchHybridCandidateSource candidateSource =
                     new ElasticsearchHybridCandidateSource(restClient, properties, mapper);
-            EmbeddingClient unavailableEmbedding = texts -> {
+            EmbeddingClient queryEmbedding = hybrid ? embeddingClient : texts -> {
                 throw new ModelClientException("评测环境 embedding 服务不可达（走 BM25-only 降级）");
             };
-            HybridRetriever retriever = new HybridRetriever(candidateSource, unavailableEmbedding,
-                    noReranker());
-            RetrievalOptions options = new RetrievalOptions(50, TOP_K, false);
+            HybridRetriever retriever = new HybridRetriever(candidateSource, queryEmbedding,
+                    providerOf(reranker));
+            RetrievalOptions options = new RetrievalOptions(50, TOP_K, reranker != null);
 
-            // ── 3. 逐题检索 ──
+            // ── 4. 逐题检索 ──
             List<String> lines = Files.readAllLines(evalSet, StandardCharsets.UTF_8);
             List<String> outLines = new ArrayList<>();
             int refusals = 0;
@@ -192,7 +213,39 @@ public final class EvalRetrievalRunner {
         return List.copyOf(v);
     }
 
-    private static ObjectProvider<RerankerClient> noReranker() {
+    /** 从 RAG_EMBEDDING_* 环境变量构造真实 embedding 客户端；配置不全返回 null（BM25-only）。 */
+    private static EmbeddingClient buildEmbeddingClient(ObjectMapper mapper) {
+        String endpoint = System.getenv("RAG_EMBEDDING_ENDPOINT");
+        String model = System.getenv("RAG_EMBEDDING_MODEL");
+        if (endpoint == null || endpoint.isBlank() || model == null || model.isBlank()) {
+            return null;
+        }
+        RagModelProperties.Embedding props = new RagModelProperties().getEmbedding();
+        props.setEnabled(true);
+        props.setEndpoint(endpoint);
+        props.setModel(model);
+        props.setApiKey(System.getenv("RAG_EMBEDDING_API_KEY"));
+        props.setTimeoutMs(60_000);
+        return new OpenAiCompatibleEmbeddingClient(props, mapper);
+    }
+
+    /** 从 RAG_RERANK_* 环境变量构造真实 rerank 客户端；配置不全返回 null（跳过重排）。 */
+    private static RerankerClient buildReranker(ObjectMapper mapper) {
+        String endpoint = System.getenv("RAG_RERANK_ENDPOINT");
+        String model = System.getenv("RAG_RERANK_MODEL");
+        if (endpoint == null || endpoint.isBlank() || model == null || model.isBlank()) {
+            return null;
+        }
+        RagModelProperties.Rerank props = new RagModelProperties().getRerank();
+        props.setEnabled(true);
+        props.setEndpoint(endpoint);
+        props.setModel(model);
+        props.setApiKey(System.getenv("RAG_RERANK_API_KEY"));
+        props.setTimeoutMs(60_000);
+        return new OpenAiCompatibleRerankerClient(props, mapper);
+    }
+
+    private static ObjectProvider<RerankerClient> providerOf(RerankerClient reranker) {
         return new ObjectProvider<>() {
             @Override
             public RerankerClient getObject(Object... a) {
@@ -206,12 +259,12 @@ public final class EvalRetrievalRunner {
 
             @Override
             public RerankerClient getIfAvailable() {
-                return null;
+                return reranker;
             }
 
             @Override
             public RerankerClient getIfUnique() {
-                return null;
+                return reranker;
             }
         };
     }
