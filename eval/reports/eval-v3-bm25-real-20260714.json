@@ -1,0 +1,90 @@
+{
+  "version_meta": {
+    "chunker": "technical-chunker@v3",
+    "retriever": "bm25-only@rrf-single-leg",
+    "embedding": "unavailable(降级BM25-only)",
+    "rerank": "none",
+    "corpus": "部-测量标志@532chunks"
+  },
+  "overall": {
+    "total": 61,
+    "answerable_total": 53,
+    "expected_refusal_total": 8,
+    "recall_at_1": 0.03773584905660377,
+    "recall_at_5": 0.09433962264150944,
+    "recall_at_10": 0.18867924528301888,
+    "mrr": 0.07333782569631626,
+    "refusal_precision": 0.0,
+    "refusal_recall": 0.0,
+    "refusal_f1": 0.0
+  },
+  "by_category": {
+    "config": {
+      "total": 2,
+      "answerable_total": 2,
+      "expected_refusal_total": 0,
+      "recall_at_5": 0.0,
+      "mrr": 0.0,
+      "refusal_f1": 0.0
+    },
+    "module": {
+      "total": 37,
+      "answerable_total": 37,
+      "expected_refusal_total": 0,
+      "recall_at_5": 0.13513513513513514,
+      "mrr": 0.10505148005148005,
+      "refusal_f1": 0.0
+    },
+    "out-of-scope": {
+      "total": 8,
+      "answerable_total": 0,
+      "expected_refusal_total": 8,
+      "recall_at_5": 0.0,
+      "mrr": 0.0,
+      "refusal_f1": 0.0
+    },
+    "data-structure": {
+      "total": 9,
+      "answerable_total": 9,
+      "expected_refusal_total": 0,
+      "recall_at_5": 0.0,
+      "mrr": 0.0,
+      "refusal_f1": 0.0
+    },
+    "api": {
+      "total": 2,
+      "answerable_total": 2,
+      "expected_refusal_total": 0,
+      "recall_at_5": 0.0,
+      "mrr": 0.0,
+      "refusal_f1": 0.0
+    },
+    "class-name": {
+      "total": 3,
+      "answerable_total": 3,
+      "expected_refusal_total": 0,
+      "recall_at_5": 0.0,
+      "mrr": 0.0,
+      "refusal_f1": 0.0
+    }
+  },
+  "by_difficulty": {
+    "hard": {
+      "total": 58,
+      "answerable_total": 50,
+      "expected_refusal_total": 8,
+      "recall_at_5": 0.1,
+      "mrr": 0.07773809523809523,
+      "refusal_f1": 0.0
+    },
+    "medium": {
+      "total": 3,
+      "answerable_total": 3,
+      "expected_refusal_total": 0,
+      "recall_at_5": 0.0,
+      "mrr": 0.0,
+      "refusal_f1": 0.0
+    }
+  },
+  "missing_predictions": []
+}

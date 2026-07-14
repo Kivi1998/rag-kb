@@ -53,17 +53,23 @@
 - **Fix:** 在 `HybridRetriever.java`（约第 44 行 `embeddingClient.embed(List.of(query))`）调用前，按配置的 embedding 模型族决定是否拼接指令前缀。
 - **Context:** 2026-07-13 用真实 Xinference `bge-large-zh-v1.5` + DeepSeek 生成模型联调时发现，当时优先级是先跑通链路，此项留到下一轮检索质量优化。
 
-## 切分质量真实评测（2026-07-14，评估集已就绪但未跑真实检索）
+## 切分质量真实评测（2026-07-14 已测得 BM25-only 基线，后续项如下）
 
-61 题评估集（`eval/datasets/eval-set-2026Q3.jsonl`）与评测 pipeline 已落库并通过
-mock 全流程校验，但**真实 Recall@5/MRR 还没测**。完整背景与步骤见
-`docs/解析-切块-评估指南.md` 第三节。按序要做：
+**已完成**：`eval/scripts/EvalRetrievalRunner.java` 用产品真实检索代码
+（`ElasticsearchChunkIndex` + `HybridRetriever`，embedding 不可达走产品 BM25-only
+降级）对 61 题跑出首个真实基线：**Recall@5 = 0.094，MRR = 0.073，拒答 F1 = 0**。
+报告与根因诊断：`eval/reports/eval-v3-bm25-real-20260714.md`。
+低分是"模板题与 BM25 错配 + ES 无中文分词 + 向量召回缺位"三因素叠加，
+不是 V3 切分质量的结论——解读务必看报告尾部诊断。
 
-- **后端启动前置**：配置 `JWT_SECRET`（≥32 字节，`JwtService` 启动即校验，缺失会拒绝启动——2026-07-14 实测因此起不来）。
-- **语料建库**：把 `eval/datasets/corpus/部-测量标志/` 走正常上传链路建库，建立真实 kb_id ↔ 评估集 `kb-bdzdc` 逻辑 ID 的映射。
-- **预测脚本补认证**：`eval/scripts/generate-predictions.py --mode api` 目前裸调 `/api/v1/query`，需要先登录取 JWT 带 `Authorization` 头。
-- **V0 基线对比**：检出 `1fc29ab` 重建库重跑，得到真实 V0 vs V3 对比。注意：此前一版"模拟对比数据"是随机数生成的，已从仓库删除，不可引用。
-- **评估集质量**（中期）：业务专家按 `eval/datasets/README.md` 的复核清单精修 61 题措辞与 ground truth，拒答题多样化（现 10 条 pool 重复用），扩到 200-300 题。
+按预期收益排序的后续项：
+
+- **评估集质量（最高优先）**：业务专家按 `eval/datasets/README.md` 复核清单精修 61 题——46/53 道是"这一节讲什么"模板题（BM25 词面零重叠），实体题存在 ground truth 漏标相邻 chunk 的假阴性（q-001 实锤）；拒答题多样化；扩到 200-300 题。
+- **ES 中文分析器**：`content_search` 目前是 standard analyzer 字级切分，需加 IK/smartcn 并重建索引；`heading_path` 应参与 BM25 召回（题目自带"[文档/章节]"提示目前完全没用上）。
+- **完整混合检索**：内网 Xinference 可达后（先起 `scripts/xinference-forward-proxy.py`），真实 embedding 重建向量、补跑 BM25+kNN+Rerank，与 BM25-only 基线对比。
+- **V0 基线对比**：检出 `1fc29ab` 用同一工具重跑（注意 V0 切块产物 chunk_id 与现 ground truth 不同源，需按 content_hash 映射或重标）。此前一版"模拟对比数据"是随机数生成的，已删除，不可引用。
+- **拒答阈值**：`MIN_RRF_SCORE=0.01` 对中文字级 BM25 无区分度（8 道拒答题全给了结果），需结合中文分词修复后重新校准。
+- （已解决）~~后端 JWT_SECRET 阻塞~~：`.env` 与 `application-secret.yml` 本就存在，之前启动失败是没带环境变量；且本轮评测经 EvalRetrievalRunner 直连 ES，不需要起后端。
 
 ## deepdoc 版面/表格识别集成的后续项（2026-07-14，`feat/deepdoc-parsing-foundation` 分支）
 
