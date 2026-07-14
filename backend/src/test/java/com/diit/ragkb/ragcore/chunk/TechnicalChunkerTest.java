@@ -557,4 +557,59 @@ class TechnicalChunkerTest {
                 "chunk 内容必须恰好是表头 + 两条数据行，中间的空白行必须被 isBlank 跳过、"
                         + "不能残留为独立的空白行或多余的连续换行符");
     }
+
+    // ── chunk 元数据增强（招式 5）──
+
+    @Test
+    @DisplayName("chunk metadata 携带 sectionPath 与 contentType")
+    void chunkMetadataCarriesSectionPathAndContentType() {
+        ParsedDocument doc = new ParsedDocument(
+                UUID.randomUUID(), "text/markdown", "docs/design.md",
+                List.of(new DocumentSection("正文内容。", List.of("第3条", "3.2", "(1)"), 1, 1, 1, Map.of())),
+                Map.of()
+        );
+        List<Chunk> chunks = chunksFor(doc, ChunkingOptions.defaults());
+        assertEquals("第3条 > 3.2 > (1)", chunks.get(0).metadata().get("sectionPath"));
+        assertEquals("text", chunks.get(0).metadata().get("contentType"));
+    }
+
+    @Test
+    @DisplayName("表格 chunk 的 contentType 为 table")
+    void tableChunkContentTypeIsTable() {
+        ParsedDocument doc = new ParsedDocument(
+                UUID.randomUUID(), "application/pdf", "t.pdf",
+                List.of(new DocumentSection("A | B\n1 | 2\n", List.of(), 1, 1, 2, Map.of("type", "table"))),
+                Map.of()
+        );
+        List<Chunk> chunks = chunksFor(doc, ChunkingOptions.defaults());
+        assertEquals("table", chunks.get(0).metadata().get("contentType"));
+    }
+
+    @Test
+    @DisplayName("命中关键词的 chunk 被标记 isKeyClause=true")
+    void keyClauseKeywordsAreFlagged() {
+        ParsedDocument doc = docWith("第一条 责任免除\n本公司对下列情形不承担赔偿责任：战争、核辐射。",
+                "第二条 说明\n本条款仅作说明性描述，不涉及具体权利义务。");
+        List<Chunk> chunks = chunksFor(doc, ChunkingOptions.defaults());
+        boolean anyKeyClause = chunks.stream()
+                .anyMatch(c -> "true".equals(c.metadata().get("isKeyClause")));
+        assertTrue(anyKeyClause, "包含「免除」「责任」等关键词的块应标记 isKeyClause=true");
+    }
+
+    @Test
+    @DisplayName("chunk 携带同文档内顺序的 prevChunkId/nextChunkId")
+    void chunksCarryPrevAndNextChunkId() {
+        ParsedDocument doc = docWith("第一段。", "第二段。", "第三段。");
+        List<Chunk> chunks = chunksFor(doc, ChunkingOptions.defaults());
+        assertTrue(chunks.size() >= 3);
+
+        assertNull(chunks.get(0).metadata().get("prevChunkId"), "第一块不应有 prevChunkId");
+        assertEquals(chunks.get(1).id(), chunks.get(0).metadata().get("nextChunkId"));
+
+        assertEquals(chunks.get(0).id(), chunks.get(1).metadata().get("prevChunkId"));
+        assertEquals(chunks.get(2).id(), chunks.get(1).metadata().get("nextChunkId"));
+
+        int last = chunks.size() - 1;
+        assertNull(chunks.get(last).metadata().get("nextChunkId"), "最后一块不应有 nextChunkId");
+    }
 }

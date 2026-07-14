@@ -13,6 +13,7 @@ import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.regex.Pattern;
 
@@ -57,6 +58,13 @@ public class TechnicalChunker implements Chunker {
             MD_HEADING.pattern() + "|" + CN_STRUCTURE.pattern() + "|" + CODE_FENCE.pattern()
     );
 
+    // 责任/免责/费率类关键词——命中即标记 isKeyClause=true，供检索侧加权
+    // （本轮不做检索侧改动，只落地标记本身）。关键词列表后续可按业务扩展。
+    private static final java.util.Set<String> KEY_CLAUSE_KEYWORDS = java.util.Set.of(
+            "免除", "免责", "除外", "责任范围", "保险责任", "赔偿限额", "保险金额",
+            "费率", "违约金", "解除合同", "终止合同"
+    );
+
     @Override
     public List<Chunk> chunk(ParsedDocument document, ChunkingContext context, ChunkingOptions options) {
         List<Chunk> chunks = new ArrayList<>();
@@ -73,15 +81,32 @@ public class TechnicalChunker implements Chunker {
             chunks.addAll(sectionChunks);
         }
 
-        // renumber ordinals globally
+        // renumber ordinals globally + 招式 5：链接 prev/next chunk id
         for (int i = 0; i < chunks.size(); i++) {
             Chunk old = chunks.get(i);
+            String newId = chunkId(old.documentId(), i, old.content());
+
+            java.util.LinkedHashMap<String, String> metadata = new java.util.LinkedHashMap<>(old.metadata());
+            metadata.remove("prevChunkId");
+            metadata.remove("nextChunkId");
+
             chunks.set(i, new Chunk(
-                    chunkId(old.documentId(), i, old.content()),
-                    old.organizationId(), old.knowledgeBaseId(), old.documentId(),
+                    newId, old.organizationId(), old.knowledgeBaseId(), old.documentId(),
                     i, old.content(), old.headingPath(), old.sourcePath(),
                     old.pageNo(), old.lineStart(), old.lineEnd(),
-                    old.language(), old.contentHash(), old.metadata()
+                    old.language(), old.contentHash(), metadata
+            ));
+        }
+        for (int i = 0; i < chunks.size(); i++) {
+            Chunk c = chunks.get(i);
+            java.util.LinkedHashMap<String, String> metadata = new java.util.LinkedHashMap<>(c.metadata());
+            if (i > 0) metadata.put("prevChunkId", chunks.get(i - 1).id());
+            if (i < chunks.size() - 1) metadata.put("nextChunkId", chunks.get(i + 1).id());
+            chunks.set(i, new Chunk(
+                    c.id(), c.organizationId(), c.knowledgeBaseId(), c.documentId(),
+                    c.ordinal(), c.content(), c.headingPath(), c.sourcePath(),
+                    c.pageNo(), c.lineStart(), c.lineEnd(),
+                    c.language(), c.contentHash(), metadata
             ));
         }
 
@@ -429,6 +454,8 @@ public class TechnicalChunker implements Chunker {
         String lang = document.metadata() != null ? document.metadata().getOrDefault("language", "") : "";
         String id = chunkId(document.documentId(), ordinal, content);
 
+        Map<String, String> enrichedMetadata = enrichMetadata(section, content);
+
         return new Chunk(
                 id, orgId, kbId, document.documentId(), ordinal,
                 content,
@@ -439,8 +466,20 @@ public class TechnicalChunker implements Chunker {
                 section.lineEnd() == null ? null : lineEnd,
                 lang,
                 sha256_8(content),
-                section.metadata()
+                enrichedMetadata
         );
+    }
+
+    /** 招式 5：给每个 chunk 补 sectionPath / contentType / isKeyClause 元数据。 */
+    private Map<String, String> enrichMetadata(DocumentSection section, String content) {
+        java.util.LinkedHashMap<String, String> metadata = new java.util.LinkedHashMap<>(section.metadata());
+        if (!section.headingPath().isEmpty()) {
+            metadata.put("sectionPath", String.join(" > ", section.headingPath()));
+        }
+        metadata.put("contentType", section.metadata().getOrDefault("type", "text"));
+        boolean isKeyClause = KEY_CLAUSE_KEYWORDS.stream().anyMatch(content::contains);
+        metadata.put("isKeyClause", String.valueOf(isKeyClause));
+        return metadata;
     }
 
     private boolean startsStructuralUnit(String unit) {
