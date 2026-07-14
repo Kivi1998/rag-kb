@@ -90,6 +90,10 @@ public class TechnicalChunker implements Chunker {
 
     private List<Chunk> chunkSection(DocumentSection section, ParsedDocument document,
                                       UUID orgId, UUID kbId, ChunkingOptions options, HeadingStyle style) {
+        if ("table".equals(section.metadata().get("type"))) {
+            return chunkTableSection(section, document, orgId, kbId, options);
+        }
+
         List<Chunk> chunks = new ArrayList<>();
         String text = section.text();
         if (text == null || text.isBlank()) return chunks;
@@ -177,6 +181,47 @@ public class TechnicalChunker implements Chunker {
                     bufferLineStart, currentLine - 1));
         }
 
+        return chunks;
+    }
+
+    /**
+     * 表格分块：小表格整体保留为一个 chunk；超出 maxCharacters 的大表格按行
+     * 分组，每组前面都重新带上表头行，避免"模型只看到中间几行、不知道每列
+     * 是什么"（招式 3）。
+     */
+    private List<Chunk> chunkTableSection(DocumentSection section, ParsedDocument document,
+                                           UUID orgId, UUID kbId, ChunkingOptions options) {
+        String text = section.text().strip();
+        if (text.length() <= options.maxCharacters()) {
+            return new ArrayList<>(List.of(flushBuffer(new StringBuilder(text), section, document,
+                    orgId, kbId, 0, section.lineStart() == null ? 1 : section.lineStart(),
+                    section.lineEnd() == null ? 1 : section.lineEnd())));
+        }
+
+        String[] lines = text.split("\n", -1);
+        String headerLine = lines[0];
+        List<Chunk> chunks = new ArrayList<>();
+        StringBuilder group = new StringBuilder(headerLine);
+        int groupStartLine = (section.lineStart() == null ? 1 : section.lineStart()) + 1;
+        int currentLine = groupStartLine;
+
+        for (int i = 1; i < lines.length; i++) {
+            String row = lines[i];
+            if (row.isBlank()) continue;
+            String candidate = group + "\n" + row;
+            if (candidate.length() > options.maxCharacters() && group.length() > headerLine.length()) {
+                chunks.add(flushBuffer(group, section, document, orgId, kbId, chunks.size(),
+                        groupStartLine, currentLine - 1));
+                group = new StringBuilder(headerLine);
+                groupStartLine = currentLine;
+            }
+            group.append('\n').append(row);
+            currentLine++;
+        }
+        if (group.length() > headerLine.length()) {
+            chunks.add(flushBuffer(group, section, document, orgId, kbId, chunks.size(),
+                    groupStartLine, currentLine - 1));
+        }
         return chunks;
     }
 

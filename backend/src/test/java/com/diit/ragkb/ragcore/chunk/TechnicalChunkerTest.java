@@ -382,4 +382,73 @@ class TechnicalChunkerTest {
         // 不应出现空 chunk
         assertTrue(chunks.stream().noneMatch(c -> c.content().isBlank()));
     }
+
+    // ── 表格分块保留表头（招式 3）──
+
+    @Test
+    @DisplayName("小表格整体保留为一个 chunk")
+    void smallTableStaysAsOneChunk() {
+        String table = "年龄段 | 男性费率 | 女性费率\n"
+                + "30岁 | 120.00 | 110.00\n"
+                + "40岁 | 150.00 | 140.00\n";
+        ParsedDocument doc = new ParsedDocument(
+                UUID.randomUUID(), "application/pdf", "rates.pdf",
+                List.of(new DocumentSection(table, List.of("费率表"), 1, 1, 3, Map.of("type", "table"))),
+                Map.of()
+        );
+        List<Chunk> chunks = chunksFor(doc, ChunkingOptions.defaults());
+        assertEquals(1, chunks.size());
+        assertEquals(table.strip(), chunks.get(0).content());
+    }
+
+    @Test
+    @DisplayName("大表格按行分组，每组都带表头")
+    void largeTableEachGroupCarriesHeader() {
+        StringBuilder table = new StringBuilder("年龄段 | 男性费率 | 女性费率\n");
+        for (int age = 20; age <= 65; age++) {
+            table.append(age).append("岁 | ").append(age * 4).append(".00 | ").append(age * 3).append(".50\n");
+        }
+        ParsedDocument doc = new ParsedDocument(
+                UUID.randomUUID(), "application/pdf", "rates.pdf",
+                List.of(new DocumentSection(table.toString(), List.of("费率表"), 1, 1, 50,
+                        Map.of("type", "table"))),
+                Map.of()
+        );
+        List<Chunk> chunks = chunksFor(doc, new ChunkingOptions(200, 0, true));
+
+        assertTrue(chunks.size() > 1, "超长表格应被分成多组");
+        String headerLine = "年龄段 | 男性费率 | 女性费率";
+        for (Chunk c : chunks) {
+            assertTrue(c.content().startsWith(headerLine),
+                    "每个分组都应该带表头，实际首行: " + c.content().lines().findFirst().orElse(""));
+        }
+        // 60 岁那一行必须完整出现在某一个 chunk 里，不能因为分组把行拦腰截断
+        // （表格数据按 age*3 + ".50" 拼接生成，60 岁对应 180.50，而非 180.00）
+        assertTrue(chunks.stream().anyMatch(c -> c.content().contains("60岁 | 240.00 | 180.50")));
+
+        // 行号必须落在原始区间内，且各组之间行号连续、不重叠、不虚构——
+        // 每组的表头行（复制品）不应推进行号，只有真实数据行才计入 lineStart/lineEnd。
+        int expectedNextStart = 2; // 原始区间 lineStart=1，表头占第 1 行，数据行从第 2 行开始
+        for (Chunk c : chunks) {
+            assertEquals(expectedNextStart, c.lineStart(), "分组行号必须与前一组末尾无缝衔接，不能有缺口或重叠");
+            int rowsInChunk = (int) c.content().lines().count() - 1; // 减去表头行
+            assertEquals(expectedNextStart + rowsInChunk - 1, c.lineEnd(),
+                    "lineEnd 必须精确等于该组数据行数推算出的行号，不能被表头复制误推进");
+            expectedNextStart = c.lineEnd() + 1;
+        }
+        assertEquals(48, expectedNextStart, "最后一组结束后累计行号应精确落在原始区间末尾+1（1 表头 + 46 数据行，从第 2 行到第 47 行）");
+    }
+
+    @Test
+    @DisplayName("表格 chunk 的 metadata 保留 type=table")
+    void tableChunkMetadataPreservesType() {
+        String table = "A | B\n1 | 2\n";
+        ParsedDocument doc = new ParsedDocument(
+                UUID.randomUUID(), "application/pdf", "t.pdf",
+                List.of(new DocumentSection(table, List.of(), 1, 1, 2, Map.of("type", "table"))),
+                Map.of()
+        );
+        List<Chunk> chunks = chunksFor(doc, ChunkingOptions.defaults());
+        assertEquals("table", chunks.get(0).metadata().get("type"));
+    }
 }
