@@ -1,23 +1,48 @@
 # Changelog
 
-## [Unreleased]
+## [0.4.0] - 2026-07-14
 
-在 `fix/model-client-force-http11` 分支，尚未合并进 main：
+### 新增功能
 
-- **前端视觉改版** — 全局改为 Anthropic 风格设计语言（暖白背景、陶土色主色调、标题衬线字体），新增 `frontend/src/assets/theme.css` 覆盖 Element Plus 主题变量
-- **模型客户端强制 HTTP/1.1** — `OpenAiCompatibleEmbeddingClient`/`OpenAiCompatibleRerankerClient`/`OpenAiCompatibleAnswerGenerator` 显式指定 `HttpClient.Version.HTTP_1_1`，规避部分本地模型网关不支持明文 h2c 升级协商的问题（该改动未能解决当次遇到的 502，真实根因见下方"已知问题"，但作为通用健壮性改进保留）
+- **结构感知切分 V3 五招式**（PR #13，已合并）—— `TechnicalChunker` 新增多风格文档层级自动识别
+  （`HeadingStyle`，支持含中文"第 N 章/条"在内的多种编号体系，识别不清时退化到既有
+  Markdown/空行分段逻辑）、结构→段落→句子三级递归降级、大表格分组分块并重复表头、
+  overlap 比例区间与句子边界校验、chunk 元数据增强（`sectionPath`/`contentType`/`isKeyClause`/
+  `prevChunkId`/`nextChunkId`，均落在既有 `metadata` Map，`Chunk` record 签名与 ES mapping
+  均无需改动）。`TechnicalChunkerTest` 扩到 30 个测试，新增 `HeadingStyleTest` 6 个，
+  全量后端测试 135 个通过。ML 分类器兜底与检索侧 prev/next 消费不在本轮范围（见 TODOS.md）。
+- **v2 人工标注评估集**（`eval/datasets/eval-set-v2.jsonl`）—— 150 题（125 可答 + 25 拒答），
+  标注人通读 26 篇本科毕设语料（885 个 V3 切块）逐题手写，锚点短语全库定位 ground truth
+  （多格式副本全标，平均 8.1 chunks/题）；构建可复现（`eval/scripts/build_eval_set_v2.py`）。
+  机器骨架集 v1 因 GT 大面积错位废弃保留。配套《标注指南》（`eval/datasets/标注指南.md`）。
+- **真实检索评测工具**（`eval/scripts/EvalRetrievalRunner.java`）—— 复用产品
+  `ElasticsearchChunkIndex` + `HybridRetriever` 直连 ES 独立评测索引，混合/BM25-only 自适应。
 
-在 `feat/structure-aware-chunking-v3` 分支，尚未合并进 main：
+### 评测结果（权威基线）
 
-### 新增
+- **Recall@1 = 0.824，Recall@5 = 0.912，Recall@10 = 0.920，MRR = 0.857**
+  （v2 评估集 × BM25 + bge-m3 kNN + RRF + bge-reranker-v2-m3 完整混合检索，
+  报告 `eval/reports/eval-v2-hybrid-real-20260714.md`）
+- 分桶：data-structure 类 Recall@5 = 1.000、api = 0.963；短板 module/config ≈ 0.82
+- 关键实证：同一检索系统在机器骨架集上 Recall@5 仅 0.264，人工标注集 0.912——
+  评估集质量决定评测有效性，引用指标必须注明评估集版本
 
-- **结构感知切分 V3 五招式** —— `TechnicalChunker` 新增多风格文档层级自动识别（`HeadingStyle`，
-  支持含中文"第 N 章/条"在内的多种编号体系，识别不清时退化到既有 Markdown/空行分段逻辑）、
-  结构→段落→句子三级递归降级、大表格分组分块并重复表头、overlap 比例区间与句子边界校验、chunk
-  元数据增强（`sectionPath`/`contentType`/`isKeyClause`/`prevChunkId`/`nextChunkId`，均落在既有
-  `metadata` Map，`Chunk` record 签名与 ES mapping 均无需改动）。`TechnicalChunkerTest` 从约 16 个
-  测试扩到 30 个，新增 `HeadingStyleTest` 6 个，全量后端测试 135 个全部通过。ML 分类器兜底与
-  prevChunkId/nextChunkId 检索侧自动补全明确不在本轮范围内，详见 [TODOS.md](TODOS.md)。
+### 变更
+
+- **模型服务切换** —— 内网 Xinference → 硅基流动（SiliconFlow）在线 API：
+  embedding=`BAAI/bge-m3`（bge-large-zh-v1.5 在硅基流动对 >512 token 输入报错，不可用于
+  chunk 侧）、rerank=`BAAI/bge-reranker-v2-m3`；零代码改动（OpenAI 兼容客户端），
+  仅 `.env` 配置；本机 TCP 转发代理脚本弃用
+- **前端视觉改版** —— 全局改为 Anthropic 风格设计语言（暖白背景、陶土色主色调、标题衬线
+  字体），新增 `frontend/src/assets/theme.css` 覆盖 Element Plus 主题变量
+- **模型客户端强制 HTTP/1.1** —— 三个 OpenAI 兼容客户端显式指定
+  `HttpClient.Version.HTTP_1_1`，规避部分本地模型网关不支持明文 h2c 升级协商的问题
+
+### 已知问题
+
+- 拒答判定阈值 `MIN_RRF_SCORE=0.01` 无区分度：三轮实测拒答 F1 均为 0（25 道拒答题
+  全部被给出结果），需分数校准（见 TODOS.md「切分/检索质量评测」，已置顶）
+- v2 评估集为 AI 单标注人构建，业务专家 30% 盲标复核待补
 
 ## [0.3.0] - 2026-07-14
 
