@@ -27,6 +27,9 @@ public class OpenAiCompatibleEmbeddingClient implements EmbeddingClient {
     public OpenAiCompatibleEmbeddingClient(RagModelProperties.Embedding properties, ObjectMapper objectMapper) {
         this(properties, objectMapper, HttpClient.newBuilder()
                 .connectTimeout(Duration.ofMillis(requirePositiveTimeout(properties)))
+                // 强制 HTTP/1.1：部分本地模型网关（如 Xinference）不支持明文 h2c 升级协商，
+                // 默认的 HTTP/2 优先策略会导致这类网关返回 500/502。
+                .version(HttpClient.Version.HTTP_1_1)
                 .build());
     }
 
