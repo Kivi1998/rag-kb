@@ -451,4 +451,33 @@ class TechnicalChunkerTest {
         List<Chunk> chunks = chunksFor(doc, ChunkingOptions.defaults());
         assertEquals("table", chunks.get(0).metadata().get("type"));
     }
+
+    @Test
+    @DisplayName("只有超长表头、没有数据行的表格不会静默丢失，至少产出一个块")
+    void tableWithOnlyOverlongHeaderProducesAtLeastOneChunk() {
+        String longHeader = "年龄段字段说明 | 男性费率字段说明含税含费详细说明 | 女性费率字段说明含税含费详细说明";
+        ParsedDocument doc = new ParsedDocument(
+                UUID.randomUUID(), "application/pdf", "empty-table.pdf",
+                List.of(new DocumentSection(longHeader, List.of(), 1, 1, 1, Map.of("type", "table"))),
+                Map.of()
+        );
+        List<Chunk> chunks = chunksFor(doc, new ChunkingOptions(20, 0, true));
+        assertFalse(chunks.isEmpty(), "只有表头也不应该静默丢失整个表格 section");
+        assertTrue(chunks.stream().anyMatch(c -> c.content().contains("年龄段字段说明")));
+    }
+
+    @Test
+    @DisplayName("表头带超长数据行但全为空白，不会静默丢失，至少产出一个块")
+    void tableWithOnlyBlankDataRowsProducesAtLeastOneChunk() {
+        String longHeader = "年龄段字段说明 | 男性费率字段说明含税含费详细说明 | 女性费率字段说明含税含费详细说明";
+        String table = longHeader + "\n   \n\t\n   \n";
+        ParsedDocument doc = new ParsedDocument(
+                UUID.randomUUID(), "application/pdf", "blank-rows-table.pdf",
+                List.of(new DocumentSection(table, List.of(), 1, 1, 4, Map.of("type", "table"))),
+                Map.of()
+        );
+        List<Chunk> chunks = chunksFor(doc, new ChunkingOptions(20, 0, true));
+        assertFalse(chunks.isEmpty(), "所有数据行都是空白也不应该静默丢失整个表格 section");
+        assertTrue(chunks.stream().anyMatch(c -> c.content().contains("年龄段字段说明")));
+    }
 }

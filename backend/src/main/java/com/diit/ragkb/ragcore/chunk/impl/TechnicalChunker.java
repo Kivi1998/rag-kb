@@ -222,6 +222,15 @@ public class TechnicalChunker implements Chunker {
             chunks.add(flushBuffer(group, section, document, orgId, kbId, chunks.size(),
                     groupStartLine, currentLine - 1));
         }
+
+        // 兜底：如果表格没有任何数据行（或所有数据行都是空白被跳过），主循环
+        // 一次都不会 flush，chunks 会是空列表——整张表就此从输出里静默消失。
+        // 这里保证哪怕只有一个超长表头，也至少产出一个包含表头的 chunk。
+        if (chunks.isEmpty()) {
+            chunks.add(flushBuffer(new StringBuilder(headerLine), section, document, orgId, kbId, 0,
+                    section.lineStart() == null ? 1 : section.lineStart(),
+                    section.lineStart() == null ? 1 : section.lineStart()));
+        }
         return chunks;
     }
 
