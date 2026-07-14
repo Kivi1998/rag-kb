@@ -467,17 +467,28 @@ class TechnicalChunkerTest {
     }
 
     @Test
-    @DisplayName("表头带超长数据行但全为空白，不会静默丢失，至少产出一个块")
-    void tableWithOnlyBlankDataRowsProducesAtLeastOneChunk() {
-        String longHeader = "年龄段字段说明 | 男性费率字段说明含税含费详细说明 | 女性费率字段说明含税含费详细说明";
-        String table = longHeader + "\n   \n\t\n   \n";
+    @DisplayName("表格内部（非首尾）的空行被 isBlank 跳过，不产生空白内容，也不影响前后数据行")
+    void blankRowsInsideTableAreSkippedByIsBlankCheck() {
+        // 空行必须夹在表头/数据行中间（非整段文本的开头或结尾），这样
+        // chunkTableSection 里 section.text().strip() 才不会把它们提前清除
+        // ——真正让循环体里的 if (row.isBlank()) continue; 分支被执行到。
+        String header = "年龄段 | 费率";
+        String table = header + "\n" + "\n" + "30岁 | 120.00" + "\n" + "   " + "\n" + "40岁 | 150.00";
+        // 整段 strip 后长度为 39（表头 1 行 + 空行 + 30岁 数据行 + 空白行 + 40岁 数据行），
+        // maxCharacters=38 < 39 强制走大表格分支（触发主循环及 isBlank 跳过逻辑），
+        // 但单组内容本身（表头 + 两条真实数据行，不含空行）长度不超过 38，
+        // 因此两条数据行会被合并进同一个 chunk，不会被强制拆成多组。
         ParsedDocument doc = new ParsedDocument(
-                UUID.randomUUID(), "application/pdf", "blank-rows-table.pdf",
-                List.of(new DocumentSection(table, List.of(), 1, 1, 4, Map.of("type", "table"))),
+                UUID.randomUUID(), "application/pdf", "table-with-blanks.pdf",
+                List.of(new DocumentSection(table, List.of(), 1, 1, 5, Map.of("type", "table"))),
                 Map.of()
         );
-        List<Chunk> chunks = chunksFor(doc, new ChunkingOptions(20, 0, true));
-        assertFalse(chunks.isEmpty(), "所有数据行都是空白也不应该静默丢失整个表格 section");
-        assertTrue(chunks.stream().anyMatch(c -> c.content().contains("年龄段字段说明")));
+        List<Chunk> chunks = chunksFor(doc, new ChunkingOptions(38, 0, true));
+
+        assertEquals(1, chunks.size(), "两条真实数据行应合并在同一组，不应被拆分");
+        String expected = header + "\n30岁 | 120.00\n40岁 | 150.00";
+        assertEquals(expected, chunks.get(0).content(),
+                "chunk 内容必须恰好是表头 + 两条数据行，中间的空白行必须被 isBlank 跳过、"
+                        + "不能残留为独立的空白行或多余的连续换行符");
     }
 }
