@@ -198,7 +198,7 @@ function retryLoad() {
 }
 .hint {
   margin-top: 12px;
-  color: #909399;
+  color: var(--brand-ink-soft);
   font-size: 13px;
 }
 </style>
