@@ -60,8 +60,9 @@ __pycache__/
 .gstack/
 .context/
 
-# ===== deepdoc rag_tokenizer 生成的 trie 缓存（可由 huqie.txt 重新构建，不入库）=====
+# ===== deepdoc 模型缓存（首次运行时从 HuggingFace 自动下载，不入库）=====
 parser-gateway/app/deepdoc/res/*.trie
+parser-gateway/app/deepdoc/res/deepdoc/
 
 # ===== 本地并行开发用的 git worktree =====
 .worktrees/
