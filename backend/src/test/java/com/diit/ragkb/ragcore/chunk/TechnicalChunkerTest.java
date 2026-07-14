@@ -612,4 +612,129 @@ class TechnicalChunkerTest {
         int last = chunks.size() - 1;
         assertNull(chunks.get(last).metadata().get("nextChunkId"), "最后一块不应有 nextChunkId");
     }
+
+    // ── V3 评估 fixture 生成 ──
+
+    @Test
+    @DisplayName("生成 V3 切分评估 fixture（5 个代表性文档）")
+    void generateEvalFixture() throws Exception {
+        // 5 个代表性文档
+        Map<String, String> docs = Map.ofEntries(
+            Map.entry("table-premium", "产品费率表 — 2024 年版\n\n"
+                + "年龄段 | 男性费率 | 女性费率 | 备注\n"
+                + "---|---|---|---\n"
+                + "18-25 岁 | 1.2% | 0.9% | 标准体保险\n"
+                + "26-35 岁 | 1.5% | 1.1% | 标准体保险\n"
+                + "36-45 岁 | 2.0% | 1.6% | 标准体保险\n"
+                + "46-55 岁 | 3.2% | 2.8% | 标准体保险\n"
+                + "56-65 岁 | 4.5% | 4.1% | 标准体保险\n\n"
+                + "特殊情况处理\n因职业原因产生的风险加费：\n"
+                + "- 机械操作类职业：加费 20-30%\n"
+                + "- 化学接触职业：加费 40-50%\n"
+                + "- 特殊环境职业：加费 60-80%"),
+
+            Map.entry("legal-contract", "保险合同条款\n\n"
+                + "第一条 合同的构成\n本保险合同由保险单及所附条款、投保单、健康告知书等组成。\n"
+                + "第二条 合同成立时间\n本合同自保险公司签章之日起生效。\n"
+                + "第三条 保险期间\n保险期间为一年，自合同生效之日零时起至次年相应日期二十三时五十九分止。\n"
+                + "第四条 保险责任\n在保险期间内，被保险人因疾病或意外伤害导致身故或全残的，保险公司按照保险单约定给付保险金。\n"
+                + "第五条 责任免除\n以下情况下，保险公司不负责给付保险金：\n"
+                + "（一）被保险人对本保险事故的发生有故意行为的；\n"
+                + "（二）被保险人在本合同成立或复效之日起二年内因精神疾病导致身故或全残的；"),
+
+            Map.entry("technical-list", "系统架构与部署清单\n\n"
+                + "后端服务清单\n\n"
+                + "1. API 网关（Spring Cloud Gateway）\n端口：8080\n功能：请求路由、认证、速率限制\n\n"
+                + "2. 身份认证服务\n端口：8081\n功能：JWT 颁发、OAuth 2.0 支持\n\n"
+                + "3. 文档摄取服务\n端口：8082\n功能：PDF/DOC 解析、chunk 生成\n\n"
+                + "存储与中间件清单\n\n"
+                + "- 数据库：MySQL 8.0\n"
+                + "- 向量库：Elasticsearch 8.5+\n"
+                + "- 缓存层：Redis 7.0\n"
+                + "- 文件存储：MinIO"),
+
+            Map.entry("code-snippet", "Java Spring Boot 集成示例\n\n"
+                + "1. 配置 Embedding 客户端\n\n"
+                + "```java\n"
+                + "@Configuration\n"
+                + "public class EmbeddingConfig {\n"
+                + "  @Bean\n"
+                + "  public EmbeddingClient embeddingClient(String baseUrl, String model) {\n"
+                + "    return new XinferenceEmbeddingClient(baseUrl, model);\n"
+                + "  }\n"
+                + "}\n"
+                + "```\n\n"
+                + "2. 检索调用示例\n\n"
+                + "```java\n"
+                + "public List<RetrievedChunk> retrieve(String query, String kbId) {\n"
+                + "  List<String> bm25 = bm25Retriever.search(query, kbId, topK);\n"
+                + "  List<String> vector = vectorRetriever.search(query, kbId, topK);\n"
+                + "  return rrf(bm25, vector);\n"
+                + "}\n"
+                + "```"),
+
+            Map.entry("mixed-content", "数据分析报告 2024 年 Q2\n\n"
+                + "执行摘要\n关键指标总结：\n\n"
+                + "指标项 | Q1 | Q2 | 环比增长\n"
+                + "---|---|---|---\n"
+                + "DAU | 125,000 | 156,000 | +24.8%\n"
+                + "MRR | $450K | $580K | +28.9%\n\n"
+                + "用户增长分析\n\n"
+                + "1. 有机增长\nQ1 自然新增用户：32,000（占比 25.6%）\nQ2 自然新增用户：48,500（占比 31.1%）\n\n"
+                + "2. 付费获取\nQ1 广告投入：$95K，ROI 2.8x\nQ2 广告投入：$142K，ROI 3.2x")
+        );
+
+        // 统计每个文档的切块结果
+        StringBuilder resultJson = new StringBuilder("{\n");
+        boolean first = true;
+
+        for (Map.Entry<String, String> entry : docs.entrySet()) {
+            String docKey = entry.getKey();
+            String content = entry.getValue();
+
+            ParsedDocument doc = docWith(content);
+            List<Chunk> chunks = chunksFor(doc, opts);
+
+            // 统计元数据
+            long chunksWith_sectionPath = chunks.stream()
+                .filter(c -> c.metadata().containsKey("sectionPath")).count();
+            long chunksWith_contentType = chunks.stream()
+                .filter(c -> c.metadata().containsKey("contentType")).count();
+            long chunksWith_isKeyClause = chunks.stream()
+                .filter(c -> c.metadata().containsKey("isKeyClause")).count();
+            long chunksWith_prevChunkId = chunks.stream()
+                .filter(c -> c.metadata().containsKey("prevChunkId")).count();
+            long chunksWith_nextChunkId = chunks.stream()
+                .filter(c -> c.metadata().containsKey("nextChunkId")).count();
+
+            double avgSize = chunks.stream().mapToInt(c -> c.content().length()).average().orElse(0);
+            int minSize = chunks.stream().mapToInt(c -> c.content().length()).min().orElse(0);
+            int maxSize = chunks.stream().mapToInt(c -> c.content().length()).max().orElse(0);
+
+            if (!first) resultJson.append(",\n");
+            resultJson.append("  \"").append(docKey).append("\": {\n");
+            resultJson.append("    \"count\": ").append(chunks.size()).append(",\n");
+            resultJson.append("    \"avg_size\": ").append(String.format("%.0f", avgSize)).append(",\n");
+            resultJson.append("    \"min_size\": ").append(minSize).append(",\n");
+            resultJson.append("    \"max_size\": ").append(maxSize).append(",\n");
+            resultJson.append("    \"has_section_path\": ").append(chunksWith_sectionPath > 0).append(",\n");
+            resultJson.append("    \"has_content_type\": ").append(chunksWith_contentType > 0).append(",\n");
+            resultJson.append("    \"has_is_key_clause\": ").append(chunksWith_isKeyClause > 0).append(",\n");
+            resultJson.append("    \"has_prev_chunk_id\": ").append(chunksWith_prevChunkId > 0).append(",\n");
+            resultJson.append("    \"has_next_chunk_id\": ").append(chunksWith_nextChunkId > 0).append("\n");
+            resultJson.append("  }");
+            first = false;
+        }
+
+        resultJson.append("\n}\n");
+
+        // 输出到文件（便于 Python 脚本读取）
+        java.nio.file.Files.createDirectories(java.nio.file.Paths.get("eval", "fixtures"));
+        java.nio.file.Files.write(
+            java.nio.file.Paths.get("eval", "fixtures", "v3-chunks-main.json"),
+            resultJson.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8)
+        );
+
+        System.out.println("✅ V3 eval fixture 已生成: eval/fixtures/v3-chunks-main.json");
+    }
 }
