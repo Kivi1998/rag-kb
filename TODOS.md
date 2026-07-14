@@ -62,3 +62,22 @@
 - **What:** `JwtAuthFilter.sendError()` 只返回 HTTP 401，无 `log.warn` 记录 IP/路径/原因。攻击者暴力破解/token 重放攻击不留痕迹。
 - **Fix:** 在 `sendError()` 前追加 `log.warn("AUTH_FAILURE ip={} path={} reason={}", request.getRemoteAddr(), request.getRequestURI(), message);`
 - **File:** `backend/src/main/java/com/diit/ragkb/security/JwtAuthFilter.java`（sendError 方法）
+
+## deepdoc 版面/表格识别集成的后续项（2026-07-14，`feat/deepdoc-parsing-foundation` 分支）
+
+移植了 RAGFlow deepdoc 的版面分析、OCR、表格结构识别（Apache 2.0，见
+`parser-gateway/app/deepdoc/LICENSE_THIRD_PARTY`），替代原来的 RapidOCR，
+解决了"多栏文档被按行交叉拼接"和"无边框表格行列错配"两个解析坑。已用真实
+`parse_document()` 产线代码路径验证：合成双栏文档、mock 表格结构的费率表
+场景均通过。以下几点还没做，记录下来避免误以为已经完工：
+
+- **文本型 PDF 的多栏问题仍未修复**：`parsers.py::_parse_pdf()` 里可提取文本的
+  页面（`len(text) >= 100`）走的是 PyMuPDF 原生 `get_text("text")`，没有走
+  版面分析，多栏的文本型 PDF（不需要 OCR 的那种）仍可能按行交叉拼接。要修的话，
+  思路是改用 `page.get_text("words")` 拿带位置信息的文字框，复用
+  `app/deepdoc/pipeline.py` 里现成的 `LayoutRecognizer` 分组逻辑，不需要跑 OCR
+  模型。
+- **只用合成图片验证过，没有跑过真实 PDF 样本**：`parser-gateway/tests/test_deepdoc_pipeline.py` 里的双栏测试用的是程序画出来的合成图片，表格测试用的是 mock 的表格结构（绕开了版面模型是否真能把表格识别成"table"类型这一环）。真实扫描件/真实费率表 PDF 上的效果需要单独找样本验收。
+- **印章压字（坑 3）仍未解决**：deepdoc 本身也没有针对性的印章检测/图层分离方案，这个坑目前四个参考项目（rag-kb、rag系统1/2/3）都没真正解决，见此前的调研结论。
+- **`_ocr_bytes()`（DOCX/PPTX 内嵌图片）不做版面分析**：这是有意的简化，这类图片通常是单张截图/Logo，不是多栏页面。
+- **Docker 镜像还没验证过完整跑通**：`Dockerfile` 已加 nltk 语料预下载，但没有实际 build 镜像跑过摄取全链路；本地验证用的是手工建的 venv。
