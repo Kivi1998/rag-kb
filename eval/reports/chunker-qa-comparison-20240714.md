@@ -1,5 +1,11 @@
-# 结构感知切分 V3 评估报告
+# 结构感知切分 V3 切块行为对比（功能验证，非检索评测）
+
 对比版本：v0 (1fc29ab) vs v3 (main)
+
+> **数据来源标注（务必先读）**
+> - **V3 列为实测**：由 `TechnicalChunkerTest#generateEvalFixture` 在 main 分支真实运行 `TechnicalChunker` 得到（`eval/fixtures/v3-chunks-main.json`）。
+> - **V0 列为估算**：未实际检出 1fc29ab 运行，数字是基于 V0 行为的人工假设，仅供参考，不可引用为实测结论。
+> - 本报告只对比**切块行为**（块数/块大小/元数据字段），**不是** Recall/MRR 检索质量评测；后者见 `eval/README.md`。
 
 ## 5 个代表性文档对比
 

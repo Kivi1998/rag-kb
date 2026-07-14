@@ -53,6 +53,18 @@
 - **Fix:** 在 `HybridRetriever.java`（约第 44 行 `embeddingClient.embed(List.of(query))`）调用前，按配置的 embedding 模型族决定是否拼接指令前缀。
 - **Context:** 2026-07-13 用真实 Xinference `bge-large-zh-v1.5` + DeepSeek 生成模型联调时发现，当时优先级是先跑通链路，此项留到下一轮检索质量优化。
 
+## 切分质量真实评测（2026-07-14，评估集已就绪但未跑真实检索）
+
+61 题评估集（`eval/datasets/eval-set-2026Q3.jsonl`）与评测 pipeline 已落库并通过
+mock 全流程校验，但**真实 Recall@5/MRR 还没测**。完整背景与步骤见
+`docs/解析-切块-评估指南.md` 第三节。按序要做：
+
+- **后端启动前置**：配置 `JWT_SECRET`（≥32 字节，`JwtService` 启动即校验，缺失会拒绝启动——2026-07-14 实测因此起不来）。
+- **语料建库**：把 `eval/datasets/corpus/部-测量标志/` 走正常上传链路建库，建立真实 kb_id ↔ 评估集 `kb-bdzdc` 逻辑 ID 的映射。
+- **预测脚本补认证**：`eval/scripts/generate-predictions.py --mode api` 目前裸调 `/api/v1/query`，需要先登录取 JWT 带 `Authorization` 头。
+- **V0 基线对比**：检出 `1fc29ab` 重建库重跑，得到真实 V0 vs V3 对比。注意：此前一版"模拟对比数据"是随机数生成的，已从仓库删除，不可引用。
+- **评估集质量**（中期）：业务专家按 `eval/datasets/README.md` 的复核清单精修 61 题措辞与 ground truth，拒答题多样化（现 10 条 pool 重复用），扩到 200-300 题。
+
 ## deepdoc 版面/表格识别集成的后续项（2026-07-14，`feat/deepdoc-parsing-foundation` 分支）
 
 移植了 RAGFlow deepdoc 的版面分析、OCR、表格结构识别（Apache 2.0，见

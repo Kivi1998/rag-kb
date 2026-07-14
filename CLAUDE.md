@@ -7,6 +7,8 @@
 - toB 企业级文档知识库,目标支持百人级团队协作
 - 当前处于自研 RAG Core 重构期：保留 Spring Boot 企业应用层，旧 RAGFlow 文档摄取与问答链路已删除；新实现遵循 `docs/自研RAG核心重构架构设计.md`
 - 详见 [`README.md`](README.md)、[`docs/architecture.md`](docs/architecture.md)
+- 解析/切块/评估三环节的权威入口：[`docs/解析-切块-评估指南.md`](docs/解析-切块-评估指南.md)
+  （切块为 V3 结构感知五招式；评估资产在 `eval/`：61 题评估集 + Recall@k/MRR 框架，真实检索评测尚未跑，勿把 mock 报告的 100% 当评测结论）
 - 规格驱动开发,规格在 [`openspec/`](openspec/);项目背景固化在 `openspec/config.yaml`
 
 ## Git 工作流(强制)

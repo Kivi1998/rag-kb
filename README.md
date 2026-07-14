@@ -11,9 +11,9 @@
 - PostgreSQL `ingestion_job` + 双 Worker 异步摄取、租约心跳、过期任务接管与失败重试；
 - Markdown、代码、JSON/YAML/XML、DOCX、PPTX、文本 PDF、扫描 PDF、图片、字幕、音频和视频解析；
 - 独立 Parser Gateway 提供 OCR、ASR、Office 图片提取和字幕时间戳；
-- 结构化技术切块，保留标题、代码块、页码、行号、配置项和技术标识；
+- 结构感知切块（V3）：多风格层级识别、递归多级级联、表格分组+表头重复、句子边界重叠、chunk 元数据（sectionPath/contentType/isKeyClause/prev-nextChunkId）；
 - Elasticsearch BM25 + kNN + RRF、可选 Rerank、服务端引用与 SSE 问答；
-- 离线评测、查询审计、指标与生产同构验收栈。
+- 离线评测（Recall@k/MRR/拒答 F1 框架 + 61 题真实语料评估集）、查询审计、指标与生产同构验收栈。
 
 ## 技术架构
 
@@ -54,17 +54,21 @@ openspec/        需求规格与变更记录
 
 检索问答全链路（真实 Xinference Embedding/Rerank + DeepSeek 生成模型）已完成端到端人工验证：上传 → 解析 → 切块 → 向量化 → ES 索引 → BM25+kNN+RRF → Rerank → SSE 问答 → 引用，全部走通。
 
-以下仍需在目标环境单独验收：正式 Recall@5/MRR 评测（`eval/` 目前只有示例数据集）、日均 5000 次查询容量、拒答/降级/跨组织隔离的自动化用例、生产网络 TLS/CORS 和 24 小时稳定性。
+切分质量评估方面：61 题真实语料评估集（`eval/datasets/eval-set-2026Q3.jsonl`，10 篇「部-测量标志」文档 / 532 chunks）与评测 pipeline 已就绪并通过格式校验（mock 全流程跑通）；但**真实 Recall@5/MRR 尚未测得**——需要先将语料建库并接通带认证的检索 API，步骤见 [解析-切块-评估指南](docs/解析-切块-评估指南.md) 的「真实评测待办」。
+
+以下仍需在目标环境单独验收：正式 Recall@5/MRR 评测（见上）、日均 5000 次查询容量、拒答/降级/跨组织隔离的自动化用例、生产网络 TLS/CORS 和 24 小时稳定性。
 
 ## 文档入口
 
 - [总体架构](docs/architecture.md)
 - [自研 RAG 核心重构设计](docs/自研RAG核心重构架构设计.md)（含各阶段完成状态）
+- **[解析、切块与评估指南](docs/解析-切块-评估指南.md)**（三环节权威入口：能力边界、V3 五招式、评测方法与当前状态）
 - [上传、解析与部署验收手册](docs/自研RAG摄取部署与验收手册.md)
 - [5000 份多模态文档生产验收报告](docs/文档上传与多模态解析生产验收报告.md)
 - [验收环境复现说明](acceptance/README.md)
 - [RAG 重构可复用资产清单](docs/RAG重构可复用资产清单.md)（第三方/内部代码复用与许可边界）
-- [离线评测工具](eval/README.md)
+- [离线评测框架](eval/README.md) · [61 题评估集说明](eval/datasets/README.md) · [评测集构建工具](eval/scripts/README.md)
+- [结构感知切分 V3 实现计划](docs/superpowers/plans/2026-07-14-structure-aware-chunking-v3.md)
 - [变更记录](CHANGELOG.md)
 - [延后事项清单](TODOS.md)
 - `docs/archive/` — 已完成阶段的历史规划稿（任务分工、迁移设计），仅供追溯，不代表当前状态
