@@ -7,6 +7,18 @@
 - **前端视觉改版** — 全局改为 Anthropic 风格设计语言（暖白背景、陶土色主色调、标题衬线字体），新增 `frontend/src/assets/theme.css` 覆盖 Element Plus 主题变量
 - **模型客户端强制 HTTP/1.1** — `OpenAiCompatibleEmbeddingClient`/`OpenAiCompatibleRerankerClient`/`OpenAiCompatibleAnswerGenerator` 显式指定 `HttpClient.Version.HTTP_1_1`，规避部分本地模型网关不支持明文 h2c 升级协商的问题（该改动未能解决当次遇到的 502，真实根因见下方"已知问题"，但作为通用健壮性改进保留）
 
+在 `feat/structure-aware-chunking-v3` 分支，尚未合并进 main：
+
+### 新增
+
+- **结构感知切分 V3 五招式** —— `TechnicalChunker` 新增多风格文档层级自动识别（`HeadingStyle`，
+  支持含中文"第 N 章/条"在内的多种编号体系，识别不清时退化到既有 Markdown/空行分段逻辑）、
+  结构→段落→句子三级递归降级、大表格分组分块并重复表头、overlap 比例区间与句子边界校验、chunk
+  元数据增强（`sectionPath`/`contentType`/`isKeyClause`/`prevChunkId`/`nextChunkId`，均落在既有
+  `metadata` Map，`Chunk` record 签名与 ES mapping 均无需改动）。`TechnicalChunkerTest` 从约 16 个
+  测试扩到 30 个，新增 `HeadingStyleTest` 6 个，全量后端测试 135 个全部通过。ML 分类器兜底与
+  prevChunkId/nextChunkId 检索侧自动补全明确不在本轮范围内，详见 [TODOS.md](TODOS.md)。
+
 ## [0.3.0] - 2026-07-14
 
 ### 新增功能 — 自研 RAG Core 全链路

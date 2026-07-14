@@ -12,6 +12,12 @@ public record ChunkingOptions(int maxCharacters, int overlapCharacters, boolean 
         }
     }
 
+    /**
+     * 默认参数：maxCharacters=1200，overlapCharacters=160（约 13.3%），落在
+     * 10%-20% 的性价比区间内——overlap 从 0 加到约 10%-20% 对应字符数时召回率
+     * 提升明显，继续加大到 2-3 倍则召回只再小幅提升，但存储和 embedding 成本
+     * 线性上升，不值得。
+     */
     public static ChunkingOptions defaults() {
         return new ChunkingOptions(1_200, 160, true);
     }

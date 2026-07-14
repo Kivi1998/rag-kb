@@ -71,3 +71,54 @@
 - **印章压字（坑 3）仍未解决**：deepdoc 本身也没有针对性的印章检测/图层分离方案，这个坑目前四个参考项目（rag-kb、rag系统1/2/3）都没真正解决，见此前的调研结论。
 - **`_ocr_bytes()`（DOCX/PPTX 内嵌图片）不做版面分析**：这是有意的简化，这类图片通常是单张截图/Logo，不是多栏页面。
 - **Docker 镜像还没验证过完整跑通**：`Dockerfile` 已加 nltk 语料预下载，但没有实际 build 镜像跑过摄取全链路；本地验证用的是手工建的 venv。
+
+## 结构感知切分 V3 五招式（2026-07-14 实现，见 backend/.../ragcore/chunk/impl/TechnicalChunker.java + HeadingStyle.java）
+
+`TechnicalChunker` 按计划实现了 5 项结构感知切分技巧，Task 1-5 均已通过最终评审（Task 1-4 各经过
+1-2 轮修复，Task 5 首次评审即通过），全量后端测试通过（135 个测试，0 失败，`TechnicalChunkerTest`
+从约 16 个扩到 30 个，另新增 `HeadingStyleTest` 6 个）。已实现：
+
+- **多风格文档层级自动识别**（`HeadingStyle`，非移植代码）：支持多种编号体系（含中文"第 N 章/条"层级），
+  命中数低于阈值时退化到既有 Markdown 标题 + 空行分段逻辑，不强行误判。
+- **结构→段落→句子三级递归降级**（`recursiveSplit`/`splitByLevel`/`splitByBlankLine`/`splitBySentenceWithOverlap`）：
+  超长结构单元按层级逐级降级切分。
+- **大表格分组分块并重复表头**（`chunkTableSection`）：大表格按行分组分块，每组重复表头，避免表格
+  被截断后丢失列语义。
+- **overlap 比例区间验证**：确认 overlap 大小落在预期比例区间内，且切分点对齐句子边界。
+- **chunk 元数据增强**（`enrichMetadata`）：新增 `sectionPath`/`contentType`/`isKeyClause`/
+  `prevChunkId`/`nextChunkId`，均落在既有 `metadata` Map 里，`Chunk` record 签名未变，ES mapping
+  无需改动。
+
+实现过程中发现并修复的问题（记录以避免误认为"一次到位"）：
+
+- Task 1：计划自带的测试有 bug（`CN_FORMAL` 的"章"层级期望下标写错），已修正测试本身，未改真实的
+  （本来正确的）层级顺序。
+- Task 2：发现真实 bug——`recursiveSplit` 退化到按句子切分且 overlap 非空时，`lineStart`/`lineEnd`
+  行号被错误推进，没有把 overlap 重复的内容算进去；同时计划自带的两个测试用例本身不能区分新旧行为，
+  已替换为更有判别力的测试数据。
+- Task 3：两轮修复。第一轮发现静默丢数据 bug——只有超长表头、没有数据行的表格段落本身超过
+  `maxCharacters` 时会产出 0 个 chunk，整张表被静默丢弃。第二轮发现"表格空行跳过"回归测试没有真正
+  覆盖到目标代码路径（`.strip()` 提前去掉了尾部空行，循环根本没机会看到它们），已替换为使用表格
+  内部（非尾部）空行的测试。
+- Task 4：验证 overlap 对齐句子边界的测试用了完全周期性的测试夹具，恰好 overlap 大小与夹具的重复
+  周期数值重合，导致一个故意写错的实现依然能通过测试；已换成非周期性夹具并加了正向结构断言。
+- Task 5：首次评审即通过，无需修复轮次。
+
+以下几点本轮明确没做，也没打算做（记录避免误以为遗漏）：
+
+- **ML 分类器兜底未实现**：`HeadingStyle.detectDominant()` 命中数低于阈值时直接退化，不接入
+  轻量分类器辅助判断层级。训练/维护分类器的成本远超收益，现有阈值退化策略已能覆盖"文档没有清晰
+  编号体系"的场景，本身就不在计划范围内。
+- **prevChunkId/nextChunkId 检索侧自动补全未实现**：目前只在 chunk 生成时写入这两个字段，检索侧
+  （`HybridRetriever`）还没有用它们自动补全语义不完整的相邻块——这是原文提到的用法，但属于检索
+  模块的改动，不在本次切块计划范围内，需要单独排期。
+
+以下 2 项是最终评审中记录、评估为低风险但未修复的 Minor 发现，留作后续项：
+
+- **跨表格/非表格类型的 prev/next 链接缺测试覆盖**（Task 5 评审 Minor）：目前没有测试覆盖"文档
+  同时混有表格 section 和非表格 section"时 prev/next chunk 链接是否正确跨类型串联。代码里链接逻辑
+  本身没有按类型分支，评审判断这是低风险缺口而非已知 bug，但尚未验证。
+- **表格空行跳过导致行号少算**（Task 3 评审 Minor）：`chunkTableSection` 循环中通过 `isBlank()`
+  跳过的空白行不会推进 `currentLine`，导致当表格里数据行与空行交错时，产出 chunk 的
+  `lineStart`/`lineEnd` 会比真实原始行号偏小。目前没有测试断言这一点，问题是潜在的、按计划范围
+  判断为 out of scope，但记录在此供后续处理。

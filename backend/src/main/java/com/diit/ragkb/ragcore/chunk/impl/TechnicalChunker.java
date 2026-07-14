@@ -13,6 +13,7 @@ import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.regex.Pattern;
 
@@ -57,25 +58,55 @@ public class TechnicalChunker implements Chunker {
             MD_HEADING.pattern() + "|" + CN_STRUCTURE.pattern() + "|" + CODE_FENCE.pattern()
     );
 
+    // 责任/免责/费率类关键词——命中即标记 isKeyClause=true，供检索侧加权
+    // （本轮不做检索侧改动，只落地标记本身）。关键词列表后续可按业务扩展。
+    private static final java.util.Set<String> KEY_CLAUSE_KEYWORDS = java.util.Set.of(
+            "免除", "免责", "除外", "责任范围", "保险责任", "赔偿限额", "保险金额",
+            "费率", "违约金", "解除合同", "终止合同"
+    );
+
     @Override
     public List<Chunk> chunk(ParsedDocument document, ChunkingContext context, ChunkingOptions options) {
         List<Chunk> chunks = new ArrayList<>();
 
+        List<String> allLines = document.sections().stream()
+                .flatMap(s -> s.text() == null ? java.util.stream.Stream.<String>empty()
+                        : java.util.Arrays.stream(s.text().split("\n")))
+                .toList();
+        HeadingStyle style = HeadingStyle.detectDominant(allLines, 3).orElse(null);
+
         for (DocumentSection section : document.sections()) {
             List<Chunk> sectionChunks = chunkSection(
-                    section, document, context.organizationId(), context.knowledgeBaseId(), options);
+                    section, document, context.organizationId(), context.knowledgeBaseId(), options, style);
             chunks.addAll(sectionChunks);
         }
 
-        // renumber ordinals globally
+        // renumber ordinals globally + 招式 5：链接 prev/next chunk id
         for (int i = 0; i < chunks.size(); i++) {
             Chunk old = chunks.get(i);
+            String newId = chunkId(old.documentId(), i, old.content());
+
+            java.util.LinkedHashMap<String, String> metadata = new java.util.LinkedHashMap<>(old.metadata());
+            metadata.remove("prevChunkId");
+            metadata.remove("nextChunkId");
+
             chunks.set(i, new Chunk(
-                    chunkId(old.documentId(), i, old.content()),
-                    old.organizationId(), old.knowledgeBaseId(), old.documentId(),
+                    newId, old.organizationId(), old.knowledgeBaseId(), old.documentId(),
                     i, old.content(), old.headingPath(), old.sourcePath(),
                     old.pageNo(), old.lineStart(), old.lineEnd(),
-                    old.language(), old.contentHash(), old.metadata()
+                    old.language(), old.contentHash(), metadata
+            ));
+        }
+        for (int i = 0; i < chunks.size(); i++) {
+            Chunk c = chunks.get(i);
+            java.util.LinkedHashMap<String, String> metadata = new java.util.LinkedHashMap<>(c.metadata());
+            if (i > 0) metadata.put("prevChunkId", chunks.get(i - 1).id());
+            if (i < chunks.size() - 1) metadata.put("nextChunkId", chunks.get(i + 1).id());
+            chunks.set(i, new Chunk(
+                    c.id(), c.organizationId(), c.knowledgeBaseId(), c.documentId(),
+                    c.ordinal(), c.content(), c.headingPath(), c.sourcePath(),
+                    c.pageNo(), c.lineStart(), c.lineEnd(),
+                    c.language(), c.contentHash(), metadata
             ));
         }
 
@@ -83,7 +114,11 @@ public class TechnicalChunker implements Chunker {
     }
 
     private List<Chunk> chunkSection(DocumentSection section, ParsedDocument document,
-                                      UUID orgId, UUID kbId, ChunkingOptions options) {
+                                      UUID orgId, UUID kbId, ChunkingOptions options, HeadingStyle style) {
+        if ("table".equals(section.metadata().get("type"))) {
+            return chunkTableSection(section, document, orgId, kbId, options);
+        }
+
         List<Chunk> chunks = new ArrayList<>();
         String text = section.text();
         if (text == null || text.isBlank()) return chunks;
@@ -139,24 +174,29 @@ public class TechnicalChunker implements Chunker {
             buf.append(unit);
             currentLine += unitLines;
 
-            // if single unit alone exceeds max, split at sentence boundaries
-            while (buf.length() > options.maxCharacters()) {
-                int splitAt = findSentenceSplit(buf.toString(), options.maxCharacters());
-                String head = buf.substring(0, splitAt);
-                int headLineEnd = bufferLineStart + countLines(head) - 1;
-                chunks.add(flushBuffer(new StringBuilder(head), section, document, orgId, kbId, chunks.size(),
-                        bufferLineStart, headLineEnd));
-
-                // carry overlap + remainder
-                String tailPart = buf.substring(splitAt);
-                String overlap = tailOverlap(head, options.overlapCharacters());
+            // if single unit alone exceeds max, recursively split at finer structure,
+            // then paragraph, then sentence boundaries (招式 2：多级递归降级)
+            if (buf.length() > options.maxCharacters()) {
+                String overlong = buf.toString();
                 buf.setLength(0);
-                if (!overlap.isEmpty()) buf.append(overlap);
-                buf.append(tailPart);
-                bufferLineStart = overlap.isEmpty()
-                        ? headLineEnd + 1
-                        : Math.max(section.lineStart() == null ? 1 : section.lineStart(),
-                                headLineEnd - countLines(overlap) + 1);
+                int unitLevel = style == null ? -1 : style.levelOf(overlong.lines().findFirst().orElse(""));
+                for (SplitPiece piece : recursiveSplit(overlong, style, unitLevel, options)) {
+                    int pieceLineEnd = bufferLineStart + countLines(piece.text()) - 1;
+                    chunks.add(flushBuffer(new StringBuilder(piece.text()), section, document, orgId, kbId, chunks.size(),
+                            bufferLineStart, pieceLineEnd));
+                    // 下一个 piece 的起始行号：若当前 piece 末尾带有 overlap（会被下一个 piece
+                    // 的开头原样重复），需要把 bufferLineStart 往回退 overlap 对应的行数——
+                    // 因为 overlap 内容是同一批源文件行，不应该被当成全新的行推进。
+                    // 这是 OLD 版本 while 循环里 rewind 公式在新的递归消费循环里的等价实现。
+                    if (piece.overlapChars() <= 0) {
+                        bufferLineStart = pieceLineEnd + 1;
+                    } else {
+                        String overlapTail = piece.text().substring(piece.text().length() - piece.overlapChars());
+                        bufferLineStart = Math.max(section.lineStart() == null ? 1 : section.lineStart(),
+                                pieceLineEnd - countLines(overlapTail) + 1);
+                    }
+                }
+                currentLine = bufferLineStart;
             }
         }
 
@@ -170,8 +210,58 @@ public class TechnicalChunker implements Chunker {
     }
 
     /**
+     * 表格分块：小表格整体保留为一个 chunk；超出 maxCharacters 的大表格按行
+     * 分组，每组前面都重新带上表头行，避免"模型只看到中间几行、不知道每列
+     * 是什么"（招式 3）。
+     */
+    private List<Chunk> chunkTableSection(DocumentSection section, ParsedDocument document,
+                                           UUID orgId, UUID kbId, ChunkingOptions options) {
+        String text = section.text().strip();
+        if (text.length() <= options.maxCharacters()) {
+            return new ArrayList<>(List.of(flushBuffer(new StringBuilder(text), section, document,
+                    orgId, kbId, 0, section.lineStart() == null ? 1 : section.lineStart(),
+                    section.lineEnd() == null ? 1 : section.lineEnd())));
+        }
+
+        String[] lines = text.split("\n", -1);
+        String headerLine = lines[0];
+        List<Chunk> chunks = new ArrayList<>();
+        StringBuilder group = new StringBuilder(headerLine);
+        int groupStartLine = (section.lineStart() == null ? 1 : section.lineStart()) + 1;
+        int currentLine = groupStartLine;
+
+        for (int i = 1; i < lines.length; i++) {
+            String row = lines[i];
+            if (row.isBlank()) continue;
+            String candidate = group + "\n" + row;
+            if (candidate.length() > options.maxCharacters() && group.length() > headerLine.length()) {
+                chunks.add(flushBuffer(group, section, document, orgId, kbId, chunks.size(),
+                        groupStartLine, currentLine - 1));
+                group = new StringBuilder(headerLine);
+                groupStartLine = currentLine;
+            }
+            group.append('\n').append(row);
+            currentLine++;
+        }
+        if (group.length() > headerLine.length()) {
+            chunks.add(flushBuffer(group, section, document, orgId, kbId, chunks.size(),
+                    groupStartLine, currentLine - 1));
+        }
+
+        // 兜底：如果表格没有任何数据行（或所有数据行都是空白被跳过），主循环
+        // 一次都不会 flush，chunks 会是空列表——整张表就此从输出里静默消失。
+        // 这里保证哪怕只有一个超长表头，也至少产出一个包含表头的 chunk。
+        if (chunks.isEmpty()) {
+            chunks.add(flushBuffer(new StringBuilder(headerLine), section, document, orgId, kbId, 0,
+                    section.lineStart() == null ? 1 : section.lineStart(),
+                    section.lineStart() == null ? 1 : section.lineStart()));
+        }
+        return chunks;
+    }
+
+    /**
      * Split text at natural structure boundaries. Overlong units are split in
-     * {@link #chunkSection(DocumentSection, ParsedDocument, UUID, UUID, ChunkingOptions)}
+     * {@link #chunkSection(DocumentSection, ParsedDocument, UUID, UUID, ChunkingOptions, HeadingStyle)}
      * so that {@link ChunkingOptions#maxCharacters()} is the only length limit.
      */
     List<String> splitToUnits(String text, ChunkingOptions options) {
@@ -275,12 +365,96 @@ public class TechnicalChunker implements Chunker {
         return lastEnd;
     }
 
+    /**
+     * 一个递归降级切分产生的分片，附带该分片末尾有多少字符会作为 overlap
+     * 原样重复出现在下一个分片的开头。
+     *
+     * <p>只有 {@link #splitBySentenceWithOverlap} 这条兜底路径才会产生非零
+     * {@code overlapChars}——{@link #splitByLevel}/{@link #splitByBlankLine}
+     * 产出的分片彼此不重叠（原文的不相交切片），overlapChars 恒为 0。
+     * 调用方（{@code chunkSection}）据此判断是否需要把下一个分片的起始行号
+     * 往回退，避免把 overlap 重复的内容误当成全新的源文件行推进行号。</p>
+     */
+    private record SplitPiece(String text, int overlapChars) {
+    }
+
+    /**
+     * 递归地把一个过长的文本单元按"更细一级编号 → 空行分段 → 句子边界"逐级
+     * 降级切分，每一级都优先保住更大的语义单元，装不下才继续往下降级。
+     */
+    private List<SplitPiece> recursiveSplit(String unit, HeadingStyle style, int level, ChunkingOptions options) {
+        if (unit.length() <= options.maxCharacters()) {
+            return List.of(new SplitPiece(unit, 0));
+        }
+        if (style != null && level + 1 < style.levels().size()) {
+            List<String> finer = splitByLevel(unit, style, level + 1);
+            if (finer.size() > 1) {
+                List<SplitPiece> result = new ArrayList<>();
+                for (String piece : finer) {
+                    result.addAll(recursiveSplit(piece, style, level + 1, options));
+                }
+                return result;
+            }
+        }
+        List<String> paragraphs = splitByBlankLine(unit);
+        if (paragraphs.size() > 1) {
+            List<SplitPiece> result = new ArrayList<>();
+            for (String p : paragraphs) {
+                result.addAll(recursiveSplit(p, style, level, options));
+            }
+            return result;
+        }
+        return splitBySentenceWithOverlap(unit, options);
+    }
+
+    /** 按某个编号级别的正则，在行边界处把文本切成若干段（每段以命中该级别的行开头）。 */
+    private List<String> splitByLevel(String text, HeadingStyle style, int level) {
+        String[] lines = text.split("\n", -1);
+        List<String> pieces = new ArrayList<>();
+        StringBuilder current = new StringBuilder();
+        for (String line : lines) {
+            if (style.levelOf(line) == level && !current.isEmpty()) {
+                pieces.add(current.toString().strip());
+                current.setLength(0);
+            }
+            current.append(line).append('\n');
+        }
+        if (!current.isEmpty()) pieces.add(current.toString().strip());
+        return pieces.stream().filter(s -> !s.isEmpty()).toList();
+    }
+
+    /** 按连续空行把文本切成自然段。 */
+    private List<String> splitByBlankLine(String text) {
+        return java.util.Arrays.stream(text.split("\n\\s*\n"))
+                .map(String::strip)
+                .filter(s -> !s.isEmpty())
+                .toList();
+    }
+
+    /** 最后一级降级：按句子边界切分，沿用已有的 findSentenceSplit + tailOverlap。 */
+    private List<SplitPiece> splitBySentenceWithOverlap(String text, ChunkingOptions options) {
+        List<SplitPiece> pieces = new ArrayList<>();
+        StringBuilder remaining = new StringBuilder(text);
+        while (remaining.length() > options.maxCharacters()) {
+            int splitAt = findSentenceSplit(remaining.toString(), options.maxCharacters());
+            String head = remaining.substring(0, splitAt);
+            String overlap = tailOverlap(head, options.overlapCharacters());
+            pieces.add(new SplitPiece(head, overlap.length()));
+            String tail = remaining.substring(splitAt);
+            remaining = new StringBuilder(overlap.isEmpty() ? tail : overlap + tail);
+        }
+        if (!remaining.isEmpty()) pieces.add(new SplitPiece(remaining.toString(), 0));
+        return pieces;
+    }
+
     private Chunk flushBuffer(StringBuilder buf, DocumentSection section, ParsedDocument document,
                                UUID orgId, UUID kbId, int ordinal, int lineStart, int lineEnd) {
         String content = buf.toString();
 
         String lang = document.metadata() != null ? document.metadata().getOrDefault("language", "") : "";
         String id = chunkId(document.documentId(), ordinal, content);
+
+        Map<String, String> enrichedMetadata = enrichMetadata(section, content);
 
         return new Chunk(
                 id, orgId, kbId, document.documentId(), ordinal,
@@ -292,8 +466,20 @@ public class TechnicalChunker implements Chunker {
                 section.lineEnd() == null ? null : lineEnd,
                 lang,
                 sha256_8(content),
-                section.metadata()
+                enrichedMetadata
         );
+    }
+
+    /** 招式 5：给每个 chunk 补 sectionPath / contentType / isKeyClause 元数据。 */
+    private Map<String, String> enrichMetadata(DocumentSection section, String content) {
+        java.util.LinkedHashMap<String, String> metadata = new java.util.LinkedHashMap<>(section.metadata());
+        if (!section.headingPath().isEmpty()) {
+            metadata.put("sectionPath", String.join(" > ", section.headingPath()));
+        }
+        metadata.put("contentType", section.metadata().getOrDefault("type", "text"));
+        boolean isKeyClause = KEY_CLAUSE_KEYWORDS.stream().anyMatch(content::contains);
+        metadata.put("isKeyClause", String.valueOf(isKeyClause));
+        return metadata;
     }
 
     private boolean startsStructuralUnit(String unit) {
