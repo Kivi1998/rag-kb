@@ -8,9 +8,11 @@ import com.diit.ragkb.ragcore.model.ParsedDocument;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.regex.Pattern;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -99,43 +101,117 @@ class TechnicalChunkerTest {
     // ── 递归级联切分（招式 2）──
 
     @Test
-    @DisplayName("过长的「第X条」先按内部的（一）（二）细分，而不是直接按句子硬切")
+    @DisplayName("过长的整段落文本按 1.1/1.2 这类细编号切分，而不是直接按句子/换行硬切（CN_STRUCTURE 不识别，只有 recursiveSplit->splitByLevel 才能切对）")
     void recursiveSplitPrefersFinerStructureBeforeSentence() {
-        StringBuilder article = new StringBuilder("第一条 责任范围\n");
+        // 关键设计（比朴素的"每行一个 1.N 小项"更严格）：
+        // 1) 整段文字必须作为「单一 unit」进入 chunkSection 的超长分支——首行"1. 总则"命中
+        //    HeadingStyle.CN_NUMERIC 的第 2 级（`^[0-9]{1,2}[、.．][^0-9]`），但不命中既有的
+        //    CN_STRUCTURE（只认「第X条」「一、」「（一）」），所以 splitToUnits 不会提前拆开。
+        // 2) 每个 1.N 小项内部跨 3 行（编号行 + 2 行续行），续行本身不含任何 CN_NUMERIC 能
+        //    识别的编号标记。这一点是判别力的关键：既有的 SENTENCE_END 正则把 `\n` 也当作
+        //    句子边界，如果小项是单行的，句子切分兜底路径会"巧合地"总是切在行边界、也就是
+        //    1.N 边界上，测试就失去了判别力（旧代码也能通过）。只有当小项跨多行、续行也可能
+        //    成为句子切分兜底路径的候选切点时，才能真正区分"recursiveSplit 优先按 1.N 编号切"
+        //    与"退化为按 \n/句子边界随意硬切、可能切在续行处"这两种行为。
+        StringBuilder article = new StringBuilder("1. 总则\n");
+        String[] continuations = {
+                "续行甲乙丙丁戊己庚辛壬癸子丑寅卯辰巳午未申酉戌",
+                "续行二东南西北中上下左右前后春夏秋冬"
+        };
         for (int i = 1; i <= 6; i++) {
-            article.append("（").append(cnNum(i)).append("）本公司对被保险人在保险期间内因下列第")
-                    .append(i).append("项原因导致的损失承担赔偿责任，具体包括但不限于因意外事故、"
-                            + "疾病或其他约定情形所产生的医疗费用、误工损失及相关合理支出。\n");
+            article.append("1.").append(i).append(" 规定一二三四五\n")
+                    .append(continuations[0]).append('\n')
+                    .append(continuations[1]).append('\n');
         }
-        ParsedDocument doc = docWith(article.toString());
-        ChunkingOptions tight = new ChunkingOptions(200, 30, true);
+        String fullText = article.toString();
+        ParsedDocument doc = docWith(fullText);
+        ChunkingOptions tight = new ChunkingOptions(80, 10, true);
         List<Chunk> chunks = chunksFor(doc, tight);
 
-        assertTrue(chunks.size() > 1, "过长条款应被切成多块");
-        // 每一块要么完整包含一个「（X）」小项，要么至少不是从「（X）」中间任意字符处硬切断
-        for (Chunk c : chunks) {
-            String content = c.content().strip();
-            assertFalse(content.matches("^[，,].*"), "不应该从子项中间开始，出现悬空的逗号开头: " + content);
-        }
-    }
+        assertTrue(chunks.size() > 1, "过长文本应被切成多块");
 
-    private static String cnNum(int i) {
-        String[] cn = {"一", "二", "三", "四", "五", "六"};
-        return cn[i - 1];
+        // 重新拼接所有块内容，必须与原文一致（不丢字符、不丢标点）
+        String joined = chunks.stream().map(Chunk::content)
+                .collect(java.util.stream.Collectors.joining("\n"));
+        assertEquals(fullText.strip().replaceAll("\\s+", ""), joined.replaceAll("\\s+", ""),
+                "切分后重新拼接必须还原原文内容（忽略空白差异）");
+
+        // 除第一块外，其余块都应该从 "1.N " 这样的细编号行开头，证明确实是在 1.X 边界切开，
+        // 而不是退化到句子/换行边界随意硬切（那样可能会切在续行处，例如以"续行"二字开头）。
+        Pattern numericMarker = Pattern.compile("^1\\.\\d+\\s");
+        for (int i = 1; i < chunks.size(); i++) {
+            String content = chunks.get(i).content().strip();
+            assertTrue(numericMarker.matcher(content).find(),
+                    "第 " + i + " 块应该从 1.N 编号处开始切分，不能切在续行处，实际内容开头: "
+                            + content.substring(0, Math.min(20, content.length())));
+        }
     }
 
     @Test
-    @DisplayName("没有更细编号可用时降级到空行分段，而不是直接句子切")
+    @DisplayName("没有更细编号可用时降级到空行分段，而不是直接句子切——每块必须是完整段落，不能有悬空空行或段落中间硬切")
     void fallsBackToParagraphWhenNoFinerStructure() {
         StringBuilder article = new StringBuilder("第一条 释义\n");
+        List<String> paragraphs = new ArrayList<>();
         for (int i = 0; i < 4; i++) {
-            article.append("这是第").append(i).append("个自然段，描述与本条款相关的背景信息和适用范围，"
-                    + "内容较长以触发超长条款的降级切分逻辑。\n\n");
+            String p = "这是第" + i + "个自然段，描述与本条款相关的背景信息和适用范围，"
+                    + "内容较长以触发超长条款的降级切分逻辑。";
+            paragraphs.add(p);
+            article.append(p).append("\n\n");
         }
         ParsedDocument doc = docWith(article.toString());
         ChunkingOptions tight = new ChunkingOptions(150, 20, true);
         List<Chunk> chunks = chunksFor(doc, tight);
+
         assertTrue(chunks.size() > 1);
+        for (Chunk c : chunks) {
+            String content = c.content();
+            // 不应该有老实现里出现过的"以空行开头/结尾"的缺陷
+            assertFalse(content.startsWith("\n") || content.startsWith("\r\n"),
+                    "块不应该以空行开头: [" + content + "]");
+            assertFalse(content.endsWith("\n\n"), "块不应该以空行结尾: [" + content + "]");
+            // 每块可能包含结构标题行「第一条 释义」+ 一个或多个完整自然段，
+            // 逐行核对：块内容按换行拆开后，每一行要么是标题行，要么必须
+            // 完全等于某个原始自然段（不能是自然段中间任意字符处的硬切片段）。
+            String[] contentLines = content.split("\n");
+            for (String line : contentLines) {
+                String stripped = line.strip();
+                if (stripped.isEmpty() || stripped.equals("第一条 释义")) continue;
+                boolean isWholeParagraph = paragraphs.contains(stripped);
+                assertTrue(isWholeParagraph,
+                        "块内的每一行应该是完整自然段，不能是段落中间的硬切片段: [" + stripped + "]");
+            }
+        }
+    }
+
+    @Test
+    @DisplayName("递归降级到句子切分时，overlap 部分的行号正确回退，不虚构行号")
+    void recursiveSplitWithOverlapReportsAccurateLineNumbers() {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 1; i <= 10; i++) {
+            sb.append("这是第").append(i).append("行内容用于测试行号。\n");
+        }
+        ParsedDocument doc = new ParsedDocument(
+                UUID.randomUUID(), "text/plain", "docs/lines-overlap.txt",
+                List.of(new DocumentSection(sb.toString(), List.of(), null, 300, 309, Map.of())),
+                Map.of()
+        );
+        ChunkingOptions tight = new ChunkingOptions(40, 15, false);
+        List<Chunk> chunks = chunksFor(doc, tight);
+
+        assertTrue(chunks.size() > 1);
+        // 行号必须落在原始区间 [300, 309] 内（不能虚构出区间外的行号）
+        for (Chunk c : chunks) {
+            assertTrue(c.lineStart() >= 300, "lineStart 不应该早于原始区间起点: " + c.lineStart());
+            assertTrue(c.lineEnd() <= 309, "lineEnd 不应该超过原始区间末尾——"
+                    + "原始区间只有 10 行（300-309），overlap 内容是既有源行的重复而非新行，"
+                    + "所以行号必须落在区间内，实际: " + c.lineEnd());
+        }
+        // 关键判别性断言：最后一块的 lineEnd 必须精确等于原始区间末尾 309。
+        // 旧的 bug（无条件按 countLines(piece) 推进 bufferLineStart）会让行号越推越远，
+        // 导致最后一块的 lineEnd 远超 309（探针实测为 317）；修复后必须精确落在 309。
+        Chunk lastChunk = chunks.get(chunks.size() - 1);
+        assertEquals(309, lastChunk.lineEnd(),
+                "最后一块的 lineEnd 必须精确等于原始区间末尾行号 309，而不是被 overlap 虚假推进后的更大值");
     }
 
     // ── 代码块保护 ──

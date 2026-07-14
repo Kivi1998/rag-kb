@@ -151,11 +151,21 @@ public class TechnicalChunker implements Chunker {
                 String overlong = buf.toString();
                 buf.setLength(0);
                 int unitLevel = style == null ? -1 : style.levelOf(overlong.lines().findFirst().orElse(""));
-                for (String piece : recursiveSplit(overlong, style, unitLevel, options)) {
-                    int pieceLineEnd = bufferLineStart + countLines(piece) - 1;
-                    chunks.add(flushBuffer(new StringBuilder(piece), section, document, orgId, kbId, chunks.size(),
+                for (SplitPiece piece : recursiveSplit(overlong, style, unitLevel, options)) {
+                    int pieceLineEnd = bufferLineStart + countLines(piece.text()) - 1;
+                    chunks.add(flushBuffer(new StringBuilder(piece.text()), section, document, orgId, kbId, chunks.size(),
                             bufferLineStart, pieceLineEnd));
-                    bufferLineStart = pieceLineEnd + 1;
+                    // 下一个 piece 的起始行号：若当前 piece 末尾带有 overlap（会被下一个 piece
+                    // 的开头原样重复），需要把 bufferLineStart 往回退 overlap 对应的行数——
+                    // 因为 overlap 内容是同一批源文件行，不应该被当成全新的行推进。
+                    // 这是 OLD 版本 while 循环里 rewind 公式在新的递归消费循环里的等价实现。
+                    if (piece.overlapChars() <= 0) {
+                        bufferLineStart = pieceLineEnd + 1;
+                    } else {
+                        String overlapTail = piece.text().substring(piece.text().length() - piece.overlapChars());
+                        bufferLineStart = Math.max(section.lineStart() == null ? 1 : section.lineStart(),
+                                pieceLineEnd - countLines(overlapTail) + 1);
+                    }
                 }
                 currentLine = bufferLineStart;
             }
@@ -277,17 +287,30 @@ public class TechnicalChunker implements Chunker {
     }
 
     /**
+     * 一个递归降级切分产生的分片，附带该分片末尾有多少字符会作为 overlap
+     * 原样重复出现在下一个分片的开头。
+     *
+     * <p>只有 {@link #splitBySentenceWithOverlap} 这条兜底路径才会产生非零
+     * {@code overlapChars}——{@link #splitByLevel}/{@link #splitByBlankLine}
+     * 产出的分片彼此不重叠（原文的不相交切片），overlapChars 恒为 0。
+     * 调用方（{@code chunkSection}）据此判断是否需要把下一个分片的起始行号
+     * 往回退，避免把 overlap 重复的内容误当成全新的源文件行推进行号。</p>
+     */
+    private record SplitPiece(String text, int overlapChars) {
+    }
+
+    /**
      * 递归地把一个过长的文本单元按"更细一级编号 → 空行分段 → 句子边界"逐级
      * 降级切分，每一级都优先保住更大的语义单元，装不下才继续往下降级。
      */
-    private List<String> recursiveSplit(String unit, HeadingStyle style, int level, ChunkingOptions options) {
+    private List<SplitPiece> recursiveSplit(String unit, HeadingStyle style, int level, ChunkingOptions options) {
         if (unit.length() <= options.maxCharacters()) {
-            return List.of(unit);
+            return List.of(new SplitPiece(unit, 0));
         }
         if (style != null && level + 1 < style.levels().size()) {
             List<String> finer = splitByLevel(unit, style, level + 1);
             if (finer.size() > 1) {
-                List<String> result = new ArrayList<>();
+                List<SplitPiece> result = new ArrayList<>();
                 for (String piece : finer) {
                     result.addAll(recursiveSplit(piece, style, level + 1, options));
                 }
@@ -296,7 +319,7 @@ public class TechnicalChunker implements Chunker {
         }
         List<String> paragraphs = splitByBlankLine(unit);
         if (paragraphs.size() > 1) {
-            List<String> result = new ArrayList<>();
+            List<SplitPiece> result = new ArrayList<>();
             for (String p : paragraphs) {
                 result.addAll(recursiveSplit(p, style, level, options));
             }
@@ -330,18 +353,18 @@ public class TechnicalChunker implements Chunker {
     }
 
     /** 最后一级降级：按句子边界切分，沿用已有的 findSentenceSplit + tailOverlap。 */
-    private List<String> splitBySentenceWithOverlap(String text, ChunkingOptions options) {
-        List<String> pieces = new ArrayList<>();
+    private List<SplitPiece> splitBySentenceWithOverlap(String text, ChunkingOptions options) {
+        List<SplitPiece> pieces = new ArrayList<>();
         StringBuilder remaining = new StringBuilder(text);
         while (remaining.length() > options.maxCharacters()) {
             int splitAt = findSentenceSplit(remaining.toString(), options.maxCharacters());
             String head = remaining.substring(0, splitAt);
-            pieces.add(head);
             String overlap = tailOverlap(head, options.overlapCharacters());
+            pieces.add(new SplitPiece(head, overlap.length()));
             String tail = remaining.substring(splitAt);
             remaining = new StringBuilder(overlap.isEmpty() ? tail : overlap + tail);
         }
-        if (!remaining.isEmpty()) pieces.add(remaining.toString());
+        if (!remaining.isEmpty()) pieces.add(new SplitPiece(remaining.toString(), 0));
         return pieces;
     }
 
