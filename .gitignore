@@ -62,3 +62,10 @@ __pycache__/
 
 # 本机联调用的临时工作区脚本（含内网地址，不进仓库）
 /scripts/
+
+# ===== deepdoc 模型缓存（首次运行时从 HuggingFace 自动下载，不入库）=====
+parser-gateway/app/deepdoc/res/*.trie
+parser-gateway/app/deepdoc/res/deepdoc/
+
+# ===== 本地并行开发用的 git worktree =====
+.worktrees/
