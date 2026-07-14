@@ -277,6 +277,36 @@ class TechnicalChunkerTest {
         }
     }
 
+    // ── overlap 调优验证（招式 4）──
+
+    @Test
+    @DisplayName("默认 overlap 比例落在 10%-20% 区间（参考文章的性价比拐点）")
+    void defaultOverlapRatioInSweetSpotRange() {
+        ChunkingOptions d = ChunkingOptions.defaults();
+        double ratio = (double) d.overlapCharacters() / d.maxCharacters();
+        assertTrue(ratio >= 0.10 && ratio <= 0.20,
+                "overlap 比例应在 10%-20% 之间，实际: " + ratio);
+    }
+
+    @Test
+    @DisplayName("overlap 内容不应以半句话开头（必须对齐到完整句子）")
+    void overlapNeverStartsWithPartialSentence() {
+        String text = ("这是关于理赔流程的完整说明，包含多个步骤和注意事项。"
+                + "首先需要提交申请材料，然后等待审核结果，审核通过后进行赔付。\n").repeat(30);
+        ParsedDocument doc = docWith(text);
+        List<Chunk> chunks = chunksFor(doc, new ChunkingOptions(300, 60, false));
+        assertTrue(chunks.size() > 1);
+        // 除第一块外，其余块要么以完整句首开头，要么是上一块结尾的整句重叠，
+        // 不应该以一个"半句片段+后续内容"的形式开头导致读起来断章取义。
+        for (int i = 1; i < chunks.size(); i++) {
+            String content = chunks.get(i).content();
+            assertFalse(content.startsWith("，") || content.startsWith(",")
+                            || content.startsWith("、"),
+                    "块不应以悬空标点开头（说明 overlap 从句子中间截断）: "
+                            + content.substring(0, Math.min(20, content.length())));
+        }
+    }
+
     // ── metadata ──
 
     @Test
