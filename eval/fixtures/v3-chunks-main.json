@@ -1,0 +1,57 @@
+{
+  "table-premium": {
+    "count": 1,
+    "avg_size": 284,
+    "min_size": 284,
+    "max_size": 284,
+    "has_section_path": false,
+    "has_content_type": true,
+    "has_is_key_clause": true,
+    "has_prev_chunk_id": false,
+    "has_next_chunk_id": false
+  },
+  "code-snippet": {
+    "count": 1,
+    "avg_size": 493,
+    "min_size": 493,
+    "max_size": 493,
+    "has_section_path": false,
+    "has_content_type": true,
+    "has_is_key_clause": true,
+    "has_prev_chunk_id": false,
+    "has_next_chunk_id": false
+  },
+  "legal-contract": {
+    "count": 8,
+    "avg_size": 32,
+    "min_size": 6,
+    "max_size": 54,
+    "has_section_path": false,
+    "has_content_type": true,
+    "has_is_key_clause": true,
+    "has_prev_chunk_id": true,
+    "has_next_chunk_id": true
+  },
+  "mixed-content": {
+    "count": 1,
+    "avg_size": 253,
+    "min_size": 253,
+    "max_size": 253,
+    "has_section_path": false,
+    "has_content_type": true,
+    "has_is_key_clause": true,
+    "has_prev_chunk_id": false,
+    "has_next_chunk_id": false
+  },
+  "technical-list": {
+    "count": 1,
+    "avg_size": 237,
+    "min_size": 237,
+    "max_size": 237,
+    "has_section_path": false,
+    "has_content_type": true,
+    "has_is_key_clause": true,
+    "has_prev_chunk_id": false,
+    "has_next_chunk_id": false
+  }
+}
