@@ -3,28 +3,32 @@ schema: spec-driven
 # Project context — 生成规格工件时自动注入给 AI 的项目背景
 context: |
   产品：rag-kb，toB 企业级文档知识库（RAG），面向团队，目标支持百人级协作。
-  成员上传各类文档（PDF/Word/PPT/网页/公众号）→ 解析→切块→向量化→高精度检索问答。
+  成员上传各类文档（Markdown/代码/JSON-YAML-XML/DOCX/PPTX/文本或扫描 PDF/图片/字幕/音视频）
+  → 解析 → 结构感知切块（V3）→ 向量化 → 混合检索问答。
 
-  技术选型：
-  - 编排后端：Spring Boot（认证/RBAC/多租户/审计/调用编排），统一响应格式与 RESTful 风格
-  - RAG 引擎：RAGFlow（外部，DeepDoc 解析 + 检索 + rerank + 引用溯源），后端用 REST/Feign 调用，不自写 RAG 内核
-  - 模型服务：Xinference 托管 bge-m3(embedding) + bge-reranker-large(rerank) + 小米 MiMo(本地 LLM)
-  - LLM：小米 MiMo（优先，开源权重经 Xinference/vLLM 本地托管）；备选 DeepSeek-V3/R1（云端 API）
-  - 文档解析：MinerU / RAGFlow DeepDoc
-  - 业务存储：PostgreSQL + Redis；摄取流水线挂消息队列（Kafka/RabbitMQ/Redis Stream）削峰
+  技术选型（2026-07-15 更新，此前版本仍是迁移前的 RAGFlow 架构描述，已过时）：
+  - 后端：Spring Boot（认证/RBAC/多租户/审计/调用编排），统一响应格式与 RESTful 风格
+  - RAG Core：**自研**（`backend/.../ragcore`），不依赖 RAGFlow/LangChain/LlamaIndex/Dify 等高层编排框架
+    - 解析：自研 Parser（Markdown/DOCX/PPTX/PDF/代码/结构化数据等）+ 独立 Python Parser Gateway（OCR/ASR/Office 图片提取）
+    - 切块：自研 TechnicalChunker V3（结构感知五招式）
+    - 检索：Elasticsearch 原生 BM25 + kNN 双路召回 + RRF 融合，可选 Rerank，低置信度拒答
+  - 模型服务：OpenAI 兼容 HTTP 客户端对接云端 API——Embedding/Rerank 用硅基流动（`BAAI/bge-m3`/`BAAI/bge-reranker-v2-m3`），生成用 DeepSeek（`deepseek-chat`）
+  - 业务存储：PostgreSQL（Flyway 迁移，Hibernate `tenantFilter` 按 org_id 强制过滤）；对象存储走 `ObjectStorage` 抽象，本地开发用文件系统，生产同构环境用 MinIO/S3
+  - 摄取流水线：PostgreSQL `ingestion_job` 表 + 双 Worker 轮询式异步摄取、租约心跳、失败重试——**不是**消息队列（无 Kafka/RabbitMQ/Redis Stream 依赖）
 
   企业级硬约束（toB 必备）：
-  - 多租户：组织→团队→成员，知识库级权限（RBAC），租户间数据绝不串（最高优先级红线）
-  - 认证：SSO/OIDC
-  - 异步摄取：队列削峰 + 处理进度可见
-  - 可观测：查询溯源、token 计量、延迟监控
-  - 配额限流：按租户计量与限流
+  - 多租户：组织 → 团队/成员，知识库级权限（RBAC：OWNER/ADMIN/MEMBER），租户间数据绝不串（最高优先级红线，Hibernate `@Filter tenantFilter` 强制）
+  - 认证：本地邮箱+密码 + JWT（**非** SSO/OIDC，当前未接入外部身份提供商）
+  - 异步摄取：Worker 轮询削峰 + 处理进度可见
+  - 可观测：查询审计（`rag_query_audit` 表）、检索/生成延迟记录
+  - 配额限流：**尚未实现**（Redis 目前唯一用途是 JWT 黑名单，无限流/缓存能力，规划中不代表已落地）
   - 审计：操作可追溯
 
   编码约定：
   - 所有注释/文档/commit message 用中文，代码标识符用英文
   - 密钥放 .env / application-secret，禁止硬编码与提交
   - 多租户隔离必须在每个查询路径强制校验，安全测试覆盖跨租户访问
+  - RAG Core 必须自研并保持模块化；不得重新引入 RAGFlow、LangChain、LlamaIndex、Dify 等高层 RAG 编排框架
 
 # Per-artifact rules — 各工件的额外约束
 rules:
