@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import io
+import logging
 import os
 import threading
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 
 class ParseError(RuntimeError):
@@ -188,11 +191,19 @@ def _ocr_bytes(value: bytes) -> str:
     import numpy as np
     from PIL import Image
 
+    # OCR 模型本身不可用是服务级故障，必须让 ParserUnavailableError 冒泡到
+    # 整份文档失败（503），不能被下面的单图片 except 吞掉。
     ensure_ocr_ready()
     from .deepdoc import pipeline
-    with _ocr_lock:
-        np_image = np.array(Image.open(io.BytesIO(value)).convert("RGB"))
-        raw_boxes = pipeline._ocr(np_image)
+    try:
+        with _ocr_lock:
+            np_image = np.array(Image.open(io.BytesIO(value)).convert("RGB"))
+            raw_boxes = pipeline._ocr(np_image)
+    except Exception:
+        # 单张图片解码/识别失败（如老式 WMF/EMF 矢量图 Pillow 无法解码）不该
+        # 拖垮整份文档的解析——按"这张图没有可识别文字"处理，跳过继续。
+        logger.warning("跳过一张无法解码或识别的内嵌图片", exc_info=True)
+        return ""
     if not raw_boxes:
         return ""
     return "\n".join(text.strip() for _, (text, _score) in raw_boxes if text and text.strip())
