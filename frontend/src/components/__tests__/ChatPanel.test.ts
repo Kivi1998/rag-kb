@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import ElementPlus from 'element-plus'
 import { createPinia, setActivePinia } from 'pinia'
@@ -16,14 +16,25 @@ function streamOf<T>(events: T[]): AsyncGenerator<T> {
   return (async function* () { for (const event of events) yield event })()
 }
 
+/** 打字机节流展示用真实 setInterval，测试里切到 fake timer 并推进足够时长把
+ * 缓冲区吐完，否则 flushPromises() 之后内容还停留在缓冲区里没显现出来。 */
+async function drainReveal() {
+  await vi.advanceTimersByTimeAsync(2000)
+}
+
 describe('ChatPanel', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     vi.clearAllMocks()
+    vi.useFakeTimers()
     const auth = useAuthStore()
     auth.token = 'token-1'
     auth.orgId = 'org-1'
     if (!crypto.randomUUID) Object.defineProperty(crypto, 'randomUUID', { value: () => 'test-id' })
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
   })
 
   it('累积 SSE 文本、来源和拒答，并始终使用当前 kb 路径与认证头', async () => {
@@ -36,6 +47,7 @@ describe('ChatPanel', () => {
     await wrapper.find('textarea').setValue('如何排查启动失败？')
     await wrapper.find('form').trigger('submit')
     await flushPromises()
+    await drainReveal()
 
     expect(openStream).toHaveBeenCalledWith(expect.objectContaining({
       url: '/api/v1/knowledge-bases/kb-1/query',
@@ -57,6 +69,44 @@ describe('ChatPanel', () => {
     await flushPromises()
     expect(wrapper.text()).toContain('检索结果')
     expect(wrapper.text()).toContain('未在当前知识库中检索到足够依据')
+  })
+
+  it('回答含 Markdown 语法时渲染为格式化 HTML，而不是原样展示星号', async () => {
+    vi.mocked(openStream).mockReturnValue(streamOf([
+      { eventType: 'chunk', data: { content: '**加粗结论**：一切正常。' } },
+      { eventType: 'done', data: {} }
+    ]) as never)
+    const wrapper = mount(ChatPanel, { props: { kbId: 'kb-1' }, global: { plugins: [ElementPlus] } })
+    await wrapper.find('textarea').setValue('结果如何？')
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+    await drainReveal()
+
+    const strong = wrapper.find('.message-content-markdown strong')
+    expect(strong.exists()).toBe(true)
+    expect(strong.text()).toBe('加粗结论')
+    expect(wrapper.html()).not.toContain('**加粗结论**')
+  })
+
+  it('打字机效果：chunk 到达后不会瞬间整段出现，而是随时间推进逐步显现', async () => {
+    vi.mocked(openStream).mockReturnValue(streamOf([
+      { eventType: 'chunk', data: { content: '一段较长的回答内容用于验证节流展示效果' } },
+      { eventType: 'done', data: {} }
+    ]) as never)
+    const wrapper = mount(ChatPanel, { props: { kbId: 'kb-1' }, global: { plugins: [ElementPlus] } })
+    await wrapper.find('textarea').setValue('问题')
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+
+    // 数据已经全部到达（SSE 流已 done），但打字机只推进了很短时间，不应该整段出现。
+    await vi.advanceTimersByTimeAsync(40)
+    const partial = wrapper.text()
+    expect(partial).not.toContain('一段较长的回答内容用于验证节流展示效果')
+
+    // 推进足够时间后，应完整显现，且已经吐完的输入框应重新可用（sending=false）。
+    await drainReveal()
+    expect(wrapper.text()).toContain('一段较长的回答内容用于验证节流展示效果')
+    expect(wrapper.find('textarea').attributes('disabled')).toBeFalsy()
   })
 
   it('回车直接发送', async () => {

@@ -1,10 +1,19 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue'
 import { CircleClose, Promotion } from '@element-plus/icons-vue'
+import DOMPurify from 'dompurify'
+import { marked } from 'marked'
 import { useAuthStore } from '@/stores/authStore'
 import { openStream, queryStreamUrl } from '@/api/queryApi'
 import type { Citation } from '@/types/citation'
 import type { Message, QueryEvent } from '@/types/query'
+
+/** 打字机式节流展示：每 tick 吐出的字符数与间隔。上游 LLM（DeepSeek 等）自身的
+ * SSE 推送就是一批一批到达的（同一段回答可能有 50%+ 内容挤在最后 0.2s 内到达，
+ * 不受我们控制），如果收到多少就立刻整段渲染多少，视觉上仍会"一股脑蹦出来"。
+ * 这里把"数据到达"和"文字显现"解耦：到达的内容先进缓冲区，再由定时器匀速吐出。 */
+const REVEAL_INTERVAL_MS = 20
+const REVEAL_CHARS_PER_TICK = 2
 
 const props = defineProps<{ kbId: string }>()
 const authStore = useAuthStore()
@@ -14,7 +23,21 @@ const sending = ref(false)
 const streamAbort = ref<AbortController | null>(null)
 const transcript = ref<HTMLElement | null>(null)
 
+/** LLM 回答含 Markdown 语法（**加粗**、列表、代码块等），此前直接文本插值导致
+ * 语法符号原样显示。仅对话回答需要渲染；用户自己打的话按纯文本展示，避免用户
+ * 输入里的 `*`/`#` 被意外解释成 Markdown。渲染结果必须过 DOMPurify 净化后才能
+ * 用 v-html 注入，防止检索到的文档内容里混入的 HTML/脚本片段被当作真实标签执行。 */
+function renderMarkdown(content: string): string {
+  const html = marked.parse(content, { async: false, breaks: true }) as string
+  return DOMPurify.sanitize(html)
+}
+
 const canSend = computed(() => !!props.kbId && !!question.value.trim() && !sending.value)
+
+/** 网络流可能已经结束，但打字机还在把缓冲区剩余内容匀速吐出——这段时间点
+ * "取消生成"，仅 abort 网络请求毫无意义（请求早就完成了）。ask() 内部把
+ * "立即停止吐字"的回调注册到这里，供 cancel() 调用。 */
+let stopRevealCallback: (() => void) | undefined
 
 function headers() {
   const result: Record<string, string> = {}
@@ -35,6 +58,47 @@ async function ask() {
   messages.value.push(userMessage, assistantMessage)
   question.value = ''
   sending.value = true
+
+  // 待吐出的缓冲文本；由 revealTimer 匀速搬进 assistantMessage.content。
+  let pending = ''
+  let revealTimer: ReturnType<typeof setInterval> | undefined
+  let networkDone = false
+
+  function stopRevealing() {
+    if (revealTimer) {
+      clearInterval(revealTimer)
+      revealTimer = undefined
+    }
+  }
+  /** 网络流已结束且缓冲区已吐完，才算真正生成完毕——即使 SSE 已经 done，
+   * 只要屏幕上文字还没显现完，仍应保持"生成中"状态，不能让输入框提前解禁。 */
+  function finishIfDrained() {
+    if (networkDone && !pending) {
+      stopRevealing()
+      sending.value = false
+      streamAbort.value = null
+      stopRevealCallback = undefined
+    }
+  }
+  function ensureRevealing() {
+    if (revealTimer) return
+    revealTimer = setInterval(() => {
+      if (pending) {
+        assistantMessage.content += pending.slice(0, REVEAL_CHARS_PER_TICK)
+        pending = pending.slice(REVEAL_CHARS_PER_TICK)
+        void scrollToBottom()
+      }
+      finishIfDrained()
+    }, REVEAL_INTERVAL_MS)
+  }
+  stopRevealCallback = () => {
+    stopRevealing()
+    pending = ''
+    sending.value = false
+    streamAbort.value = null
+    stopRevealCallback = undefined
+  }
+
   const controller = new AbortController()
   streamAbort.value = controller
   try {
@@ -42,28 +106,44 @@ async function ask() {
       url: queryStreamUrl('', props.kbId),
       body: { question: text }, headers: headers(), signal: controller.signal
     })) {
-      applyEvent(assistantMessage, event)
-      await scrollToBottom()
+      if (event.eventType === 'chunk') {
+        pending += event.data.content
+        ensureRevealing()
+      } else {
+        applyEvent(assistantMessage, event)
+      }
       if (event.eventType === 'done' || event.eventType === 'error' || event.eventType === 'refusal') break
     }
   } catch (error) {
     if ((error as Error).name !== 'AbortError') {
+      pending = ''
       assistantMessage.role = 'error'
       assistantMessage.content = '连接问答服务失败，请稍后重试。'
-    } else if (!assistantMessage.content) {
+    } else if (!assistantMessage.content && !pending) {
       assistantMessage.role = 'error'
       assistantMessage.content = '已取消本次问答。'
+    } else {
+      // 已经开始显现内容后用户点了取消：把缓冲区剩余内容直接展示完，不留半截字。
+      assistantMessage.content += pending
+      pending = ''
     }
   } finally {
-    sending.value = false
-    streamAbort.value = null
+    networkDone = true
+    if (pending) {
+      ensureRevealing()
+    } else {
+      stopRevealing()
+      sending.value = false
+      streamAbort.value = null
+      stopRevealCallback = undefined
+    }
     await scrollToBottom()
   }
 }
 
 function applyEvent(message: Message, event: QueryEvent) {
   switch (event.eventType) {
-    case 'chunk': message.content += event.data.content; break
+    case 'chunk': break // chunk 事件在 ask() 里单独走缓冲/节流逻辑，不会走到这里
     case 'source': message.citations = [...(message.citations || []), event.data.citation]; break
     case 'refusal':
       message.role = 'refusal'
@@ -79,6 +159,9 @@ function applyEvent(message: Message, event: QueryEvent) {
 
 function cancel() {
   streamAbort.value?.abort()
+  // 网络流可能已经结束、只是打字机还在吐字：单纯 abort 请求不会停止吐字，
+  // 需要显式调用 ask() 注册的回调立即停止。
+  stopRevealCallback?.()
 }
 
 /**
@@ -118,7 +201,12 @@ watch(() => props.kbId, () => { messages.value = []; question.value = ''; cancel
       <el-empty v-if="messages.length === 0" description="输入类名、错误码、配置项或技术问题开始检索" />
       <article v-for="message in messages" :key="message.id" class="message" :class="`message-${message.role}`">
         <span class="message-label">{{ message.role === 'user' ? '你' : message.role === 'refusal' ? '检索结果' : '知识库助手' }}</span>
-        <p class="message-content">{{ message.content || (sending ? '正在生成…' : '') }}</p>
+        <div
+          v-if="message.role === 'assistant' && message.content"
+          class="message-content message-content-markdown"
+          v-html="renderMarkdown(message.content)"
+        />
+        <p v-else class="message-content">{{ message.content || (sending ? '正在生成…' : '') }}</p>
         <div v-if="message.citations?.length" class="citations">
           <p class="citation-title">参考来源</p>
           <article v-for="(citation, index) in message.citations" :key="`${citation.documentId}-${index}`" class="citation-card">
@@ -157,7 +245,40 @@ watch(() => props.kbId, () => { messages.value = []; question.value = ''; cancel
 .message-refusal { border-color: var(--el-color-warning-light-5); background: var(--el-color-warning-light-9); }
 .message-error { border-color: var(--el-color-danger-light-5); background: var(--el-color-danger-light-9); }
 .message-label { color: var(--el-text-color-secondary); font-size: 12px; }
-.message-content { margin: 5px 0 0; white-space: pre-wrap; line-height: 1.6; }
+.message-content { margin: 5px 0 0; line-height: 1.6; }
+.message-content:not(.message-content-markdown) { white-space: pre-wrap; }
+/* v-html 注入的内容不受 scoped 属性选择器约束，需要 :deep() 才能命中。
+   marked 已经用 <p>/<ul>/<pre> 等块级元素处理换行，这里不需要再叠加 pre-wrap。 */
+.message-content-markdown :deep(p) { margin: 0 0 8px; }
+.message-content-markdown :deep(p:last-child) { margin-bottom: 0; }
+.message-content-markdown :deep(ul),
+.message-content-markdown :deep(ol) { margin: 0 0 8px; padding-left: 1.4em; }
+.message-content-markdown :deep(li) { margin: 2px 0; }
+.message-content-markdown :deep(strong) { font-weight: 600; }
+.message-content-markdown :deep(code) {
+  background: var(--el-fill-color-light);
+  border-radius: 3px;
+  padding: 1px 5px;
+  font-size: 0.9em;
+}
+.message-content-markdown :deep(pre) {
+  background: var(--el-fill-color-light);
+  border-radius: 6px;
+  padding: 10px 12px;
+  overflow-x: auto;
+  margin: 0 0 8px;
+}
+.message-content-markdown :deep(pre code) { background: none; padding: 0; }
+.message-content-markdown :deep(blockquote) {
+  margin: 0 0 8px;
+  padding-left: 10px;
+  border-left: 3px solid var(--brand-border);
+  color: var(--el-text-color-secondary);
+}
+.message-content-markdown :deep(h1),
+.message-content-markdown :deep(h2),
+.message-content-markdown :deep(h3) { margin: 10px 0 6px; font-size: 1.05em; }
+.message-content-markdown :deep(a) { color: var(--el-color-primary); }
 .citations { margin-top: 10px; border-top: 1px dashed var(--el-border-color); padding-top: 8px; }
 .citation-title { margin: 0 0 7px; color: var(--el-text-color-secondary); font-size: 12px; }
 .citation-card { margin: 6px 0; padding: 8px; border-radius: 5px; background: var(--brand-surface-soft); border: 1px solid var(--brand-border-soft); font-size: 13px; }
