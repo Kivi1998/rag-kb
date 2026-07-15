@@ -114,6 +114,73 @@ class HybridRetrieverTest {
     }
 
     @Test
+    void lowRerankScoreIsRefusedEvenWithRrfCandidates() {
+        Chunk chunk = chunk("topically-close-but-irrelevant");
+        HybridCandidateSource source = new HybridCandidateSource() {
+            @Override public List<RetrievedChunk> searchBm25(SearchRequest request) {
+                return List.of(new RetrievedChunk(chunk, 1, null, null, null, 1.0));
+            }
+            @Override public List<RetrievedChunk> searchKnn(VectorSearchRequest request) { return List.of(); }
+        };
+        EmbeddingClient embedding = texts -> new EmbeddingResult("test", List.of(List.of(0.1f, 0.2f)));
+        RerankerClient lowScoreReranker = (query, candidates, topK) -> candidates.stream()
+                .map(c -> new RetrievedChunk(c.chunk(), c.bm25Rank(), c.vectorRank(), c.rrfScore(), 0.02, 0.02))
+                .toList();
+        @SuppressWarnings("unchecked") ObjectProvider<RerankerClient> reranker = mock(ObjectProvider.class);
+        when(reranker.getIfAvailable()).thenReturn(lowScoreReranker);
+
+        RetrievalResult result = new HybridRetriever(source, embedding, reranker)
+                .retrieveWithDecision(UUID.randomUUID(), UUID.randomUUID(), "q", new RetrievalOptions(30, 1, true));
+
+        assertTrue(result.refused(), "rerank 分数低于阈值应拒答，即使 RRF 召回非空");
+        assertEquals("重排后最高相关性低于阈值，未在当前知识库中检索到足够依据", result.refusalReason());
+    }
+
+    @Test
+    void highRerankScorePassesThreshold() {
+        Chunk chunk = chunk("genuinely-relevant");
+        HybridCandidateSource source = new HybridCandidateSource() {
+            @Override public List<RetrievedChunk> searchBm25(SearchRequest request) {
+                return List.of(new RetrievedChunk(chunk, 1, null, null, null, 1.0));
+            }
+            @Override public List<RetrievedChunk> searchKnn(VectorSearchRequest request) { return List.of(); }
+        };
+        EmbeddingClient embedding = texts -> new EmbeddingResult("test", List.of(List.of(0.1f, 0.2f)));
+        RerankerClient highScoreReranker = (query, candidates, topK) -> candidates.stream()
+                .map(c -> new RetrievedChunk(c.chunk(), c.bm25Rank(), c.vectorRank(), c.rrfScore(), 0.95, 0.95))
+                .toList();
+        @SuppressWarnings("unchecked") ObjectProvider<RerankerClient> reranker = mock(ObjectProvider.class);
+        when(reranker.getIfAvailable()).thenReturn(highScoreReranker);
+
+        RetrievalResult result = new HybridRetriever(source, embedding, reranker)
+                .retrieveWithDecision(UUID.randomUUID(), UUID.randomUUID(), "q", new RetrievalOptions(30, 1, true));
+
+        assertTrue(!result.refused(), "rerank 分数高于阈值应正常返回结果");
+        assertEquals("genuinely-relevant", result.chunks().get(0).chunk().id());
+    }
+
+    @Test
+    void rerankFallbackSkipsRerankScoreGate() {
+        Chunk chunk = chunk("only");
+        HybridCandidateSource source = new HybridCandidateSource() {
+            @Override public List<RetrievedChunk> searchBm25(SearchRequest request) {
+                return List.of(new RetrievedChunk(chunk, 1, null, null, null, 1.0));
+            }
+            @Override public List<RetrievedChunk> searchKnn(VectorSearchRequest request) { return List.of(); }
+        };
+        EmbeddingClient embedding = texts -> new EmbeddingResult("test", List.of(List.of(0.1f, 0.2f)));
+        RerankerClient brokenReranker = (query, candidates, topK) -> { throw new IllegalStateException("timeout"); };
+        @SuppressWarnings("unchecked") ObjectProvider<RerankerClient> reranker = mock(ObjectProvider.class);
+        when(reranker.getIfAvailable()).thenReturn(brokenReranker);
+
+        RetrievalResult result = new HybridRetriever(source, embedding, reranker)
+                .retrieveWithDecision(UUID.randomUUID(), UUID.randomUUID(), "q", new RetrievalOptions(30, 1, true));
+
+        assertTrue(!result.refused(), "rerank 降级时不应套用 rerank 分数门槛（无分数可用）");
+        assertTrue(result.diagnostics().rerankFallback());
+    }
+
+    @Test
     void emptyQuestionIsRefusedWithoutCallingModels() {
         HybridCandidateSource source = mock(HybridCandidateSource.class);
         EmbeddingClient embedding = mock(EmbeddingClient.class);

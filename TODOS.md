@@ -53,22 +53,36 @@
 - **Fix:** 在 `HybridRetriever.java`（约第 44 行 `embeddingClient.embed(List.of(query))`）调用前，按配置的 embedding 模型族决定是否拼接指令前缀。
 - **Context:** 2026-07-13 用真实 Xinference `bge-large-zh-v1.5` + DeepSeek 生成模型联调时发现，当时优先级是先跑通链路，此项留到下一轮检索质量优化。
 
-## 切分/检索质量评测（2026-07-14 已完成 v2 权威基线，后续项如下）
+## 切分/检索质量评测（2026-07-14 已完成 v2 权威基线 + 拒答阈值首轮校准，后续项如下）
 
-**权威基线已测得**（v2 人工标注集 × 完整混合检索，工具 `eval/scripts/EvalRetrievalRunner.java`）：
-**Recall@1 = 0.824 / Recall@5 = 0.912 / Recall@10 = 0.920 / MRR = 0.857 / 拒答 F1 = 0**。
-报告：`eval/reports/eval-v2-hybrid-real-20260714.md`（尾部含解读与方法论注记）。
+**权威基线已测得**（v2 人工标注集 × 完整混合检索 × 拒答阈值已校准，工具
+`eval/scripts/EvalRetrievalRunner.java`）：
+**Recall@1 = 0.816 / Recall@5 = 0.904 / Recall@10 = 0.912 / MRR = 0.849 / 拒答 F1 = 0.564**。
+报告：`eval/reports/eval-v2-calibrated-20260714.md`（含校准前后对比）、
+`eval/reports/refusal-threshold-calibration-20260714.md`（校准全过程）。
 评估集 `eval/datasets/eval-set-v2.jsonl`（150 题，构建脚本 `eval/scripts/build_eval_set_v2.py`）。
-历史基线（骨架集时代 0.094 / 0.264）主因评估集假阴性，仅供追溯。
+历史基线（骨架集时代 0.094/0.264；v2 校准阈值前 0.912/拒答F1=0）仅供追溯。
 模型服务：硅基流动在线 API（embedding=BAAI/bge-m3；rerank=BAAI/bge-reranker-v2-m3；
 bge-large-zh-v1.5 在硅基流动对 >512 token 报错 code 20015 不可用于 chunk 侧）。
 
+**拒答阈值校准已完成首轮**（`HybridRetriever.MIN_RERANK_SCORE=0.06`，rerank 成功后
+top1 分数低于阈值即拒答；139/139 后端测试通过，新增 3 个单测）：拒答 F1 从 0 → 0.564，
+代价是 3/125 应答题被误伤（Recall@5/MRR 各降 0.008，属可接受权衡）。
+
+**已发现的机制性局限（下一步真正的优先级）**——按拒答类型命中率：LOW_CONFIDENCE
+3/4、OUT_OF_SCOPE 6/10、SAFETY 2/3、**NO_RETRIEVAL 0/8**。rerank 分数衡量的是
+"主题相关性"，管不了"具体事实是否存在"（NO_RETRIEVAL）或"内容是否该外发"
+（SAFETY）——这两类检索到的 chunk 确实主题相关甚至真包含相关信息，问题出在
+别的判断维度，不是检索排序能解决的。
+
 按预期收益排序的后续项：
 
-- **拒答阈值校准（最高优先，产品端缺陷）**：`MIN_RRF_SCORE=0.01` 三轮实测拒答 F1 均为 0——混合召回总能凑出候选，25 道拒答题全部被给出结果。需引入分数校准或相关性下限（可用 v2 集的 25 道拒答题做校准集）。
+- **NO_RETRIEVAL 类拒答方案（最高优先，当前完全无解）**：需要生成阶段的事实核验——判断检索到的 chunk 是否真的陈述了被问及的具体数值/事实，而非仅主题相关。可能方向：生成后二次校验 prompt、或结构化字段抽取比对。
+- **SAFETY 类拒答方案**：需要独立的内容安全/合规分类器（如是否涉及个人信息聚合外发），与检索相关性正交，rerank 分数天生管不了。
 - **业务专家盲标复核**：v2 为 AI 单标注人构建（锚点定位+人工复核），按标注指南 §6 第③步抽 30% 双人独立标注，Jaccard ≥ 0.8 后补齐验收门 6。
-- **ES 中文分析器**：`content_search` 仍是 standard analyzer 字级切分，加 IK/smartcn 并让 `heading_path` 参与召回，观察 module/config 短板类（Recall@5 0.82-0.83）能否抬升。
+- **ES 中文分析器**：`content_search` 仍是 standard analyzer 字级切分，加 IK/smartcn 并让 `heading_path` 参与召回，观察 module/config 短板类（Recall@5 0.77-0.83）能否抬升。
 - **V0 切分基线对比**：检出 `1fc29ab` 在同一 v2 集组合下重跑（V0 chunk 边界不同，GT 需按锚点重定位——重跑 `build_eval_set_v2.py --report` 即可）。此前一版"模拟对比数据"是随机数生成的，已删除，不可引用。
+- **拒答阈值中期复核**：0.06 校准自单次 v2 评估（25 道拒答题），样本量有限；q-126（OUT_OF_SCOPE，深度学习方法）rerank 分数异常达 0.916 需要单独排查是否是 reranker 对"同文档不同方法"判别力的系统性问题；语料/评估集扩充后应重新校准。
 - **BGE query 指令前缀**：bge-m3 密集检索模式对指令前缀不敏感，优先级低；换回 bge 非对称模型时必须做。
 
 ## deepdoc 版面/表格识别集成的后续项（2026-07-14，`feat/deepdoc-parsing-foundation` 分支）

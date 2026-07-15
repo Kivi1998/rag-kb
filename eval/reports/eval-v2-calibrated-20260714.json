@@ -1,0 +1,99 @@
+{
+  "version_meta": {
+    "chunker": "technical-chunker@v3",
+    "retriever": "hybrid-bm25+kNN+rrf+rerank@v1-rerank-gate0.06",
+    "embedding": "siliconflow/BAAI-bge-m3@1024d",
+    "rerank": "siliconflow/BAAI-bge-reranker-v2-m3",
+    "corpus": "本科毕设@885chunks",
+    "eval-set": "v2@150题人工标注"
+  },
+  "overall": {
+    "total": 150,
+    "answerable_total": 125,
+    "expected_refusal_total": 25,
+    "recall_at_1": 0.816,
+    "recall_at_5": 0.904,
+    "recall_at_10": 0.912,
+    "mrr": 0.8488,
+    "refusal_precision": 0.7857142857142857,
+    "refusal_recall": 0.44,
+    "refusal_f1": 0.5641025641025641
+  },
+  "by_category": {
+    "api": {
+      "total": 27,
+      "answerable_total": 27,
+      "expected_refusal_total": 0,
+      "recall_at_5": 0.9629629629629629,
+      "mrr": 0.9259259259259259,
+      "refusal_f1": 0.0
+    },
+    "config": {
+      "total": 22,
+      "answerable_total": 22,
+      "expected_refusal_total": 0,
+      "recall_at_5": 0.7727272727272727,
+      "mrr": 0.75,
+      "refusal_f1": 0.0
+    },
+    "data-structure": {
+      "total": 26,
+      "answerable_total": 26,
+      "expected_refusal_total": 0,
+      "recall_at_5": 1.0,
+      "mrr": 0.9551282051282051,
+      "refusal_f1": 0.0
+    },
+    "troubleshoot": {
+      "total": 27,
+      "answerable_total": 27,
+      "expected_refusal_total": 0,
+      "recall_at_5": 0.9259259259259259,
+      "mrr": 0.8481481481481481,
+      "refusal_f1": 0.0
+    },
+    "module": {
+      "total": 23,
+      "answerable_total": 23,
+      "expected_refusal_total": 0,
+      "recall_at_5": 0.8260869565217391,
+      "mrr": 0.7333333333333334,
+      "refusal_f1": 0.0
+    },
+    "out-of-scope": {
+      "total": 25,
+      "answerable_total": 0,
+      "expected_refusal_total": 25,
+      "recall_at_5": 0.0,
+      "mrr": 0.0,
+      "refusal_f1": 0.6111111111111112
+    }
+  },
+  "by_difficulty": {
+    "easy": {
+      "total": 22,
+      "answerable_total": 22,
+      "expected_refusal_total": 0,
+      "recall_at_5": 0.8636363636363636,
+      "mrr": 0.7818181818181817,
+      "refusal_f1": 0.0
+    },
+    "medium": {
+      "total": 69,
+      "answerable_total": 69,
+      "expected_refusal_total": 0,
+      "recall_at_5": 0.8985507246376812,
+      "mrr": 0.8743961352657005,
+      "refusal_f1": 0.0
+    },
+    "hard": {
+      "total": 59,
+      "answerable_total": 34,
+      "expected_refusal_total": 25,
+      "recall_at_5": 0.9411764705882353,
+      "mrr": 0.8401960784313726,
+      "refusal_f1": 0.5945945945945945
+    }
+  },
+  "missing_predictions": []
+}

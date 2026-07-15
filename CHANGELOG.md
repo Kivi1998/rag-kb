@@ -17,14 +17,21 @@
   机器骨架集 v1 因 GT 大面积错位废弃保留。配套《标注指南》（`eval/datasets/标注指南.md`）。
 - **真实检索评测工具**（`eval/scripts/EvalRetrievalRunner.java`）—— 复用产品
   `ElasticsearchChunkIndex` + `HybridRetriever` 直连 ES 独立评测索引，混合/BM25-only 自适应。
+- **拒答阈值校准** —— `HybridRetriever` 新增 `MIN_RERANK_SCORE=0.06`：rerank 成功执行
+  （非降级）且 top1 相关性分数低于阈值时拒答，修复此前三轮实测拒答 F1 恒为 0 的问题。
+  阈值基于 v2 评估集 25 道拒答题的分数分布校准（`eval/scripts/analyze_refusal_threshold.py`），
+  过程详见 `eval/reports/refusal-threshold-calibration-20260714.md`。新增 3 个单元测试
+  （低分拒答/高分放行/降级场景跳过门槛），全量后端测试 139/139 通过。
 
 ### 评测结果（权威基线）
 
-- **Recall@1 = 0.824，Recall@5 = 0.912，Recall@10 = 0.920，MRR = 0.857**
-  （v2 评估集 × BM25 + bge-m3 kNN + RRF + bge-reranker-v2-m3 完整混合检索，
-  报告 `eval/reports/eval-v2-hybrid-real-20260714.md`）
-- 分桶：data-structure 类 Recall@5 = 1.000、api = 0.963；短板 module/config ≈ 0.82
-- 关键实证：同一检索系统在机器骨架集上 Recall@5 仅 0.264，人工标注集 0.912——
+- **Recall@1 = 0.816，Recall@5 = 0.904，Recall@10 = 0.912，MRR = 0.849，拒答 F1 = 0.564**
+  （v2 评估集 × BM25 + bge-m3 kNN + RRF + bge-reranker-v2-m3 完整混合检索 + 已校准拒答阈值，
+  报告 `eval/reports/eval-v2-calibrated-20260714.md`）
+- 拒答阈值校准前后对比：拒答 F1 0 → 0.564（+11/25 命中），代价是 3/125 应答题被误伤，
+  Recall@5/MRR 各下降 0.008（0.912→0.904，0.857→0.849），收益/代价权衡记录在报告中
+- 分桶：data-structure 类 Recall@5 = 1.000、api = 0.963；短板 module/config ≈ 0.77-0.83
+- 关键实证：同一检索系统在机器骨架集上 Recall@5 仅 0.264，人工标注集 0.904——
   评估集质量决定评测有效性，引用指标必须注明评估集版本
 
 ### 变更
@@ -40,8 +47,11 @@
 
 ### 已知问题
 
-- 拒答判定阈值 `MIN_RRF_SCORE=0.01` 无区分度：三轮实测拒答 F1 均为 0（25 道拒答题
-  全部被给出结果），需分数校准（见 TODOS.md「切分/检索质量评测」，已置顶）
+- 拒答阈值对 NO_RETRIEVAL 类（主题相关但具体事实缺失，如"随机数种子设的多少"）
+  和 SAFETY 类（内容确实可检索，但因合规原因应拒答，如汇总个人信息外发）几乎无
+  区分力（按类型命中率：LOW_CONFIDENCE 3/4、OUT_OF_SCOPE 6/10、SAFETY 2/3、
+  **NO_RETRIEVAL 0/8**）——rerank 分数衡量主题相关性，管不了"事实是否存在"或
+  "内容是否该外发"，需要独立机制（事实核验、内容安全分类器），见 TODOS.md（已置顶）
 - v2 评估集为 AI 单标注人构建，业务专家 30% 盲标复核待补
 
 ## [0.3.0] - 2026-07-14

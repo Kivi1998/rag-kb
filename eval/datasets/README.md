@@ -1,8 +1,9 @@
 # eval/datasets/ 评估集说明
 
-> **权威基线（2026-07-14，v2 集 × 完整混合检索）：Recall@1 = 0.824，Recall@5 = 0.912，
-> Recall@10 = 0.920，MRR = 0.857**，拒答 F1 = 0（阈值待校准，见 TODOS）。
-> 报告：[`eval/reports/eval-v2-hybrid-real-20260714.md`](../reports/eval-v2-hybrid-real-20260714.md)。
+> **权威基线（2026-07-14，v2 集 × 完整混合检索 × 拒答阈值已校准）：Recall@1 = 0.816，
+> Recall@5 = 0.904，Recall@10 = 0.912，MRR = 0.849，拒答 F1 = 0.564**。
+> 报告：[`eval/reports/eval-v2-calibrated-20260714.md`](../reports/eval-v2-calibrated-20260714.md)
+> （含校准前后对比）、[拒答阈值校准过程](../reports/refusal-threshold-calibration-20260714.md)。
 
 ## 当前交付物
 

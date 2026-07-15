@@ -133,6 +133,7 @@ public final class EvalRetrievalRunner {
                 JsonNode q = mapper.readTree(line);
                 String id = q.path("id").asText();
                 String question = q.path("question").asText();
+                boolean expectRefusal = q.path("expect_refusal").asBoolean(false);
                 RetrievalResult result = retriever.retrieveWithDecision(ORG_ID, KB_ID, question, options);
 
                 ObjectNode prediction = mapper.createObjectNode();
@@ -148,10 +149,14 @@ public final class EvalRetrievalRunner {
                     }
                     prediction.put("predicted_refusal", false);
                     prediction.putNull("predicted_refusal_reason");
+                    // 诊断字段（schema 未知字段，eval.runner 会忽略）：供拒答阈值校准使用。
+                    RetrievedChunk top = result.chunks().get(0);
+                    if (top.finalScore() != null) prediction.put("_top_rerank_score", top.finalScore());
+                    if (top.rrfScore() != null) prediction.put("_top_rrf_score", top.rrfScore());
                 }
-                prediction.put("reranked", false);
+                prediction.put("reranked", hybrid && reranker != null);
                 outLines.add(mapper.writeValueAsString(prediction));
-                System.out.println("[query] " + id + " → "
+                System.out.println("[query] " + id + (expectRefusal ? " [应拒答]" : "") + " → "
                         + (result.refused() ? "拒答(" + result.refusalReason() + ")" : ids.size() + " chunks"));
             }
             Files.createDirectories(output.getParent());

@@ -54,7 +54,7 @@ openspec/        需求规格与变更记录
 
 检索问答全链路（真实 Xinference Embedding/Rerank + DeepSeek 生成模型）已完成端到端人工验证：上传 → 解析 → 切块 → 向量化 → ES 索引 → BM25+kNN+RRF → Rerank → SSE 问答 → 引用，全部走通。
 
-切分与检索质量已完成正式离线评测：150 题人工标注评估集（`eval/datasets/eval-set-v2.jsonl`，26 篇本科毕设真实文档 / 885 个 V3 切块）× 产品完整混合检索链（BM25 + bge-m3 kNN + RRF + bge-reranker-v2-m3），实测 **Recall@1 = 0.824、Recall@5 = 0.912、MRR = 0.857**（硅基流动在线模型，报告与解读见 `eval/reports/eval-v2-hybrid-real-20260714.md`）。已知短板：拒答判定阈值无区分度（拒答 F1 = 0，产品端待办）；评估集为 AI 单标注人构建，业务专家盲标复核待补。方法论与完整状态见 [解析-切块-评估指南](docs/解析-切块-评估指南.md)。
+切分与检索质量已完成正式离线评测：150 题人工标注评估集（`eval/datasets/eval-set-v2.jsonl`，26 篇本科毕设真实文档 / 885 个 V3 切块）× 产品完整混合检索链（BM25 + bge-m3 kNN + RRF + bge-reranker-v2-m3，含已校准的 rerank 分数拒答门槛），实测 **Recall@1 = 0.816、Recall@5 = 0.904、MRR = 0.849、拒答 F1 = 0.564**（硅基流动在线模型，报告见 `eval/reports/eval-v2-calibrated-20260714.md`）。拒答门槛对"检索真找不到相关内容"（OUT_OF_SCOPE/LOW_CONFIDENCE）有效，对"主题相关但事实缺失"（NO_RETRIEVAL）和"内容合规"（SAFETY）类拒答存在机制性局限，需独立方案（详见指南与 TODOS）。评估集为 AI 单标注人构建，业务专家盲标复核待补。方法论与完整状态见 [解析-切块-评估指南](docs/解析-切块-评估指南.md)。
 
 以下仍需在目标环境单独验收：日均 5000 次查询容量、拒答/降级/跨组织隔离的自动化用例、生产网络 TLS/CORS 和 24 小时稳定性。
 
