@@ -50,7 +50,8 @@ public class HybridRetriever implements Retriever {
         if (query == null || query.isBlank()) {
             return RetrievalResult.refuse("问题不能为空");
         }
-        SearchRequest textRequest = new SearchRequest(organizationId, knowledgeBaseId, query, options.candidateLimit());
+        SearchRequest textRequest = new SearchRequest(organizationId, knowledgeBaseId, query, options.candidateLimit(),
+                options.documentIds());
         List<RetrievedChunk> bm25 = candidateSource.searchBm25(textRequest);
 
         List<RetrievedChunk> vector;
@@ -61,7 +62,7 @@ public class HybridRetriever implements Retriever {
                 throw new ModelClientException("查询 Embedding 返回数量不正确");
             }
             vector = candidateSource.searchKnn(new VectorSearchRequest(organizationId, knowledgeBaseId,
-                    embedding.vectors().get(0), options.candidateLimit()));
+                    embedding.vectors().get(0), options.candidateLimit(), options.documentIds()));
         } catch (ModelClientException ex) {
             // 向量模型短暂不可用时，保留关键词召回能力，避免整个检索入口不可用。
             log.warn("Embedding 不可用，降级为 BM25 结果: {}", ex.getMessage());

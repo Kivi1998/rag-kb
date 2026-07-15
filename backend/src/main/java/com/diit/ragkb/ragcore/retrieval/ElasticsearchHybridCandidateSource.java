@@ -48,7 +48,7 @@ public class ElasticsearchHybridCandidateSource implements HybridCandidateSource
                 "size", request.topK(),
                 "_source", SOURCE_FIELDS,
                 "query", Map.of("bool", Map.of(
-                        "filter", tenantFilters(request.organizationId(), request.knowledgeBaseId()),
+                        "filter", tenantFilters(request.organizationId(), request.knowledgeBaseId(), request.documentIds()),
                         "should", List.of(
                                 Map.of("term", Map.of("symbol_names", Map.of("value", request.query(), "boost", 8))),
                                 Map.of("term", Map.of("config_keys", Map.of("value", request.query(), "boost", 7))),
@@ -72,7 +72,7 @@ public class ElasticsearchHybridCandidateSource implements HybridCandidateSource
                         "query_vector", request.queryVector(),
                         "k", request.topK(),
                         "num_candidates", Math.max(100, request.topK() * 3),
-                        "filter", tenantFilters(request.organizationId(), request.knowledgeBaseId())));
+                        "filter", tenantFilters(request.organizationId(), request.knowledgeBaseId(), request.documentIds())));
         return execute(body, false);
     }
 
@@ -87,10 +87,15 @@ public class ElasticsearchHybridCandidateSource implements HybridCandidateSource
         }
     }
 
-    private List<Map<String, Object>> tenantFilters(UUID organizationId, UUID knowledgeBaseId) {
-        return List.of(
+    private List<Map<String, Object>> tenantFilters(UUID organizationId, UUID knowledgeBaseId, List<UUID> documentIds) {
+        List<Map<String, Object>> filters = new ArrayList<>(List.of(
                 Map.of("term", Map.of("org_id", organizationId.toString())),
-                Map.of("term", Map.of("kb_id", knowledgeBaseId.toString())));
+                Map.of("term", Map.of("kb_id", knowledgeBaseId.toString()))));
+        if (documentIds != null && !documentIds.isEmpty()) {
+            filters.add(Map.of("terms", Map.of("document_id",
+                    documentIds.stream().map(UUID::toString).toList())));
+        }
+        return filters;
     }
 
     private List<RetrievedChunk> parseHits(HttpEntity entity, boolean bm25) throws IOException {

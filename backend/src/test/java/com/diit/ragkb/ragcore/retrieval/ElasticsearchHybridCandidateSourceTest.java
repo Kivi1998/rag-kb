@@ -19,6 +19,7 @@ import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** 双路 ES DSL 必须携带 org/kb 过滤，且技术标识字段优先。 */
@@ -72,6 +73,32 @@ class ElasticsearchHybridCandidateSourceTest {
         assertTrue(latestBody.get().contains("\"num_candidates\":100"));
         assertTrue(latestBody.get().contains("\"org_id\":\"" + orgId + "\""));
         assertTrue(latestBody.get().contains("\"kb_id\":\"" + kbId + "\""));
+    }
+
+    @Test
+    void bm25WithoutDocumentIdsOmitsDocumentFilter() {
+        var source = new ElasticsearchHybridCandidateSource(restClient, properties(), new ObjectMapper());
+        source.searchBm25(new SearchRequest(orgId, kbId, "SearchService", 30));
+
+        assertFalse(latestBody.get().contains("\"terms\""));
+    }
+
+    @Test
+    void bm25WithDocumentIdsAddsTermsFilter() {
+        UUID documentId = UUID.randomUUID();
+        var source = new ElasticsearchHybridCandidateSource(restClient, properties(), new ObjectMapper());
+        source.searchBm25(new SearchRequest(orgId, kbId, "SearchService", 30, List.of(documentId)));
+
+        assertTrue(latestBody.get().contains("\"terms\":{\"document_id\":[\"" + documentId + "\"]}"));
+    }
+
+    @Test
+    void knnWithDocumentIdsAddsTermsFilter() {
+        UUID documentId = UUID.randomUUID();
+        var source = new ElasticsearchHybridCandidateSource(restClient, properties(), new ObjectMapper());
+        source.searchKnn(new VectorSearchRequest(orgId, kbId, List.of(0.1f, 0.2f), 30, List.of(documentId)));
+
+        assertTrue(latestBody.get().contains("\"terms\":{\"document_id\":[\"" + documentId + "\"]}"));
     }
 
     private RagElasticsearchProperties properties() {

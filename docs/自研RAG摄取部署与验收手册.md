@@ -24,6 +24,7 @@
 - 共享 ES 索引 `rag_chunks_v1` 的 mapping、Bulk Upsert、按 org/kb/document 三重过滤删除；
 - `DELETING` 删除补偿：优先删除 ES chunk，再删除对象与数据库元数据，失败自动重试。
 - ES 原生 BM25 与 kNN 双路召回、RRF 融合、可选 Rerank、低置信度拒答；
+- `RetrievalOptions.documentIds` 可选文档范围过滤：非空时 BM25/kNN 两路在租户过滤外叠加 `document_id` terms 过滤，只在指定文档内检索（2026-07-15 新增，仅检索层能力，暂无前端入口传入非空值）；
 - `POST /api/v1/knowledge-bases/{kbId}/query` SSE 接口，稳定输出 `chunk/source/refusal/done/error` 五类事件；
 - 服务端引用卡片：从最终 chunk 和本租户文档元数据构造，不向前端暴露对象存储路径；
 - Embedding 故障时退化为 BM25，Rerank 故障时退化为 RRF，空召回不调用生成模型。
