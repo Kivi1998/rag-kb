@@ -1,18 +1,33 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { Delete, RefreshRight, UploadFilled } from '@element-plus/icons-vue'
+import { Close, Delete, RefreshRight, UploadFilled } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { documentsApi } from '@/api/documentsApi'
 import { INGESTION_IN_FLIGHT_STATES, type Document, type IngestionStatus } from '@/types/ingestion'
+
+/** 同时进行的上传请求数上限；避免一次选择几十个文件时把浏览器/网关连接数打满。 */
+const MAX_CONCURRENT_UPLOADS = 3
+
+type UploadItemStatus = 'pending' | 'uploading' | 'success' | 'error'
+
+interface UploadQueueItem {
+  id: string
+  file: File
+  status: UploadItemStatus
+  progress: number
+  errorMessage?: string
+}
 
 const props = defineProps<{ kbId: string }>()
 
 const documents = ref<Document[]>([])
 const loading = ref(false)
-const uploading = ref(false)
-const uploadProgress = ref(0)
+const uploadQueue = ref<UploadQueueItem[]>([])
 const fileInput = ref<HTMLInputElement | null>(null)
 let pollTimer: ReturnType<typeof setInterval> | undefined
+let activeUploadCount = 0
+
+const uploading = computed(() => uploadQueue.value.some((item) => item.status === 'pending' || item.status === 'uploading'))
 
 const statusMeta: Record<IngestionStatus, { label: string; type: 'info' | 'warning' | 'success' | 'danger' }> = {
   QUEUED: { label: '排队中', type: 'info' },
@@ -54,20 +69,56 @@ function chooseFile() {
   fileInput.value?.click()
 }
 
-async function handleFileChange(event: Event) {
+function handleFileChange(event: Event) {
   const input = event.target as HTMLInputElement
-  const file = input.files?.[0]
-  input.value = ''
-  if (!file) return
-  uploading.value = true
-  uploadProgress.value = 0
-  try {
-    await documentsApi.upload(props.kbId, file, (value) => { uploadProgress.value = value })
-    ElMessage.success('文件已上传，正在异步解析与建立索引')
-    await loadDocuments(true)
-  } finally {
-    uploading.value = false
+  const files = input.files ? Array.from(input.files) : []
+  input.value = '' // 允许用户重新选择同名文件
+  if (files.length === 0) return
+  for (const file of files) {
+    uploadQueue.value.push({ id: `${file.name}-${file.size}-${Date.now()}-${Math.random()}`, file, status: 'pending', progress: 0 })
   }
+  pumpUploadQueue()
+}
+
+/** 并发上限调度器：每有一个上传槽位空出来，就从队列里取下一个待上传项。 */
+function pumpUploadQueue() {
+  while (activeUploadCount < MAX_CONCURRENT_UPLOADS) {
+    const next = uploadQueue.value.find((item) => item.status === 'pending')
+    if (!next) break
+    void runUpload(next)
+  }
+}
+
+async function runUpload(item: UploadQueueItem) {
+  activeUploadCount += 1
+  item.status = 'uploading'
+  item.progress = 0
+  try {
+    await documentsApi.upload(props.kbId, item.file, (value) => { item.progress = value })
+    item.status = 'success'
+    await loadDocuments(true)
+  } catch (error) {
+    item.status = 'error'
+    item.errorMessage = error instanceof Error ? error.message : '上传失败'
+  } finally {
+    activeUploadCount -= 1
+    pumpUploadQueue()
+  }
+}
+
+/** 失败的文件允许原样重新入队重试，不需要用户重新选择文件。 */
+function retryUploadItem(item: UploadQueueItem) {
+  item.status = 'pending'
+  item.errorMessage = undefined
+  pumpUploadQueue()
+}
+
+function dismissUploadItem(item: UploadQueueItem) {
+  uploadQueue.value = uploadQueue.value.filter((entry) => entry !== item)
+}
+
+function clearFinishedUploads() {
+  uploadQueue.value = uploadQueue.value.filter((item) => item.status === 'pending' || item.status === 'uploading')
 }
 
 async function retry(document: Document) {
@@ -115,11 +166,38 @@ onBeforeUnmount(() => { if (pollTimer) clearInterval(pollTimer) })
       <div class="header-actions">
         <el-button :icon="RefreshRight" :loading="loading" @click="loadDocuments()">刷新</el-button>
         <el-button type="primary" :icon="UploadFilled" :loading="uploading" @click="chooseFile">上传文档</el-button>
-        <input ref="fileInput" class="file-input" type="file" accept=".md,.markdown,.txt,.pdf,.docx,.json,.yaml,.yml,.xml,.java,.py,.js,.ts,.tsx,.jsx,.go,.rs,.sql,.sh,.bash,.properties,.conf,.ini,.gradle,.pom" @change="handleFileChange" />
+        <input
+          ref="fileInput"
+          class="file-input"
+          type="file"
+          multiple
+          accept=".md,.markdown,.txt,.pdf,.docx,.pptx,.srt,.vtt,.json,.yaml,.yml,.xml,.png,.jpg,.jpeg,.tif,.tiff,.mp3,.wav,.mp4,.mov,.mkv,.java,.py,.js,.ts,.tsx,.jsx,.go,.rs,.sql,.sh,.bash,.properties,.conf,.ini,.gradle,.pom"
+          @change="handleFileChange"
+        />
       </div>
     </header>
 
-    <el-progress v-if="uploading" :percentage="uploadProgress" :indeterminate="uploadProgress === 0" />
+    <div v-if="uploadQueue.length > 0" class="upload-queue" data-testid="upload-queue">
+      <div class="upload-queue-header">
+        <span>本次选择 {{ uploadQueue.length }} 个文件</span>
+        <el-button text size="small" @click="clearFinishedUploads">清除已完成</el-button>
+      </div>
+      <ul class="upload-queue-list">
+        <li v-for="item in uploadQueue" :key="item.id" class="upload-queue-item">
+          <span class="upload-queue-name" :title="item.file.name">{{ item.file.name }}</span>
+          <el-progress
+            v-if="item.status === 'uploading' || item.status === 'pending'"
+            class="upload-queue-progress"
+            :percentage="item.progress"
+            :indeterminate="item.status === 'pending' || item.progress === 0"
+          />
+          <el-tag v-else-if="item.status === 'success'" type="success" effect="light">已上传</el-tag>
+          <el-tag v-else type="danger" effect="light" :title="item.errorMessage">失败：{{ item.errorMessage || '未知错误' }}</el-tag>
+          <el-button v-if="item.status === 'error'" text type="primary" size="small" @click="retryUploadItem(item)">重试</el-button>
+          <el-button text size="small" :icon="Close" @click="dismissUploadItem(item)" />
+        </li>
+      </ul>
+    </div>
 
     <el-table v-loading="loading" :data="documents" empty-text="暂无文档，请上传技术资料" class="document-table">
       <el-table-column prop="name" label="文件" min-width="190" show-overflow-tooltip />
@@ -152,5 +230,11 @@ onBeforeUnmount(() => { if (pollTimer) clearInterval(pollTimer) })
 .header-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
 .file-input { display: none; }
 .document-table { flex: 1; }
+.upload-queue { border: 1px solid var(--el-border-color); border-radius: 6px; padding: 10px 12px; background: var(--el-fill-color-lighter); }
+.upload-queue-header { display: flex; align-items: center; justify-content: space-between; font-size: 13px; color: var(--el-text-color-secondary); margin-bottom: 6px; }
+.upload-queue-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; max-height: 180px; overflow-y: auto; }
+.upload-queue-item { display: flex; align-items: center; gap: 10px; font-size: 13px; }
+.upload-queue-name { flex: 0 0 auto; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.upload-queue-progress { flex: 1; min-width: 80px; }
 @media (max-width: 760px) { .panel-header { flex-direction: column; } .header-actions { justify-content: flex-start; } }
 </style>
