@@ -99,10 +99,12 @@ top1 分数低于阈值即拒答；139/139 后端测试通过，新增 3 个单�
   思路是改用 `page.get_text("words")` 拿带位置信息的文字框，复用
   `app/deepdoc/pipeline.py` 里现成的 `LayoutRecognizer` 分组逻辑，不需要跑 OCR
   模型。
-- **只用合成图片验证过，没有跑过真实 PDF 样本**：`parser-gateway/tests/test_deepdoc_pipeline.py` 里的双栏测试用的是程序画出来的合成图片，表格测试用的是 mock 的表格结构（绕开了版面模型是否真能把表格识别成"table"类型这一环）。真实扫描件/真实费率表 PDF 上的效果需要单独找样本验收。
+- **版面/表格识别（多栏 PDF、无边框表格）仍只用合成样本验证**：`parser-gateway/tests/test_deepdoc_pipeline.py` 里的双栏测试用的是程序画出来的合成图片，表格测试用的是 mock 的表格结构（绕开了版面模型是否真能把表格识别成"table"类型这一环）。真实扫描件/真实费率表 PDF 上的效果需要单独找样本验收。
+- ~~DOCX/PPTX 内嵌图片 OCR 未用真实样本验证~~（**2026-07-14 已验证**）：本机首次真正启用 parser-gateway 后，用真实文档（贾昊-文献翻译.docx）跑通端到端 `/v1/parse`，过程中发现并修复了一个真实 bug——单张内嵌图片解码/OCR 失败（如老式 WMF 格式）会导致整份文档解析 500，现已改为该图片降级返回空文本、不影响文档其余内容（见 `parsers.py::_ocr_bytes`，新增 3 个单测 `test_parsers_ocr_resilience.py`）。验证结果：71 段落全部提取，3 张内嵌图片中可识别的均被识别。
 - **印章压字（坑 3）仍未解决**：deepdoc 本身也没有针对性的印章检测/图层分离方案，这个坑目前四个参考项目（rag-kb、rag系统1/2/3）都没真正解决，见此前的调研结论。
 - **`_ocr_bytes()`（DOCX/PPTX 内嵌图片）不做版面分析**：这是有意的简化，这类图片通常是单张截图/Logo，不是多栏页面。
-- **Docker 镜像还没验证过完整跑通**：`Dockerfile` 已加 nltk 语料预下载，但没有实际 build 镜像跑过摄取全链路；本地验证用的是手工建的 venv。
+- **Docker 镜像还没验证过完整跑通**：`Dockerfile` 已加 nltk 语料预下载，但没有实际 build 镜像跑过摄取全链路；本地验证用的是手工建的 venv（2026-07-14：本机 venv 首次真正跑通，Python 3.13 + `httpx[socks]`——本机走 SOCKS5 代理下载 HuggingFace 模型需要装这个 extra，`requirements.txt` 未声明，见下条）。
+- **`requirements.txt` 缺 `httpx[socks]`**：本机环境经 SOCKS5 代理（`all_proxy`）访问 HuggingFace 下载 deepdoc 模型时，`huggingface_hub` 底层用 httpx 走 SOCKS 代理需要 `socksio` 包，而 `requirements.txt` 只声明了 `huggingface_hub`，未显式声明 `httpx[socks]`。当前只是本机手动 `pip install "httpx[socks]"` 补的，未写回 `requirements.txt`——是否要固化取决于生产环境是否也走代理拉模型，暂不改动生产依赖清单。
 
 ## 结构感知切分 V3 五招式（2026-07-14 实现，见 backend/.../ragcore/chunk/impl/TechnicalChunker.java + HeadingStyle.java）
 
