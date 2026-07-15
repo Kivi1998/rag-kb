@@ -65,6 +65,55 @@ MINIO_ENDPOINT=https://minio.example.internal
 MINIO_BUCKET=rag-kb
 MINIO_ACCESS_KEY=...
 MINIO_SECRET_KEY=...
+```
+
+### 本地开发环境的对象存储
+
+本地开发默认走 `rag.storage.type=local`（`./data/rag-objects`），2026-07-15 起改为与生产同构，使用独立的 MinIO 容器 `rag-kb-dev-minio`（与同机运行的其他项目容器如 `thxpace-minio-local` 相互隔离，各自独立的 bucket/凭据/数据卷）：
+
+```bash
+# 启动容器（API 端口 9010，控制台端口 9011，持久化到具名卷 rag_kb_minio_data）
+docker volume create rag_kb_minio_data
+docker run -d --name rag-kb-dev-minio \
+  -p 9010:9000 -p 9011:9001 \
+  -e MINIO_ROOT_USER=ragkb \
+  -e MINIO_ROOT_PASSWORD=<强密码> \
+  -v rag_kb_minio_data:/data \
+  minio/minio:RELEASE.2025-09-07T16-13-09Z server /data --console-address ":9001"
+
+# 建 bucket（用 mc 一次性容器执行，避免本机安装 mc 客户端）
+docker run --rm --add-host=host.docker.internal:host-gateway \
+  --entrypoint /bin/sh minio/mc:RELEASE.2025-08-13T08-35-41Z -c "
+mc alias set devminio http://host.docker.internal:9010 ragkb <强密码> &&
+mc mb --ignore-existing devminio/rag-kb &&
+mc anonymous set none devminio/rag-kb
+"
+```
+
+对应的 `.env`（本地开发，不提交仓库）：
+
+```bash
+RAG_STORAGE_TYPE=minio
+MINIO_ENDPOINT=http://localhost:9010
+MINIO_BUCKET=rag-kb
+MINIO_ACCESS_KEY=ragkb
+MINIO_SECRET_KEY=<强密码>
+```
+
+MinIO 控制台：`http://localhost:9011`（用 `MINIO_ROOT_USER`/`MINIO_ROOT_PASSWORD` 登录，可直接浏览对象）。
+
+切换存储后端不需要改代码——`LocalObjectStorage`/`MinioObjectStorage` 都是 `@ConditionalOnProperty(rag.storage.type)` 条件装配的 Bean，只由 `RAG_STORAGE_TYPE` 决定装配哪一个。从本地文件系统切到 MinIO 时，已摄取文档对应的原始对象需要手动迁移（保持相同的 `org/{orgId}/kb/{kbId}/documents/{documentId}.{ext}` 对象键），否则数据库/ES 中记录的 `object_storage_path` 会在新后端下找不到对应对象：
+
+```bash
+docker run --rm --add-host=host.docker.internal:host-gateway \
+  -v "$(pwd)/backend/data/rag-objects:/migrate:ro" \
+  --entrypoint /bin/sh minio/mc:RELEASE.2025-08-13T08-35-41Z -c "
+mc alias set devminio http://host.docker.internal:9010 ragkb <强密码> &&
+mc cp --recursive /migrate/ devminio/rag-kb/
+"
+```
+
+```bash
 
 # 上传与解析必需
 RAG_DIRECT_UPLOAD_TTL_SECONDS=900
