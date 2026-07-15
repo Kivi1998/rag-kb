@@ -2,6 +2,7 @@ package com.diit.ragkb.service;
 
 import com.diit.ragkb.model.KnowledgeBase;
 import com.diit.ragkb.model.KnowledgeDocument;
+import com.diit.ragkb.ragcore.conversation.ConversationMemoryOrchestrator;
 import com.diit.ragkb.ragcore.generation.AnswerGenerator;
 import com.diit.ragkb.ragcore.generation.GenerationMetrics;
 import com.diit.ragkb.ragcore.model.Chunk;
@@ -14,6 +15,7 @@ import com.diit.ragkb.repository.KnowledgeDocumentRepository;
 import com.diit.ragkb.security.TenantContext;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.ObjectProvider;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -23,6 +25,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -51,9 +54,10 @@ class QueryServiceTest {
         RetrievedChunk retrieved = retrieved(orgId, kbId, documentId);
         Retriever retriever = retriever(new RetrievalResult(List.of(retrieved), null));
         AnswerGenerator generator = (question, contexts, consumer) -> consumer.accept(QueryEvent.chunk("请检查数据库连接。"));
-        QueryService service = new QueryService(retriever, generator, kbService, documents);
+        QueryService service = new QueryService(retriever, generator, kbService, documents, emptyProvider(),
+                emptyProvider());
 
-        QueryService.PreparedQuery prepared = service.prepare(kbId, "如何排查启动失败？");
+        QueryService.PreparedQuery prepared = service.prepare(kbId, UUID.randomUUID(), "如何排查启动失败？");
         List<QueryEvent> events = new ArrayList<>();
         GenerationMetrics metrics = service.stream(prepared, events::add);
 
@@ -79,10 +83,10 @@ class QueryServiceTest {
         KnowledgeDocumentRepository documents = mock(KnowledgeDocumentRepository.class);
         AnswerGenerator generator = mock(AnswerGenerator.class);
         QueryService service = new QueryService(retriever(RetrievalResult.refuse("未在当前知识库中检索到足够依据")),
-                generator, kbService, documents);
+                generator, kbService, documents, emptyProvider(), emptyProvider());
 
         List<QueryEvent> events = new ArrayList<>();
-        QueryService.PreparedQuery prepared = service.prepare(kbId, "不存在的问题");
+        QueryService.PreparedQuery prepared = service.prepare(kbId, UUID.randomUUID(), "不存在的问题");
         GenerationMetrics metrics = service.stream(prepared, events::add);
 
         assertEquals(List.of("refusal"), events.stream().map(QueryEvent::sseEventName).toList());
@@ -102,10 +106,107 @@ class QueryServiceTest {
         KnowledgeDocumentRepository documents = mock(KnowledgeDocumentRepository.class);
         RetrievedChunk wrongTenant = retrieved(UUID.randomUUID(), kbId, UUID.randomUUID());
         QueryService service = new QueryService(retriever(new RetrievalResult(List.of(wrongTenant), null)),
-                mock(AnswerGenerator.class), kbService, documents);
+                mock(AnswerGenerator.class), kbService, documents, emptyProvider(), emptyProvider());
 
-        assertThrows(IllegalStateException.class, () -> service.prepare(kbId, "查询"));
+        assertThrows(IllegalStateException.class, () -> service.prepare(kbId, UUID.randomUUID(), "查询"));
         verify(documents, never()).findByKnowledgeBaseIdAndOrgIdOrderByCreatedAtDesc(any(), any());
+    }
+
+    @Test
+    void touchesSessionWhenMemoryFeatureEnabled() {
+        UUID orgId = UUID.randomUUID();
+        UUID kbId = UUID.randomUUID();
+        UUID sessionId = UUID.randomUUID();
+        TenantContext.set(orgId, UUID.randomUUID(), "MEMBER");
+        KnowledgeBaseService kbService = mock(KnowledgeBaseService.class);
+        when(kbService.getByIdAndCurrentOrg(kbId)).thenReturn(new KnowledgeBase());
+        KnowledgeDocumentRepository documents = mock(KnowledgeDocumentRepository.class);
+        ChatSessionService chatSessionService = mock(ChatSessionService.class);
+        ObjectProvider<ChatSessionService> sessionProvider = mock(ObjectProvider.class);
+        when(sessionProvider.getIfAvailable()).thenReturn(chatSessionService);
+        QueryService service = new QueryService(retriever(RetrievalResult.refuse("拒答")), mock(AnswerGenerator.class),
+                kbService, documents, sessionProvider, emptyProvider());
+
+        service.prepare(kbId, sessionId, "问题");
+
+        verify(chatSessionService, org.mockito.Mockito.times(1)).touchSession(sessionId);
+    }
+
+    @Test
+    void invalidSessionPropagatesExceptionBeforeRetrieval() {
+        UUID orgId = UUID.randomUUID();
+        UUID kbId = UUID.randomUUID();
+        UUID sessionId = UUID.randomUUID();
+        TenantContext.set(orgId, UUID.randomUUID(), "MEMBER");
+        KnowledgeBaseService kbService = mock(KnowledgeBaseService.class);
+        when(kbService.getByIdAndCurrentOrg(kbId)).thenReturn(new KnowledgeBase());
+        KnowledgeDocumentRepository documents = mock(KnowledgeDocumentRepository.class);
+        ChatSessionService chatSessionService = mock(ChatSessionService.class);
+        when(chatSessionService.touchSession(sessionId))
+                .thenThrow(new com.diit.ragkb.exception.ResourceNotFoundException("会话不存在"));
+        ObjectProvider<ChatSessionService> sessionProvider = mock(ObjectProvider.class);
+        when(sessionProvider.getIfAvailable()).thenReturn(chatSessionService);
+        Retriever retriever = mock(Retriever.class);
+        QueryService service = new QueryService(retriever, mock(AnswerGenerator.class), kbService, documents,
+                sessionProvider, emptyProvider());
+
+        assertThrows(com.diit.ragkb.exception.ResourceNotFoundException.class,
+                () -> service.prepare(kbId, sessionId, "问题"));
+        verify(retriever, never()).retrieveWithDecision(any(), any(), any(), any());
+    }
+
+    @Test
+    void memoryOrchestratorResolvesQuestionAndInjectsProfileIntoGeneration() {
+        UUID orgId = UUID.randomUUID();
+        UUID kbId = UUID.randomUUID();
+        UUID documentId = UUID.randomUUID();
+        UUID sessionId = UUID.randomUUID();
+        TenantContext.set(orgId, UUID.randomUUID(), "MEMBER");
+        KnowledgeBaseService kbService = mock(KnowledgeBaseService.class);
+        when(kbService.getByIdAndCurrentOrg(kbId)).thenReturn(new KnowledgeBase());
+        KnowledgeDocument document = new KnowledgeDocument();
+        document.setId(documentId);
+        document.setName("文档.md");
+        KnowledgeDocumentRepository documents = mock(KnowledgeDocumentRepository.class);
+        when(documents.findByKnowledgeBaseIdAndOrgIdOrderByCreatedAtDesc(kbId, orgId)).thenReturn(List.of(document));
+
+        ConversationMemoryOrchestrator orchestrator = mock(ConversationMemoryOrchestrator.class);
+        com.diit.ragkb.ragcore.conversation.MemoryContext memoryContext =
+                new com.diit.ragkb.ragcore.conversation.MemoryContext("重疾险犹豫期过了还能退保吗", "用户偏好：常问保险条款");
+        when(orchestrator.prepareContext(eq(orgId), any(), eq(sessionId), eq("那它呢"))).thenReturn(memoryContext);
+        ObjectProvider<ConversationMemoryOrchestrator> orchestratorProvider = mock(ObjectProvider.class);
+        when(orchestratorProvider.getIfAvailable()).thenReturn(orchestrator);
+
+        Retriever retriever = mock(Retriever.class);
+        RetrievedChunk retrieved = retrieved(orgId, kbId, documentId);
+        when(retriever.retrieveWithDecision(eq(orgId), eq(kbId), eq("重疾险犹豫期过了还能退保吗"), any()))
+                .thenReturn(new RetrievalResult(List.of(retrieved), null));
+
+        List<String> capturedSystemContext = new ArrayList<>();
+        AnswerGenerator generator = new AnswerGenerator() {
+            @Override
+            public void stream(String question, List<RetrievedChunk> contexts, java.util.function.Consumer<QueryEvent> c) { }
+
+            @Override
+            public GenerationMetrics streamWithMetrics(String question, List<RetrievedChunk> contexts,
+                                                       String additionalSystemContext,
+                                                       java.util.function.Consumer<QueryEvent> eventConsumer) {
+                capturedSystemContext.add(additionalSystemContext);
+                eventConsumer.accept(QueryEvent.chunk("答案"));
+                return GenerationMetrics.none();
+            }
+        };
+        QueryService service = new QueryService(retriever, generator, kbService, documents, emptyProvider(),
+                orchestratorProvider);
+
+        QueryService.PreparedQuery prepared = service.prepare(kbId, sessionId, "那它呢");
+        service.stream(prepared, e -> { });
+
+        verify(retriever, org.mockito.Mockito.times(1))
+                .retrieveWithDecision(eq(orgId), eq(kbId), eq("重疾险犹豫期过了还能退保吗"), any());
+        assertEquals(List.of("用户偏好：常问保险条款"), capturedSystemContext);
+        verify(orchestrator, org.mockito.Mockito.times(1)).recordTurn(eq(orgId), eq(kbId), any(), eq(sessionId),
+                eq("那它呢"), eq("答案"));
     }
 
     private Retriever retriever(RetrievalResult result) {
@@ -125,5 +226,13 @@ class QueryServiceTest {
         Chunk chunk = new Chunk("chunk-1", orgId, kbId, documentId, 0, "数据库连接失败时检查 JDBC URL。",
                 List.of("部署", "数据库"), "org/private/object.md", 3, 11, 12, "markdown", "hash", java.util.Map.of());
         return new RetrievedChunk(chunk, 1, 1, 0.032, 0.9, 0.9);
+    }
+
+    /** 模拟 rag.memory.enabled=false 时的 Bean 缺失场景：ObjectProvider 取不到任何实例。 */
+    @SuppressWarnings("unchecked")
+    private <T> ObjectProvider<T> emptyProvider() {
+        ObjectProvider<T> provider = mock(ObjectProvider.class);
+        when(provider.getIfAvailable()).thenReturn(null);
+        return provider;
     }
 }

@@ -71,7 +71,7 @@ function fetchSpyAbortable() {
 }
 
 const baseOpts = {
-  body: { question: '核辐射在保障范围内吗？' },
+  body: { question: '核辐射在保障范围内吗？', sessionId: 'session-1' },
   headers: {
     Authorization: 'Bearer test-token',
     'X-Org-Id': 'org-42'

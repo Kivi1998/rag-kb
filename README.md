@@ -13,7 +13,8 @@
 - 独立 Parser Gateway 提供 OCR、ASR、Office 图片提取和字幕时间戳；
 - 结构感知切块（V3）：多风格层级识别、递归多级级联、表格分组+表头重复、句子边界重叠、chunk 元数据（sectionPath/contentType/isKeyClause/prev-nextChunkId）；
 - Elasticsearch BM25 + kNN + RRF、可选 Rerank、服务端引用与 SSE 问答；
-- 离线评测（Recall@k/MRR/拒答 F1 框架 + 61 题真实语料评估集）、查询审计、指标与生产同构验收栈。
+- 多轮对话与记忆管理：滑动窗口+语义历史检索+摘要压缩、用户画像+读时衰减遗忘机制、指代消解（2026-07-15 新增，学习性质的能力储备，当前规模非刚需驱动）；
+- 离线评测（Recall@k/MRR/拒答 F1 框架 + 150 题真实语料评估集 eval-set-v2）、查询审计、指标与生产同构验收栈。
 
 ## 技术架构
 
@@ -25,13 +26,15 @@ Vue 前端
             ├─ Parser / TechnicalChunker
             ├─ Embedding / Rerank / Generation Client
             ├─ Elasticsearch：BM25 + kNN + RRF
+            ├─ Conversation Memory：滑动窗口 / 指代消解 / 用户画像
             ├─ 引用、拒答、SSE 与审计
             └─ Worker、重试、指标与评测
 
-PostgreSQL：业务数据和任务
+PostgreSQL：业务数据、任务与会话元数据（chat_session）
 MinIO/S3：原文件与解析产物
-Elasticsearch：Chunk、全文与向量
-Redis：限流和缓存
+Elasticsearch：Chunk、全文与向量；统一记忆索引（rag_memory_v1）
+Redis：JWT 黑名单（DB 0）+ 会话记忆滑动窗口（DB 1，rag-kb 专属实例）
+MongoDB：会话消息长期存档 + 用户画像条目（只服务记忆子系统）
 Parser Gateway：OCR / ASR / 多模态解析
 模型服务：OpenAI 兼容的 Embedding / Rerank / LLM
 ```
@@ -92,6 +95,12 @@ openspec/        需求规格与变更记录
 - 文档：[拒答阈值校准报告](eval/reports/refusal-threshold-calibration-20260714.md)（rerank 分数拒答门槛怎么定的）、[候选池大小调优实验](eval/reports/candidate-pool-size-tuning-20260715.md)（candidateLimit 从 50 降到 10/20/30 的 Recall/延迟实测对比）、[延后事项清单](TODOS.md)（RRF 融合动态权重等待办）
 - 代码：[`RerankerClient.java`](backend/src/main/java/com/diit/ragkb/ragcore/rerank/RerankerClient.java)（接口）、[`OpenAiCompatibleRerankerClient.java`](backend/src/main/java/com/diit/ragkb/ragcore/rerank/OpenAiCompatibleRerankerClient.java)（Cross-Encoder 兼容实现，当前对接硅基流动 `BAAI/bge-reranker-v2-m3`）
 
+### 7. 多轮对话与记忆管理
+
+- 文档：[brainstorming 设计文档](docs/superpowers/specs/2026-07-15-conversation-memory-design.md)（架构决策与备选方案对比）、[OpenSpec change](openspec/changes/conversation-memory/)（proposal/design/specs/tasks）
+- 代码：[`ConversationMemoryOrchestrator.java`](backend/src/main/java/com/diit/ragkb/ragcore/conversation/ConversationMemoryOrchestrator.java)（编排入口：滑动窗口→指代消解→画像检索/生成后持久化+异步提炼）、[`SlidingWindowAssembler.java`](backend/src/main/java/com/diit/ragkb/ragcore/conversation/SlidingWindowAssembler.java)（token 预算滑动窗口+摘要压缩）、[`DeepSeekCoreferenceResolver.java`](backend/src/main/java/com/diit/ragkb/ragcore/conversation/impl/DeepSeekCoreferenceResolver.java)（窄范围指代消解）、[`MemoryItemStoreImpl.java`](backend/src/main/java/com/diit/ragkb/ragcore/conversation/impl/MemoryItemStoreImpl.java)（用户画像语义去重+读时衰减遗忘机制）、[`ElasticsearchMemoryIndex.java`](backend/src/main/java/com/diit/ragkb/ragcore/conversation/impl/ElasticsearchMemoryIndex.java)（统一记忆索引 `rag_memory_v1`）、[`ChatSessionService.java`](backend/src/main/java/com/diit/ragkb/service/ChatSessionService.java)（会话生命周期）
+- 存储：Redis（`rag-kb-dev-redis` 专属实例，逻辑 DB 1）+ MongoDB（`chat_messages`/`memory_items`）+ Elasticsearch（复用现有集群，新索引）+ Postgres（`chat_session` 元数据）
+
 ### 评测框架（跨模块）
 
 - [离线评测框架](eval/README.md) · [150 题评估集说明](eval/datasets/README.md)（`eval-set-v2.jsonl`，v1 已废弃） · [评测集构建工具](eval/scripts/README.md)
@@ -115,7 +124,8 @@ openspec/        需求规格与变更记录
 | Kibana | http://localhost:5601 | 容器 `rag-kb-dev-kibana`，图形化查看 ES 索引/文档 |
 | MinIO API | http://localhost:9010 | 容器 `rag-kb-dev-minio`，bucket `rag-kb` |
 | MinIO 控制台 | http://localhost:9011 | 账号密码见本机 `.env` 的 `MINIO_ACCESS_KEY`/`MINIO_SECRET_KEY` |
-| Redis | localhost:6379 | 容器 `thxpace-redis-local`（与其他本机项目共用，非 rag-kb 专属） |
+| Redis | localhost:6380 | 容器 `rag-kb-dev-redis`（rag-kb 专属，2026-07-15 起不再共用 `thxpace-redis-local`）；DB 0 = JWT 黑名单，DB 1 = 会话记忆滑动窗口 |
+| MongoDB | localhost:27018 | 容器 `rag-kb-dev-mongo`，库 `rag_kb_memory`，只服务会话记忆子系统（`chat_messages`/`memory_items`），账号密码见 `.env` |
 | Parser Gateway | http://localhost:8081 | `/v1/parse` 解析接口，`/health`/`/ready`/`/metrics` |
 
 以上均为本机开发环境地址，随本机 Docker/进程状态变化；生产环境地址由部署配置另行提供，见 [上传、解析与部署验收手册](docs/自研RAG摄取部署与验收手册.md)。

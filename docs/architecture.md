@@ -17,19 +17,24 @@
 ```text
 Vue 前端
   └─ Spring Boot 应用层
-       ├─ JWT / 组织团队 / RBAC / 审计 / 限流
+       ├─ JWT / 组织团队 / RBAC / 审计
        ├─ 知识库与文档任务管理
        └─ ragcore（自研）
             ├─ 文档解析与技术切块
             ├─ Embedding / Rerank / LLM Client
             ├─ Elasticsearch：BM25 + kNN + RRF
+            ├─ Conversation Memory：滑动窗口 / 指代消解 / 用户画像（2026-07-15 新增）
             ├─ 引用构造、拒答与 SSE 输出
             └─ 评测、重试与可观测性
 
-基础设施：PostgreSQL（业务与任务）/ MinIO（原文件）/
-Elasticsearch（chunk、全文、向量）/ Redis（限流与缓存）/
-Xinference 或 vLLM（模型服务）
+基础设施：PostgreSQL（业务、任务与会话元数据）/ MinIO（原文件）/
+Elasticsearch（chunk、全文、向量；统一记忆索引）/
+Redis（JWT 黑名单 + 会话记忆滑动窗口，逻辑 DB 隔离）/
+MongoDB（会话消息长期存档 + 用户画像，只服务记忆子系统）/
+硅基流动（Embedding/Rerank）+ DeepSeek（生成模型）
 ```
+
+> 注：限流尚未实现（此前版本图里的"限流"是规划态描述，代码中未落地）。
 
 ## 三、关键技术决策
 
@@ -57,6 +62,13 @@ Xinference 或 vLLM（模型服务）
 - 所有检索请求先完成组织、知识库和角色校验；
 - Elasticsearch 查询由服务端强制注入 `org_id` 与 `kb_id` 过滤；
 - 跨组织访问按资源不存在处理，并作为自动化测试发布门禁。
+
+### 决策 5：多轮对话记忆是学习性质的能力储备，非当前刚需
+
+- 短期记忆（滑动窗口+语义历史检索+摘要压缩）与长期记忆（用户画像+读时衰减遗忘机制）已实现，详见 [brainstorming 设计文档](superpowers/specs/2026-07-15-conversation-memory-design.md)；
+- 存储引入 Redis 专属实例（与 JWT 黑名单逻辑隔离）+ MongoDB（只服务本子系统），当前规模（单节点、日均 5000 次查询）本不需要这套复杂度，是为学习生产级架构、给未来用户规模增长预先建设；
+- 画像只影响生成阶段的 System 上下文，不影响 `HybridRetriever` 的检索参数；
+- 同样不引入 LangChain/LlamaIndex 等编排框架，指代消解/摘要压缩/画像提炼均为自研 prompt + 现有模型客户端。
 
 ## 四、当前重构边界
 

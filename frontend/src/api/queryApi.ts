@@ -162,7 +162,7 @@ function protocolError(message: string): QueryEvent {
  */
 export interface OpenStreamOptions {
   url: string
-  body: { question: string; history?: ReadonlyArray<{ role: string; content: string }>; rewrite?: boolean }
+  body: { question: string; sessionId: string }
   headers: Readonly<Record<string, string>>
   signal?: AbortSignal
 }
@@ -226,4 +226,33 @@ export async function* openStream(opts: OpenStreamOptions): AsyncGenerator<Query
 /** 默认问答路径（kbId 拼到 URL 里） */
 export function queryStreamUrl(baseUrl: string, kbId: string): string {
   return `${baseUrl.replace(/\/$/, '')}/api/v1/knowledge-bases/${encodeURIComponent(kbId)}/query`
+}
+
+/** 会话创建路径。 */
+export function sessionUrl(baseUrl: string, kbId: string): string {
+  return `${baseUrl.replace(/\/$/, '')}/api/v1/knowledge-bases/${encodeURIComponent(kbId)}/sessions`
+}
+
+/**
+ * 创建多轮对话会话，返回 sessionId。切换知识库/新建对话时调用，
+ * 之后同一对话内的每次提问都携带同一个 sessionId。
+ */
+export async function createSession(
+  baseUrl: string,
+  kbId: string,
+  headers: Readonly<Record<string, string>>
+): Promise<string> {
+  const response = await fetch(sessionUrl(baseUrl, kbId), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...headers }
+  })
+  if (!response.ok) {
+    throw new Error(`创建会话失败: HTTP ${response.status} ${response.statusText}`)
+  }
+  const payload = (await response.json()) as { data?: { sessionId?: string } }
+  const sessionId = payload.data?.sessionId
+  if (!sessionId) {
+    throw new Error('创建会话响应缺少 sessionId')
+  }
+  return sessionId
 }

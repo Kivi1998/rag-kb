@@ -87,10 +87,16 @@
             <artifactId>spring-boot-starter-aop</artifactId>
         </dependency>
 
-        <!-- Redis: token 黑名单 -->
+        <!-- Redis: token 黑名单 + 会话记忆滑动窗口（逻辑 DB 隔离，见 application.yml） -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-data-redis</artifactId>
+        </dependency>
+
+        <!-- MongoDB: 会话记忆子系统专用（长期消息存档 + 用户画像），不涉及其他业务表 -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-mongodb</artifactId>
         </dependency>
 
         <!-- 配置属性绑定 -->

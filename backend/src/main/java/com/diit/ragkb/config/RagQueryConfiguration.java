@@ -1,10 +1,13 @@
 package com.diit.ragkb.config;
 
+import com.diit.ragkb.ragcore.conversation.ConversationMemoryOrchestrator;
 import com.diit.ragkb.ragcore.generation.AnswerGenerator;
 import com.diit.ragkb.ragcore.retrieval.Retriever;
 import com.diit.ragkb.repository.KnowledgeDocumentRepository;
+import com.diit.ragkb.service.ChatSessionService;
 import com.diit.ragkb.service.KnowledgeBaseService;
 import com.diit.ragkb.service.QueryService;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
@@ -24,8 +27,11 @@ public class RagQueryConfiguration {
     @ConditionalOnProperty(prefix = "rag.query", name = "enabled", havingValue = "true")
     public QueryService queryService(Retriever retriever, AnswerGenerator answerGenerator,
                                      KnowledgeBaseService knowledgeBaseService,
-                                     KnowledgeDocumentRepository documentRepository) {
-        return new QueryService(retriever, answerGenerator, knowledgeBaseService, documentRepository);
+                                     KnowledgeDocumentRepository documentRepository,
+                                     ObjectProvider<ChatSessionService> chatSessionServiceProvider,
+                                     ObjectProvider<ConversationMemoryOrchestrator> memoryOrchestratorProvider) {
+        return new QueryService(retriever, answerGenerator, knowledgeBaseService, documentRepository,
+                chatSessionServiceProvider, memoryOrchestratorProvider);
     }
 
     @Bean(destroyMethod = "shutdown", name = "ragQueryExecutor")

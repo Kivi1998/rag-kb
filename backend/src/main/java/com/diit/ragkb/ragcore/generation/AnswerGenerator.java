@@ -15,6 +15,16 @@ public interface AnswerGenerator {
     /** 默认实现保留旧适配器兼容性，并至少统计输出字符数。 */
     default GenerationMetrics streamWithMetrics(String question, List<RetrievedChunk> contexts,
                                                 Consumer<QueryEvent> eventConsumer) {
+        return streamWithMetrics(question, contexts, null, eventConsumer);
+    }
+
+    /**
+     * {@code additionalSystemContext} 非空时拼进 System Prompt（如用户画像背景信息），
+     * 只影响生成风格，不影响 contexts 本身。默认实现忽略该参数、退化为不带画像的普通生成，
+     * 供不支持此能力的实现（如测试替身）安全兼容。
+     */
+    default GenerationMetrics streamWithMetrics(String question, List<RetrievedChunk> contexts,
+                                                String additionalSystemContext, Consumer<QueryEvent> eventConsumer) {
         AtomicLong outputCharacters = new AtomicLong();
         stream(question, contexts, event -> {
             if (event.content() != null) outputCharacters.addAndGet(event.content().length());
