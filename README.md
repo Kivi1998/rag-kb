@@ -73,6 +73,22 @@ openspec/        需求规格与变更记录
 - [延后事项清单](TODOS.md)
 - `docs/archive/` — 已完成阶段的历史规划稿（任务分工、迁移设计），仅供追溯，不代表当前状态
 
+## 本地开发环境访问地址
+
+| 服务 | 地址 | 说明 |
+|---|---|---|
+| 前端 Vue dev server | http://localhost:5173 | `cd frontend && pnpm dev` |
+| 后端 Spring Boot API | http://localhost:8090 | `/actuator/health` 查健康状态 |
+| PostgreSQL | localhost:5432 | 本机 Homebrew `postgresql@17`（非容器），库名 `ragkb` |
+| Elasticsearch | http://localhost:9200 | 容器 `rag-kb-dev-es`，索引 `rag_chunks_v1` |
+| Kibana | http://localhost:5601 | 容器 `rag-kb-dev-kibana`，图形化查看 ES 索引/文档 |
+| MinIO API | http://localhost:9010 | 容器 `rag-kb-dev-minio`，bucket `rag-kb` |
+| MinIO 控制台 | http://localhost:9011 | 账号密码见本机 `.env` 的 `MINIO_ACCESS_KEY`/`MINIO_SECRET_KEY` |
+| Redis | localhost:6379 | 容器 `thxpace-redis-local`（与其他本机项目共用，非 rag-kb 专属） |
+| Parser Gateway | http://localhost:8081 | `/v1/parse` 解析接口，`/health`/`/ready`/`/metrics` |
+
+以上均为本机开发环境地址，随本机 Docker/进程状态变化；生产环境地址由部署配置另行提供，见 [上传、解析与部署验收手册](docs/自研RAG摄取部署与验收手册.md)。
+
 ## 开发流程
 
 项目使用 OpenSpec 管理需求与变更，并通过自动化测试、验收环境和代码审查保障交付质量。
