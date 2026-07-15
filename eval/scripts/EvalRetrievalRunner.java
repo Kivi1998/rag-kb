@@ -52,8 +52,13 @@ import java.util.UUID;
  * java -cp "eval/scripts:$(cat /tmp/rag-cp.txt):backend/target/classes" EvalRetrievalRunner \
  *   eval/datasets/corpus-index.jsonl \
  *   eval/datasets/eval-set-2026Q3.jsonl \
- *   eval/predictions/predicted-v3-bm25-YYYYMMDD.jsonl
- * </pre></p>
+ *   eval/predictions/predicted-v3-bm25-YYYYMMDD.jsonl \
+ *   [candidateLimit=50] [skipIndex=false]
+ * </pre>
+ * 第 4/5 个参数用于候选池大小（N）调优实验：candidateLimit 覆盖 RRF 两路各自的召回条数；
+ * skipIndex=true 时跳过重建评测索引（仅 candidateLimit 变化、语料不变时可复用已有索引，
+ * 省掉重复 embedding 入库的时间与调用成本）。每题检索延迟会写入
+ * {@code <output>.latency.json}（mean/median/p95，单位毫秒）。</p>
  */
 public final class EvalRetrievalRunner {
 
@@ -70,6 +75,8 @@ public final class EvalRetrievalRunner {
         Path corpusIndex = Path.of(args.length > 0 ? args[0] : "eval/datasets/corpus-index.jsonl");
         Path evalSet = Path.of(args.length > 1 ? args[1] : "eval/datasets/eval-set-2026Q3.jsonl");
         Path output = Path.of(args.length > 2 ? args[2] : "eval/predictions/predicted-v3-bm25.jsonl");
+        int candidateLimit = args.length > 3 ? Integer.parseInt(args[3]) : 50;
+        boolean skipIndex = args.length > 4 && Boolean.parseBoolean(args[4]);
 
         ObjectMapper mapper = new ObjectMapper();
         try (RestClient restClient = RestClient.builder(new HttpHost("localhost", 9200, "http")).build()) {
@@ -85,32 +92,37 @@ public final class EvalRetrievalRunner {
             boolean hybrid = embeddingClient != null;
             System.out.println("[mode] " + (hybrid
                     ? "完整混合检索（真实 embedding" + (reranker != null ? " + rerank）" : "，无 rerank）")
-                    : "BM25-only（embedding 未配置/不可达）"));
+                    : "BM25-only（embedding 未配置/不可达）")
+                    + " candidateLimit=" + candidateLimit + " skipIndex=" + skipIndex);
 
             // ── 2. 重建独立评测索引（不触碰生产 rag_chunks_v1）──
-            deleteIndexIfExists(restClient);
-            List<Chunk> chunks = loadChunks(corpusIndex, mapper);
-            System.out.println("[index] 读取 corpus-index：" + chunks.size() + " chunks");
-            ElasticsearchChunkIndex chunkIndex = new ElasticsearchChunkIndex(restClient, properties, mapper);
-            int batch = 32;
-            for (int i = 0; i < chunks.size(); i += batch) {
-                List<Chunk> slice = chunks.subList(i, Math.min(i + batch, chunks.size()));
-                List<List<Float>> vectors;
-                String modelVersion;
-                if (hybrid) {
-                    EmbeddingResult result = embeddingClient.embed(
-                            slice.stream().map(Chunk::content).toList());
-                    vectors = result.vectors();
-                    modelVersion = result.modelVersion();
-                } else {
-                    vectors = java.util.Collections.nCopies(slice.size(), placeholderVector());
-                    modelVersion = "eval-placeholder(BM25-only)";
+            if (skipIndex) {
+                System.out.println("[index] 跳过重建，复用已有索引 " + INDEX_NAME);
+            } else {
+                deleteIndexIfExists(restClient);
+                List<Chunk> chunks = loadChunks(corpusIndex, mapper);
+                System.out.println("[index] 读取 corpus-index：" + chunks.size() + " chunks");
+                ElasticsearchChunkIndex chunkIndex = new ElasticsearchChunkIndex(restClient, properties, mapper);
+                int batch = 32;
+                for (int i = 0; i < chunks.size(); i += batch) {
+                    List<Chunk> slice = chunks.subList(i, Math.min(i + batch, chunks.size()));
+                    List<List<Float>> vectors;
+                    String modelVersion;
+                    if (hybrid) {
+                        EmbeddingResult result = embeddingClient.embed(
+                                slice.stream().map(Chunk::content).toList());
+                        vectors = result.vectors();
+                        modelVersion = result.modelVersion();
+                    } else {
+                        vectors = java.util.Collections.nCopies(slice.size(), placeholderVector());
+                        modelVersion = "eval-placeholder(BM25-only)";
+                    }
+                    chunkIndex.upsert(slice, vectors, modelVersion);
+                    System.out.println("[index] 已入库 " + Math.min(i + batch, chunks.size()) + "/" + chunks.size());
                 }
-                chunkIndex.upsert(slice, vectors, modelVersion);
-                System.out.println("[index] 已入库 " + Math.min(i + batch, chunks.size()) + "/" + chunks.size());
+                restClient.performRequest(new Request("POST", "/" + INDEX_NAME + "/_refresh"));
+                System.out.println("[index] 已写入并 refresh 索引 " + INDEX_NAME);
             }
-            restClient.performRequest(new Request("POST", "/" + INDEX_NAME + "/_refresh"));
-            System.out.println("[index] 已写入并 refresh 索引 " + INDEX_NAME);
 
             // ── 3. 组装产品检索链 ──
             ElasticsearchHybridCandidateSource candidateSource =
@@ -120,11 +132,12 @@ public final class EvalRetrievalRunner {
             };
             HybridRetriever retriever = new HybridRetriever(candidateSource, queryEmbedding,
                     providerOf(reranker));
-            RetrievalOptions options = new RetrievalOptions(50, TOP_K, reranker != null);
+            RetrievalOptions options = new RetrievalOptions(candidateLimit, TOP_K, reranker != null);
 
-            // ── 4. 逐题检索 ──
+            // ── 4. 逐题检索（记录每题延迟）──
             List<String> lines = Files.readAllLines(evalSet, StandardCharsets.UTF_8);
             List<String> outLines = new ArrayList<>();
+            List<Long> latenciesMs = new ArrayList<>();
             int refusals = 0;
             for (String line : lines) {
                 if (line.isBlank()) {
@@ -134,7 +147,10 @@ public final class EvalRetrievalRunner {
                 String id = q.path("id").asText();
                 String question = q.path("question").asText();
                 boolean expectRefusal = q.path("expect_refusal").asBoolean(false);
+                long startedAt = System.nanoTime();
                 RetrievalResult result = retriever.retrieveWithDecision(ORG_ID, KB_ID, question, options);
+                long elapsedMs = (System.nanoTime() - startedAt) / 1_000_000;
+                latenciesMs.add(elapsedMs);
 
                 ObjectNode prediction = mapper.createObjectNode();
                 prediction.put("id", id);
@@ -155,14 +171,39 @@ public final class EvalRetrievalRunner {
                     if (top.rrfScore() != null) prediction.put("_top_rrf_score", top.rrfScore());
                 }
                 prediction.put("reranked", hybrid && reranker != null);
+                prediction.put("_latency_ms", elapsedMs);
                 outLines.add(mapper.writeValueAsString(prediction));
                 System.out.println("[query] " + id + (expectRefusal ? " [应拒答]" : "") + " → "
-                        + (result.refused() ? "拒答(" + result.refusalReason() + ")" : ids.size() + " chunks"));
+                        + (result.refused() ? "拒答(" + result.refusalReason() + ")" : ids.size() + " chunks")
+                        + " (" + elapsedMs + "ms)");
             }
             Files.createDirectories(output.getParent());
             Files.write(output, outLines, StandardCharsets.UTF_8);
             System.out.println("[done] " + outLines.size() + " 条预测（其中拒答 " + refusals + "）→ " + output);
+
+            writeLatencySummary(output, candidateLimit, latenciesMs, mapper);
         }
+    }
+
+    private static void writeLatencySummary(Path output, int candidateLimit, List<Long> latenciesMs,
+                                            ObjectMapper mapper) throws IOException {
+        List<Long> sorted = new ArrayList<>(latenciesMs);
+        java.util.Collections.sort(sorted);
+        double mean = sorted.stream().mapToLong(Long::longValue).average().orElse(0);
+        long median = sorted.get(sorted.size() / 2);
+        long p95 = sorted.get((int) Math.min(sorted.size() - 1, Math.ceil(sorted.size() * 0.95) - 1));
+        ObjectNode summary = mapper.createObjectNode();
+        summary.put("candidateLimit", candidateLimit);
+        summary.put("n", sorted.size());
+        summary.put("meanMs", Math.round(mean));
+        summary.put("medianMs", median);
+        summary.put("p95Ms", p95);
+        summary.put("minMs", sorted.get(0));
+        summary.put("maxMs", sorted.get(sorted.size() - 1));
+        Path latencyPath = Path.of(output + ".latency.json");
+        Files.writeString(latencyPath, mapper.writerWithDefaultPrettyPrinter().writeValueAsString(summary));
+        System.out.println("[latency] mean=" + Math.round(mean) + "ms median=" + median + "ms p95=" + p95
+                + "ms → " + latencyPath);
     }
 
     private static void deleteIndexIfExists(RestClient restClient) {

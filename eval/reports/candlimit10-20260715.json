@@ -1,0 +1,97 @@
+{
+  "version_meta": {
+    "candidateLimit": "10",
+    "embedding": "siliconflow/BAAI-bge-m3@1024d",
+    "rerank": "siliconflow/BAAI-bge-reranker-v2-m3",
+    "retriever": "hybrid-bm25+kNN+rrf+rerank@v1-rerank-gate0.06"
+  },
+  "overall": {
+    "total": 150,
+    "answerable_total": 125,
+    "expected_refusal_total": 25,
+    "recall_at_1": 0.792,
+    "recall_at_5": 0.848,
+    "recall_at_10": 0.872,
+    "mrr": 0.8185555555555555,
+    "refusal_precision": 0.631578947368421,
+    "refusal_recall": 0.48,
+    "refusal_f1": 0.5454545454545454
+  },
+  "by_category": {
+    "api": {
+      "total": 27,
+      "answerable_total": 27,
+      "expected_refusal_total": 0,
+      "recall_at_5": 0.8888888888888888,
+      "mrr": 0.8991769547325101,
+      "refusal_f1": 0.0
+    },
+    "config": {
+      "total": 22,
+      "answerable_total": 22,
+      "expected_refusal_total": 0,
+      "recall_at_5": 0.7727272727272727,
+      "mrr": 0.75,
+      "refusal_f1": 0.0
+    },
+    "data-structure": {
+      "total": 26,
+      "answerable_total": 26,
+      "expected_refusal_total": 0,
+      "recall_at_5": 0.9230769230769231,
+      "mrr": 0.9230769230769231,
+      "refusal_f1": 0.0
+    },
+    "troubleshoot": {
+      "total": 27,
+      "answerable_total": 27,
+      "expected_refusal_total": 0,
+      "recall_at_5": 0.8518518518518519,
+      "mrr": 0.7916666666666666,
+      "refusal_f1": 0.0
+    },
+    "module": {
+      "total": 23,
+      "answerable_total": 23,
+      "expected_refusal_total": 0,
+      "recall_at_5": 0.782608695652174,
+      "mrr": 0.7028985507246376,
+      "refusal_f1": 0.0
+    },
+    "out-of-scope": {
+      "total": 25,
+      "answerable_total": 0,
+      "expected_refusal_total": 25,
+      "recall_at_5": 0.0,
+      "mrr": 0.0,
+      "refusal_f1": 0.6486486486486487
+    }
+  },
+  "by_difficulty": {
+    "easy": {
+      "total": 22,
+      "answerable_total": 22,
+      "expected_refusal_total": 0,
+      "recall_at_5": 0.8181818181818182,
+      "mrr": 0.7954545454545454,
+      "refusal_f1": 0.0
+    },
+    "medium": {
+      "total": 69,
+      "answerable_total": 69,
+      "expected_refusal_total": 0,
+      "recall_at_5": 0.8695652173913043,
+      "mrr": 0.8470209339774558,
+      "refusal_f1": 0.0
+    },
+    "hard": {
+      "total": 59,
+      "answerable_total": 34,
+      "expected_refusal_total": 25,
+      "recall_at_5": 0.8235294117647058,
+      "mrr": 0.7757352941176471,
+      "refusal_f1": 0.6153846153846153
+    }
+  },
+  "missing_predictions": []
+}

@@ -1,0 +1,9 @@
+{
+  "candidateLimit" : 30,
+  "n" : 150,
+  "meanMs" : 4161,
+  "medianMs" : 2777,
+  "p95Ms" : 13173,
+  "minMs" : 2197,
+  "maxMs" : 39048
+}
