@@ -8,6 +8,10 @@ import { INGESTION_IN_FLIGHT_STATES, type Document, type IngestionStatus } from 
 /** 同时进行的上传请求数上限；避免一次选择几十个文件时把浏览器/网关连接数打满。 */
 const MAX_CONCURRENT_UPLOADS = 3
 
+/** 文档列表每页展示数量。后端 GET /api/v1/documents 目前一次性返回全部文档
+ * （分页仍是 TODOS.md 里的后端待办），这里先做前端分页，避免长列表把整页撑爆。 */
+const PAGE_SIZE = 20
+
 type UploadItemStatus = 'pending' | 'uploading' | 'success' | 'error'
 
 interface UploadQueueItem {
@@ -24,10 +28,15 @@ const documents = ref<Document[]>([])
 const loading = ref(false)
 const uploadQueue = ref<UploadQueueItem[]>([])
 const fileInput = ref<HTMLInputElement | null>(null)
+const currentPage = ref(1)
 let pollTimer: ReturnType<typeof setInterval> | undefined
 let activeUploadCount = 0
 
 const uploading = computed(() => uploadQueue.value.some((item) => item.status === 'pending' || item.status === 'uploading'))
+const pagedDocuments = computed(() => {
+  const start = (currentPage.value - 1) * PAGE_SIZE
+  return documents.value.slice(start, start + PAGE_SIZE)
+})
 
 const statusMeta: Record<IngestionStatus, { label: string; type: 'info' | 'warning' | 'success' | 'danger' }> = {
   QUEUED: { label: '排队中', type: 'info' },
@@ -151,7 +160,13 @@ function asDocument(row: unknown): Document {
   return row as Document
 }
 
-watch(() => props.kbId, () => void loadDocuments())
+/** 文档被删除后，若当前页超出了剩余页数（如删掉了最后一页的最后一条），回退到最后一页。 */
+watch(documents, () => {
+  const maxPage = Math.max(1, Math.ceil(documents.value.length / PAGE_SIZE))
+  if (currentPage.value > maxPage) currentPage.value = maxPage
+})
+
+watch(() => props.kbId, () => { currentPage.value = 1; void loadDocuments() })
 onMounted(() => void loadDocuments())
 onBeforeUnmount(() => { if (pollTimer) clearInterval(pollTimer) })
 </script>
@@ -199,7 +214,7 @@ onBeforeUnmount(() => { if (pollTimer) clearInterval(pollTimer) })
       </ul>
     </div>
 
-    <el-table v-loading="loading" :data="documents" empty-text="暂无文档，请上传技术资料" class="document-table">
+    <el-table v-loading="loading" :data="pagedDocuments" height="100%" empty-text="暂无文档，请上传技术资料" class="document-table">
       <el-table-column prop="name" label="文件" min-width="190" show-overflow-tooltip />
       <el-table-column label="大小" width="92">
         <template #default="{ row }">{{ formatBytes(asDocument(row).size) }}</template>
@@ -219,6 +234,15 @@ onBeforeUnmount(() => { if (pollTimer) clearInterval(pollTimer) })
         </template>
       </el-table-column>
     </el-table>
+
+    <el-pagination
+      v-if="documents.length > PAGE_SIZE"
+      v-model:current-page="currentPage"
+      :page-size="PAGE_SIZE"
+      :total="documents.length"
+      layout="total, prev, pager, next"
+      class="document-pagination"
+    />
   </section>
 </template>
 
@@ -230,6 +254,7 @@ onBeforeUnmount(() => { if (pollTimer) clearInterval(pollTimer) })
 .header-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
 .file-input { display: none; }
 .document-table { flex: 1; }
+.document-pagination { flex: 0 0 auto; justify-content: flex-end; padding-top: 4px; }
 .upload-queue { border: 1px solid var(--el-border-color); border-radius: 6px; padding: 10px 12px; background: var(--el-fill-color-lighter); }
 .upload-queue-header { display: flex; align-items: center; justify-content: space-between; font-size: 13px; color: var(--el-text-color-secondary); margin-bottom: 6px; }
 .upload-queue-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; max-height: 180px; overflow-y: auto; }

@@ -154,3 +154,60 @@ describe('DocumentPanel 多文件上传', () => {
     await flushPromises()
   })
 })
+
+function makeDocuments(count: number) {
+  return Array.from({ length: count }, (_, i) => ({
+    documentId: `doc-${i + 1}`, kbId: 'kb-1', jobId: `job-${i + 1}`,
+    name: `文档-${String(i + 1).padStart(3, '0')}.md`, size: 1024,
+    contentType: 'text/markdown', status: 'READY' as const, retryable: false,
+    uploadedAt: '2026-07-12T00:00:00Z'
+  }))
+}
+
+describe('DocumentPanel 分页', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    vi.clearAllMocks()
+  })
+
+  it('文档数不超过一页时不展示分页控件', async () => {
+    vi.mocked(documentsApi.list).mockResolvedValue(makeDocuments(20) as never)
+    const wrapper = mount(DocumentPanel, { props: { kbId: 'kb-1' }, global: { plugins: [ElementPlus] } })
+    await flushPromises()
+    expect(wrapper.find('.document-pagination').exists()).toBe(false)
+    expect(wrapper.text()).toContain('文档-020.md')
+  })
+
+  it('每页 20 条，第二页展示第 21 条起的文档', async () => {
+    vi.mocked(documentsApi.list).mockResolvedValue(makeDocuments(25) as never)
+    const wrapper = mount(DocumentPanel, { props: { kbId: 'kb-1' }, global: { plugins: [ElementPlus] } })
+    await flushPromises()
+
+    expect(wrapper.find('.document-pagination').exists()).toBe(true)
+    expect(wrapper.text()).toContain('文档-001.md')
+    expect(wrapper.text()).toContain('文档-020.md')
+    expect(wrapper.text()).not.toContain('文档-021.md')
+
+    const nextButton = wrapper.find('.btn-next')
+    await nextButton.trigger('click')
+    await flushPromises()
+
+    expect(wrapper.text()).not.toContain('文档-001.md')
+    expect(wrapper.text()).toContain('文档-021.md')
+    expect(wrapper.text()).toContain('文档-025.md')
+  })
+
+  it('切换知识库后分页回到第一页', async () => {
+    vi.mocked(documentsApi.list).mockResolvedValue(makeDocuments(25) as never)
+    const wrapper = mount(DocumentPanel, { props: { kbId: 'kb-1' }, global: { plugins: [ElementPlus] } })
+    await flushPromises()
+    await wrapper.find('.btn-next').trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('文档-021.md')
+
+    await wrapper.setProps({ kbId: 'kb-2' })
+    await flushPromises()
+    expect(wrapper.text()).toContain('文档-001.md')
+    expect(wrapper.text()).not.toContain('文档-021.md')
+  })
+})

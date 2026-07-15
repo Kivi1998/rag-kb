@@ -81,6 +81,18 @@ function cancel() {
   streamAbort.value?.abort()
 }
 
+/**
+ * Enter 直接发送；Shift+Enter 换行（保留 textarea 默认行为，不拦截）。
+ * `isComposing` 排除中文输入法确认候选词时误触发的 Enter（拼音选字按 Enter
+ * 提交候选，不代表用户想发送消息），是中文输入场景下常见的一个坑。
+ */
+function handleComposerKeydown(event: Event) {
+  if (!(event instanceof KeyboardEvent)) return
+  if (event.key !== 'Enter' || event.shiftKey || event.isComposing) return
+  event.preventDefault()
+  ask()
+}
+
 async function scrollToBottom() {
   await nextTick()
   if (transcript.value) transcript.value.scrollTop = transcript.value.scrollHeight
@@ -119,7 +131,16 @@ watch(() => props.kbId, () => { messages.value = []; question.value = ''; cancel
       </article>
     </div>
     <form class="composer" @submit.prevent="ask">
-      <el-input v-model="question" type="textarea" :rows="3" maxlength="2000" show-word-limit :disabled="sending" placeholder="例如：SearchService 启动失败如何排查？" @keydown.ctrl.enter.prevent="ask" />
+      <el-input
+        v-model="question"
+        type="textarea"
+        :rows="3"
+        maxlength="2000"
+        show-word-limit
+        :disabled="sending"
+        placeholder="例如：SearchService 启动失败如何排查？（Enter 发送，Shift+Enter 换行）"
+        @keydown="handleComposerKeydown"
+      />
       <el-button type="primary" native-type="submit" :icon="Promotion" :loading="sending" :disabled="!canSend">发送</el-button>
     </form>
   </section>

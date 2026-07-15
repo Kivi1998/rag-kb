@@ -58,4 +58,29 @@ describe('ChatPanel', () => {
     expect(wrapper.text()).toContain('检索结果')
     expect(wrapper.text()).toContain('未在当前知识库中检索到足够依据')
   })
+
+  it('回车直接发送', async () => {
+    vi.mocked(openStream).mockReturnValue(streamOf([{ eventType: 'done', data: {} }]) as never)
+    const wrapper = mount(ChatPanel, { props: { kbId: 'kb-1' }, global: { plugins: [ElementPlus] } })
+    await wrapper.find('textarea').setValue('回车发送测试')
+    await wrapper.find('textarea').trigger('keydown', { key: 'Enter' })
+    await flushPromises()
+    expect(openStream).toHaveBeenCalledWith(expect.objectContaining({ body: { question: '回车发送测试' } }))
+  })
+
+  it('shift+回车换行，不发送', async () => {
+    const wrapper = mount(ChatPanel, { props: { kbId: 'kb-1' }, global: { plugins: [ElementPlus] } })
+    await wrapper.find('textarea').setValue('第一行')
+    await wrapper.find('textarea').trigger('keydown', { key: 'Enter', shiftKey: true })
+    await flushPromises()
+    expect(openStream).not.toHaveBeenCalled()
+  })
+
+  it('中文输入法候选词确认（isComposing）时的回车不触发发送', async () => {
+    const wrapper = mount(ChatPanel, { props: { kbId: 'kb-1' }, global: { plugins: [ElementPlus] } })
+    await wrapper.find('textarea').setValue('拼音候选中')
+    await wrapper.find('textarea').trigger('keydown', { key: 'Enter', isComposing: true })
+    await flushPromises()
+    expect(openStream).not.toHaveBeenCalled()
+  })
 })
