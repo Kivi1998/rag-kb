@@ -9,6 +9,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.io.IOException;
 import java.net.URI;
+import java.net.URLEncoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
@@ -66,23 +67,9 @@ public class HttpMultimodalDocumentParser implements MultimodalDocumentParser {
 
     @Override
     public ParsedDocument parse(DocumentInput input) throws IOException {
-        HttpRequest.Builder builder = HttpRequest.newBuilder(endpoint)
-                .timeout(timeout)
-                .header("Content-Type", input.contentType() == null || input.contentType().isBlank()
-                        ? "application/octet-stream" : input.contentType())
-                .header("X-Document-Id", input.documentId().toString())
-                .header("X-Document-Filename", input.filename())
-                .header("X-Source-Path", input.sourcePath())
-                .POST(HttpRequest.BodyPublishers.ofInputStream(() -> {
-                    try {
-                        return input.openStream();
-                    } catch (IOException ex) {
-                        throw new IllegalStateException("无法读取待解析对象", ex);
-                    }
-                }));
-        builder.header("Authorization", "Bearer " + apiKey);
         try {
-            HttpResponse<String> response = client.send(builder.build(), HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+            HttpRequest request = buildRequest(input);
+            HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
             if (response.statusCode() < 200 || response.statusCode() >= 300) {
                 String body = response.body() == null ? "" : response.body().strip();
                 if (body.length() > 500) body = body.substring(0, 500);
@@ -94,8 +81,31 @@ public class HttpMultimodalDocumentParser implements MultimodalDocumentParser {
             Thread.currentThread().interrupt();
             throw new IOException("多模态解析请求被中断", ex);
         } catch (IllegalArgumentException ex) {
-            throw new IOException("多模态解析网关响应不合法", ex);
+            throw new IOException("多模态解析请求构造或网关响应不合法: " + ex.getMessage(), ex);
         }
+    }
+
+    /** 拆出请求构造逻辑，便于单元测试直接检查 header 而不必真的发网络请求。 */
+    HttpRequest buildRequest(DocumentInput input) {
+        HttpRequest.Builder builder = HttpRequest.newBuilder(endpoint)
+                .timeout(timeout)
+                .header("Content-Type", input.contentType() == null || input.contentType().isBlank()
+                        ? "application/octet-stream" : input.contentType())
+                .header("X-Document-Id", input.documentId().toString())
+                // Java HttpRequest 的 header 值只接受 ASCII 可见字符；中文等非 ASCII 文件名
+                // 直接塞进去会抛 IllegalArgumentException: invalid header value。用
+                // application/x-www-form-urlencoded 的百分号编码规避，网关侧对称解码。
+                .header("X-Document-Filename", URLEncoder.encode(input.filename(), StandardCharsets.UTF_8))
+                .header("X-Source-Path", input.sourcePath())
+                .header("Authorization", "Bearer " + apiKey)
+                .POST(HttpRequest.BodyPublishers.ofInputStream(() -> {
+                    try {
+                        return input.openStream();
+                    } catch (IOException ex) {
+                        throw new IllegalStateException("无法读取待解析对象", ex);
+                    }
+                }));
+        return builder.build();
     }
 
     private ParsedDocument toParsedDocument(DocumentInput input, JsonNode root) throws IOException {

@@ -7,6 +7,7 @@ import tempfile
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
+from urllib.parse import unquote_plus
 
 from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.responses import JSONResponse, Response
@@ -74,6 +75,13 @@ def metrics(x_metrics_key: str | None = Header(default=None, alias="X-Metrics-Ke
     return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 
+def decode_filename_header(value: str) -> str:
+    """Java 端 HttpRequest 的 header 值只接受 ASCII 可见字符；中文等非 ASCII
+    文件名在发送前做了 application/x-www-form-urlencoded 百分号编码
+    （见 backend HttpMultimodalDocumentParser.buildRequest），这里对称解码还原。"""
+    return unquote_plus(value)
+
+
 @app.post("/v1/parse")
 async def parse(
     request: Request,
@@ -83,6 +91,7 @@ async def parse(
     x_source_path: str | None = Header(default=None, alias="X-Source-Path"),
 ) -> JSONResponse:
     started = time.perf_counter()
+    x_document_filename = decode_filename_header(x_document_filename)
     suffix = Path(x_document_filename).suffix.lower()
     metric_format = suffix.lstrip(".") if suffix in SUPPORTED_SUFFIXES else "unsupported"
     outcome = "500"
