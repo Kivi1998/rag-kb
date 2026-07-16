@@ -35,7 +35,9 @@ onMounted(() => {
               <el-icon><component :is="documentPanelExpanded ? ArrowLeftBold : ArrowRightBold" /></el-icon>
               <span class="document-toggle-label">技术文档</span>
             </button>
-            <DocumentPanel v-if="documentPanelExpanded" :kb-id="kbStore.selectedKbId" />
+            <!-- v-show 而非 v-if：折叠只是隐藏，避免每次收起/展开都销毁重建
+                 DocumentPanel（丢失上传队列、并发计数、轮询状态，并重新拉取整个文档列表）。 -->
+            <DocumentPanel v-show="documentPanelExpanded" :kb-id="kbStore.selectedKbId" />
           </div>
           <ChatPanel :kb-id="kbStore.selectedKbId" />
         </div>

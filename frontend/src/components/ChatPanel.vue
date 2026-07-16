@@ -87,9 +87,18 @@ function handleCitationClick(event: MouseEvent, message: Message) {
 
 const canSend = computed(() => !!props.kbId && !!question.value.trim() && !sending.value && sessionReady.value)
 
+/** 引用抽屉展示的是某一条历史消息的引用，切换/重置会话后 messages 已经不是那一条了，
+ * 抽屉若还开着会显示跟当前可见对话对不上的内容，因此每次切换会话前先关掉。 */
+function closeCitationDrawer() {
+  citationDrawerVisible.value = false
+  selectedCitation.value = null
+  selectedCitationIndex.value = null
+}
+
 /** 切换到某个已存在的会话：拉取其历史消息并 hydrate；供"刷新恢复"与"点击历史列表项"共用。 */
 async function switchToSession(id: string) {
   const history = await getSessionMessages('', props.kbId, id, headers())
+  closeCitationDrawer()
   sessionId.value = id
   messages.value = history
   sessionReady.value = true
@@ -102,6 +111,7 @@ async function switchToSession(id: string) {
  * 都不会在 Postgres 里留下从未真正使用过的空会话，历史列表也就不会被这些空占位淤积。
  */
 function resetToNewConversation() {
+  closeCitationDrawer()
   sessionId.value = null
   messages.value = []
   sessionReady.value = true
