@@ -8,6 +8,7 @@ import com.diit.ragkb.ragcore.generation.GenerationMetrics;
 import com.diit.ragkb.ragcore.model.Chunk;
 import com.diit.ragkb.ragcore.model.QueryEvent;
 import com.diit.ragkb.ragcore.model.RetrievedChunk;
+import com.diit.ragkb.ragcore.rerank.RerankerClient;
 import com.diit.ragkb.ragcore.retrieval.RetrievalOptions;
 import com.diit.ragkb.ragcore.retrieval.RetrievalResult;
 import com.diit.ragkb.ragcore.retrieval.Retriever;
@@ -55,7 +56,7 @@ class QueryServiceTest {
         Retriever retriever = retriever(new RetrievalResult(List.of(retrieved), null));
         AnswerGenerator generator = (question, contexts, consumer) -> consumer.accept(QueryEvent.chunk("请检查数据库连接。"));
         QueryService service = new QueryService(retriever, generator, kbService, documents, emptyProvider(),
-                emptyProvider());
+                emptyProvider(), emptyProvider());
 
         QueryService.PreparedQuery prepared = service.prepare(kbId, UUID.randomUUID(), "如何排查启动失败？");
         List<QueryEvent> events = new ArrayList<>();
@@ -83,7 +84,7 @@ class QueryServiceTest {
         KnowledgeDocumentRepository documents = mock(KnowledgeDocumentRepository.class);
         AnswerGenerator generator = mock(AnswerGenerator.class);
         QueryService service = new QueryService(retriever(RetrievalResult.refuse("未在当前知识库中检索到足够依据")),
-                generator, kbService, documents, emptyProvider(), emptyProvider());
+                generator, kbService, documents, emptyProvider(), emptyProvider(), emptyProvider());
 
         List<QueryEvent> events = new ArrayList<>();
         QueryService.PreparedQuery prepared = service.prepare(kbId, UUID.randomUUID(), "不存在的问题");
@@ -106,7 +107,7 @@ class QueryServiceTest {
         KnowledgeDocumentRepository documents = mock(KnowledgeDocumentRepository.class);
         RetrievedChunk wrongTenant = retrieved(UUID.randomUUID(), kbId, UUID.randomUUID());
         QueryService service = new QueryService(retriever(new RetrievalResult(List.of(wrongTenant), null)),
-                mock(AnswerGenerator.class), kbService, documents, emptyProvider(), emptyProvider());
+                mock(AnswerGenerator.class), kbService, documents, emptyProvider(), emptyProvider(), emptyProvider());
 
         assertThrows(IllegalStateException.class, () -> service.prepare(kbId, UUID.randomUUID(), "查询"));
         verify(documents, never()).findByKnowledgeBaseIdAndOrgIdOrderByCreatedAtDesc(any(), any());
@@ -125,7 +126,7 @@ class QueryServiceTest {
         ObjectProvider<ChatSessionService> sessionProvider = mock(ObjectProvider.class);
         when(sessionProvider.getIfAvailable()).thenReturn(chatSessionService);
         QueryService service = new QueryService(retriever(RetrievalResult.refuse("拒答")), mock(AnswerGenerator.class),
-                kbService, documents, sessionProvider, emptyProvider());
+                kbService, documents, sessionProvider, emptyProvider(), emptyProvider());
 
         service.prepare(kbId, sessionId, "问题");
 
@@ -148,7 +149,7 @@ class QueryServiceTest {
         when(sessionProvider.getIfAvailable()).thenReturn(chatSessionService);
         Retriever retriever = mock(Retriever.class);
         QueryService service = new QueryService(retriever, mock(AnswerGenerator.class), kbService, documents,
-                sessionProvider, emptyProvider());
+                sessionProvider, emptyProvider(), emptyProvider());
 
         assertThrows(com.diit.ragkb.exception.ResourceNotFoundException.class,
                 () -> service.prepare(kbId, sessionId, "问题"));
@@ -197,7 +198,7 @@ class QueryServiceTest {
             }
         };
         QueryService service = new QueryService(retriever, generator, kbService, documents, emptyProvider(),
-                orchestratorProvider);
+                orchestratorProvider, emptyProvider());
 
         QueryService.PreparedQuery prepared = service.prepare(kbId, sessionId, "那它呢");
         service.stream(prepared, e -> { });
@@ -233,7 +234,7 @@ class QueryServiceTest {
         when(retriever.retrieveWithDecision(any(), any(), any(), any()))
                 .thenReturn(RetrievalResult.refuse("拒答"));
         QueryService service = new QueryService(retriever, mock(AnswerGenerator.class), kbService, documents,
-                emptyProvider(), orchestratorProvider);
+                emptyProvider(), orchestratorProvider, emptyProvider());
 
         service.prepare(kbId, sessionId, "那它呢");
 
@@ -269,7 +270,7 @@ class QueryServiceTest {
         ObjectProvider<ConversationMemoryOrchestrator> orchestratorProvider = mock(ObjectProvider.class);
         when(orchestratorProvider.getIfAvailable()).thenReturn(orchestrator);
         QueryService service = new QueryService(retriever, generator, kbService, documents, emptyProvider(),
-                orchestratorProvider);
+                orchestratorProvider, emptyProvider());
 
         QueryService.PreparedQuery prepared = service.prepare(kbId, sessionId, "随机数种子设的多少？");
         List<QueryEvent> events = new ArrayList<>();
@@ -279,6 +280,68 @@ class QueryServiceTest {
         assertEquals("未在当前知识库中检索到该问题的具体答案", events.get(0).message());
         assertEquals("NO_RETRIEVAL", metrics.factVerificationRefusalReason());
         verify(orchestrator, never()).recordTurn(any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void selfCheckEmitsWarningWhenAnswerHasUnsupportedClaim() {
+        UUID orgId = UUID.randomUUID();
+        UUID kbId = UUID.randomUUID();
+        UUID documentId = UUID.randomUUID();
+        TenantContext.set(orgId, UUID.randomUUID(), "MEMBER");
+        KnowledgeBaseService kbService = mock(KnowledgeBaseService.class);
+        when(kbService.getByIdAndCurrentOrg(kbId)).thenReturn(new KnowledgeBase());
+        KnowledgeDocument document = new KnowledgeDocument();
+        document.setId(documentId);
+        document.setName("部署手册.md");
+        KnowledgeDocumentRepository documents = mock(KnowledgeDocumentRepository.class);
+        when(documents.findByKnowledgeBaseIdAndOrgIdOrderByCreatedAtDesc(kbId, orgId)).thenReturn(List.of(document));
+        RetrievedChunk retrieved = retrieved(orgId, kbId, documentId);
+        Retriever retriever = retriever(new RetrievalResult(List.of(retrieved), null));
+        AnswerGenerator generator = (question, contexts, consumer) ->
+                consumer.accept(QueryEvent.chunk("{\"found\": true}\n这是一句没有任何引用标记的实质性陈述句。"));
+        RerankerClient reranker = mock(RerankerClient.class);
+        ObjectProvider<RerankerClient> rerankerProvider = mock(ObjectProvider.class);
+        when(rerankerProvider.getIfAvailable()).thenReturn(reranker);
+        QueryService service = new QueryService(retriever, generator, kbService, documents, emptyProvider(),
+                emptyProvider(), rerankerProvider);
+
+        QueryService.PreparedQuery prepared = service.prepare(kbId, UUID.randomUUID(), "如何排查启动失败？");
+        List<QueryEvent> events = new ArrayList<>();
+        service.stream(prepared, events::add);
+
+        assertTrue(events.stream().anyMatch(e -> e.sseEventName().equals("self_check_warning")));
+    }
+
+    @Test
+    void selfCheckSkipsWarningWhenAnswerIsWellSupported() {
+        UUID orgId = UUID.randomUUID();
+        UUID kbId = UUID.randomUUID();
+        UUID documentId = UUID.randomUUID();
+        TenantContext.set(orgId, UUID.randomUUID(), "MEMBER");
+        KnowledgeBaseService kbService = mock(KnowledgeBaseService.class);
+        when(kbService.getByIdAndCurrentOrg(kbId)).thenReturn(new KnowledgeBase());
+        KnowledgeDocument document = new KnowledgeDocument();
+        document.setId(documentId);
+        document.setName("部署手册.md");
+        KnowledgeDocumentRepository documents = mock(KnowledgeDocumentRepository.class);
+        when(documents.findByKnowledgeBaseIdAndOrgIdOrderByCreatedAtDesc(kbId, orgId)).thenReturn(List.of(document));
+        RetrievedChunk retrieved = retrieved(orgId, kbId, documentId);
+        Retriever retriever = retriever(new RetrievalResult(List.of(retrieved), null));
+        AnswerGenerator generator = (question, contexts, consumer) ->
+                consumer.accept(QueryEvent.chunk("{\"found\": true}\n请检查 JDBC URL [资料1]。"));
+        RerankerClient reranker = (query, candidates, topK) -> candidates.stream()
+                .map(c -> new RetrievedChunk(c.chunk(), c.bm25Rank(), c.vectorRank(), c.rrfScore(), 0.9, 0.9))
+                .toList();
+        ObjectProvider<RerankerClient> rerankerProvider = mock(ObjectProvider.class);
+        when(rerankerProvider.getIfAvailable()).thenReturn(reranker);
+        QueryService service = new QueryService(retriever, generator, kbService, documents, emptyProvider(),
+                emptyProvider(), rerankerProvider);
+
+        QueryService.PreparedQuery prepared = service.prepare(kbId, UUID.randomUUID(), "如何排查启动失败？");
+        List<QueryEvent> events = new ArrayList<>();
+        service.stream(prepared, events::add);
+
+        assertTrue(events.stream().noneMatch(e -> e.sseEventName().equals("self_check_warning")));
     }
 
     private Retriever retriever(RetrievalResult result) {

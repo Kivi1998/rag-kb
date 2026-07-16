@@ -98,8 +98,16 @@ public class HybridRetriever implements Retriever {
         if (selected.isEmpty()) {
             return RetrievalResult.refuse("未在当前知识库中检索到足够依据", finalDiagnostics);
         }
-        if (reranked && selected.get(0).finalScore() != null && selected.get(0).finalScore() < MIN_RERANK_SCORE) {
-            return RetrievalResult.refuse("重排后最高相关性低于阈值，未在当前知识库中检索到足够依据", finalDiagnostics);
+        if (reranked) {
+            // 此前只检查排名第一的片段是否达标，排名靠后的低可信片段会原样进入生成 prompt 和引用来源，
+            // 与其它高分片段混在一起可能干扰模型的多段融合判断。这里把同一阈值应用到每个候选片段；
+            // 排名第一的分数最高，若它都过不了阈值，过滤后必然为空，走同一条拒答分支。
+            selected = selected.stream()
+                    .filter(candidate -> candidate.finalScore() == null || candidate.finalScore() >= MIN_RERANK_SCORE)
+                    .toList();
+            if (selected.isEmpty()) {
+                return RetrievalResult.refuse("重排后最高相关性低于阈值，未在当前知识库中检索到足够依据", finalDiagnostics);
+            }
         }
         return new RetrievalResult(selected, null, finalDiagnostics);
     }

@@ -2,9 +2,10 @@
  * 知识库 SSE 流式问答契约（T203 / T205）。
  *
  * 设计要点：
- * - 五类事件固定：chunk / source / refusal / done / error，禁止自创
+ * - 六类事件：chunk / source / refusal / self_check_warning / done / error
  * - `event:` 是 Java QueryEventType 的小写值；source 的 data 为单个 citation，
- *   refusal 的 data 为 message（可选 reason 由未来 Controller 扩展）
+ *   refusal 的 data 为 message（可选 reason 由未来 Controller 扩展）；
+ *   self_check_warning 的 data 为 message，出现代表生成后自检发现疑似未支撑断言
  * - 使用原生 fetch + reader 避开 axios 的拦截器（SSE 流不应被 response 拦截
  *   解包逻辑污染）；与 4c41e4f 旧 queryApi.ts 的 SSE 解析形态保持一致
  * - 通过 AbortSignal 支持取消请求；网络中断由调用方捕获/重试
@@ -20,6 +21,7 @@ import type {
   Message,
   QueryEvent,
   RefusalEventPayload,
+  SelfCheckWarningEventPayload,
   SourceEventPayload
 } from '@/types/query'
 
@@ -105,6 +107,14 @@ export function toQueryEvent(block: SseBlock): QueryEvent {
           ...(payload.reason === undefined ? {} : { reason: payload.reason })
         } satisfies RefusalEventPayload
       }
+    case 'self_check_warning':
+      if (!isRecord(payload) || typeof payload.message !== 'string') {
+        return protocolError('self_check_warning 事件缺少字符串 message')
+      }
+      return {
+        eventType: 'self_check_warning',
+        data: { message: payload.message } satisfies SelfCheckWarningEventPayload
+      }
     case 'done':
       if (!isRecord(payload) || Object.keys(payload).length !== 0) {
         return protocolError('done 事件不应携带业务载荷')
@@ -159,7 +169,7 @@ function protocolError(message: string): QueryEvent {
  *   路径参数）
  * - 调用方负责把 token / X-Org-Id 放到 headers 中
  * - AbortSignal 触发时，闭包内 fetch 自动抛 AbortError，AsyncGenerator 终止
- * - 5 类事件按到达顺序 yield；任何非五类事件（如服务端推送注释、空块）被静默跳过
+ * - 六类事件按到达顺序 yield；任何不认识的事件（如服务端推送注释、空块）被静默跳过
  * - 后端已实现该协议；真实 ES/模型环境仍需按部署手册完成端到端验收
  */
 export interface OpenStreamOptions {

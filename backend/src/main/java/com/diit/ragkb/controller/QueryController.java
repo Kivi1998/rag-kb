@@ -145,7 +145,7 @@ public class QueryController {
         return switch (event.type()) {
             case CHUNK -> Map.of("content", event.content());
             case SOURCE -> Map.of("citation", event.citation());
-            case REFUSAL, ERROR -> Map.of("message", event.message());
+            case REFUSAL, ERROR, SELF_CHECK_WARNING -> Map.of("message", event.message());
             case DONE -> Map.of();
         };
     }
