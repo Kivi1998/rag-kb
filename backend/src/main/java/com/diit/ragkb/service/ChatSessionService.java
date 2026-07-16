@@ -82,13 +82,17 @@ public class ChatSessionService {
 
     private static final int MAX_LISTED_SESSIONS = 50;
 
-    /** 当前成员在该知识库下最近活跃的会话列表，固定最多 {@value #MAX_LISTED_SESSIONS} 条，按最后活跃时间倒序；不分状态展示。 */
+    /**
+     * 当前成员在该知识库下最近活跃的会话列表，固定最多 {@value #MAX_LISTED_SESSIONS} 条，按最后活跃时间倒序；
+     * 不分状态展示，但只包含已发生过至少一轮问答（即已有标题）的会话——前端每次挂载/新建对话都会创建一个
+     * 空会话占位，用户没实际提问就不该出现在历史列表里制造噪音。
+     */
     @Transactional(readOnly = true)
     public List<ChatSessionSummary> listSessions(UUID kbId) {
         UUID organizationId = requireOrganizationId();
         UUID memberId = requireMemberId();
         return chatSessionRepository
-                .findByOrgIdAndKbIdAndMemberIdOrderByLastActiveAtDesc(organizationId, kbId, memberId,
+                .findByOrgIdAndKbIdAndMemberIdAndTitleIsNotNullOrderByLastActiveAtDesc(organizationId, kbId, memberId,
                         Pageable.ofSize(MAX_LISTED_SESSIONS))
                 .stream()
                 .map(session -> new ChatSessionSummary(session.getId(), session.getTitle(), session.getLastActiveAt()))

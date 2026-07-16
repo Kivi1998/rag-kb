@@ -2,17 +2,17 @@
 
 ### Requirement: 会话历史列表查询
 
-系统 SHALL 提供 `GET /api/v1/knowledge-bases/{kbId}/sessions`，返回已认证成员在该知识库下最近活跃的会话列表（固定最多 50 条，不分页），按 `lastActiveAt` 倒序排列；每项包含 `sessionId`/`title`/`lastActiveAt`；ACTIVE/IDLE/ARCHIVED 状态的会话一视同仁展示，不做区分或过滤。
+系统 SHALL 提供 `GET /api/v1/knowledge-bases/{kbId}/sessions`，返回已认证成员在该知识库下最近活跃、且已发生过至少一轮问答（即已有标题）的会话列表（固定最多 50 条，不分页），按 `lastActiveAt` 倒序排列；每项包含 `sessionId`/`title`/`lastActiveAt`；ACTIVE/IDLE/ARCHIVED 状态的会话一视同仁展示，不做区分或过滤。从未发生过问答的空会话（`title` 为空）不出现在列表结果里，避免前端每次挂载/新建对话产生的占位会话淤积历史列表。
 
 #### Scenario: 返回按最后活跃时间倒序的会话列表
 
-- **WHEN** 已认证成员请求某知识库的会话列表，该知识库下存在多条属于自己的会话
+- **WHEN** 已认证成员请求某知识库的会话列表，该知识库下存在多条属于自己、已有实际问答内容的会话
 - **THEN** 系统返回这些会话，按 `lastActiveAt` 从新到旧排序
 
-#### Scenario: 会话尚无标题
+#### Scenario: 从未使用过的空会话不出现在列表里
 
-- **WHEN** 某会话刚创建、还没有任何消息
-- **THEN** 该会话的 `title` 字段为空，由前端展示层负责兜底文案（如"新对话"）
+- **WHEN** 某会话已创建（存在 `chat_session` 记录）但从未收到过任何用户消息，`title` 仍为空
+- **THEN** 该会话不出现在会话列表查询结果里，即使它的创建时间/最后活跃时间比其他会话更新
 
 #### Scenario: 跨知识库/跨组织/跨成员列表隔离
 

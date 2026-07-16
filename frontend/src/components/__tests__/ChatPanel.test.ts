@@ -166,7 +166,7 @@ describe('ChatPanel', () => {
     expect(wrapper.text()).toContain('之前的回答')
   })
 
-  it('localStorage 记录的会话已失效（404）时退回创建新会话', async () => {
+  it('localStorage 记录的会话已失效（404）时退回空白新对话，且不提前创建会话', async () => {
     localStorage.setItem('rag-kb:last-session:kb-1', 'session-deleted')
     vi.mocked(getSessionMessages).mockRejectedValue(new Error('HTTP 404 Not Found'))
 
@@ -174,24 +174,52 @@ describe('ChatPanel', () => {
     await flushPromises()
 
     expect(getSessionMessages).toHaveBeenCalledWith('', 'kb-1', 'session-deleted', expect.anything())
-    expect(createSession).toHaveBeenCalledWith('', 'kb-1', expect.anything())
-    expect(localStorage.getItem('rag-kb:last-session:kb-1')).toBe('session-1')
-    // 恢复失败后应能正常提问，不应停留在"会话未就绪"状态。
+    // 懒创建：恢复失败只回到空白状态，不应该在这里就调用创建会话接口。
+    expect(createSession).not.toHaveBeenCalled()
+    // 恢复失败后应能正常提问，不应停留在"会话未就绪"状态；真正发消息时才懒创建会话。
     vi.mocked(openStream).mockReturnValue(streamOf([{ eventType: 'done', data: {} }]) as never)
     await wrapper.find('textarea').setValue('恢复失败后继续提问')
     await wrapper.find('form').trigger('submit')
     await flushPromises()
+    expect(createSession).toHaveBeenCalledWith('', 'kb-1', expect.anything())
+    expect(localStorage.getItem('rag-kb:last-session:kb-1')).toBe('session-1')
     expect(openStream).toHaveBeenCalledWith(expect.objectContaining({
       body: { question: '恢复失败后继续提问', sessionId: 'session-1' }
     }))
   })
 
-  it('没有 localStorage 记录时创建新会话并写入 localStorage', async () => {
+  it('没有 localStorage 记录时不提前创建会话；只有真正发送消息才懒创建', async () => {
     const wrapper = mount(ChatPanel, { props: { kbId: 'kb-1' }, global: { plugins: [ElementPlus] } })
+    await flushPromises()
+
+    expect(createSession).not.toHaveBeenCalled()
+    expect(localStorage.getItem('rag-kb:last-session:kb-1')).toBeNull()
+    expect(wrapper.find('[data-testid="chat-history-sidebar"]').exists()).toBe(true)
+
+    vi.mocked(openStream).mockReturnValue(streamOf([{ eventType: 'done', data: {} }]) as never)
+    await wrapper.find('textarea').setValue('第一条真实消息')
+    await wrapper.find('form').trigger('submit')
     await flushPromises()
 
     expect(createSession).toHaveBeenCalledWith('', 'kb-1', expect.anything())
     expect(localStorage.getItem('rag-kb:last-session:kb-1')).toBe('session-1')
-    expect(wrapper.find('[data-testid="chat-history-sidebar"]').exists()).toBe(true)
+  })
+
+  it('新建对话按钮/删除当前会话后回到空白状态，不调用创建会话接口', async () => {
+    localStorage.setItem('rag-kb:last-session:kb-1', 'session-remembered')
+    vi.mocked(getSessionMessages).mockResolvedValue([
+      { id: 'm1', role: 'user', content: '之前问过的问题', createdAt: '2026-07-15T00:00:00Z' }
+    ])
+    const wrapper = mount(ChatPanel, { props: { kbId: 'kb-1' }, global: { plugins: [ElementPlus] } })
+    await flushPromises()
+    expect(wrapper.text()).toContain('之前问过的问题')
+    vi.mocked(createSession).mockClear()
+
+    const sidebar = wrapper.findComponent({ name: 'ChatHistorySidebar' })
+    await sidebar.vm.$emit('create')
+    await flushPromises()
+
+    expect(wrapper.text()).not.toContain('之前问过的问题')
+    expect(createSession).not.toHaveBeenCalled()
   })
 })
