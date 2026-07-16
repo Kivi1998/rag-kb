@@ -9,4 +9,6 @@ public interface ChatMessageRepository extends MongoRepository<ChatMessageDocume
 
     List<ChatMessageDocument> findBySessionIdAndOrganizationIdAndMemberIdOrderByCreatedAtAsc(UUID sessionId,
             UUID organizationId, UUID memberId);
+
+    void deleteBySessionIdAndOrganizationIdAndMemberId(UUID sessionId, UUID organizationId, UUID memberId);
 }

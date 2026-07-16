@@ -30,8 +30,19 @@ public class ChatSessionController {
         return ApiResponse.ok(Map.of("sessionId", session.getId()));
     }
 
+    @GetMapping
+    public ApiResponse<List<ChatSessionService.ChatSessionSummary>> listSessions(@PathVariable UUID kbId) {
+        return ApiResponse.ok(chatSessionService.listSessions(kbId));
+    }
+
     @GetMapping("/{sessionId}/messages")
     public ApiResponse<List<ChatMessage>> getMessages(@PathVariable UUID kbId, @PathVariable UUID sessionId) {
         return ApiResponse.ok(chatSessionService.getMessages(kbId, sessionId));
+    }
+
+    @DeleteMapping("/{sessionId}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void deleteSession(@PathVariable UUID kbId, @PathVariable UUID sessionId) {
+        chatSessionService.deleteSession(kbId, sessionId);
     }
 }

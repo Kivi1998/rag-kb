@@ -15,6 +15,13 @@ public interface MemoryIndex {
     /** 删除一条记忆（画像条目定期清理用）。 */
     void delete(String memoryId);
 
+    /**
+     * 删除某会话在统一记忆索引里的全部语义历史条目（会话被用户删除时的级联清理）。
+     * 过滤条件与 {@link #searchSessionHistory} 保持一致（org_id + session_id + memory_type=SESSION_MESSAGE），
+     * 不裸传 sessionId，避免跨租户误删。
+     */
+    void deleteBySession(UUID organizationId, UUID sessionId);
+
     /** 限定 sessionId 检索语义相关的历史会话消息，按相关度降序。 */
     List<ScoredMemoryRecord> searchSessionHistory(UUID organizationId, UUID sessionId, List<Float> queryVector,
                                                   int topK);
