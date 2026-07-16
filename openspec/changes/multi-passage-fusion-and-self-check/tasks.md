@@ -26,10 +26,10 @@
 
 ## 4. 前端事件类型与展示
 
-- [ ] 4.1 `frontend/src/types/query.ts`：`QueryEventType` 联合类型新增 `'self_check_warning'`，新增 `SelfCheckWarningEventPayload`（`message: string`），`QueryEvent` 联合类型补充对应分支；更新文件头部注释（不再是"五类事件固定"，改为六类）
-- [ ] 4.2 `frontend/src/api/queryApi.ts`：`toQueryEvent()` 的 switch 补充 `self_check_warning` 分支解析
-- [ ] 4.3 `ChatPanel.vue`：处理 `self_check_warning` 事件，在对应回答下方渲染一个警示样式的提醒块（区别于普通回答气泡与"参考来源"卡片），不中断/不影响 `chunk`/`source`/`done` 的既有处理
-- [ ] 4.4 前端单测：`toQueryEvent` 对 `self_check_warning` 的解析用例；`ChatPanel.test.ts` 补充收到该事件时渲染提醒块的用例
+- [x] 4.1 `frontend/src/types/query.ts`：`QueryEventType` 联合类型新增 `'self_check_warning'`，新增 `SelfCheckWarningEventPayload`（`message: string`），`QueryEvent` 联合类型补充对应分支，`Message` 新增 `selfCheckWarning?: string` 字段；更新文件头部注释（改为六类事件）
+- [x] 4.2 `frontend/src/api/queryApi.ts`：`toQueryEvent()` 的 switch 补充 `self_check_warning` 分支解析；更新头部与 `openStream` 注释里"五类事件"的表述
+- [x] 4.3 `ChatPanel.vue`：`applyEvent()` 补充 `self_check_warning` 分支写入 `message.selfCheckWarning`，模板在参考来源卡片下方渲染 `.self-check-warning` 警示样式提醒块
+- [x] 4.4 前端单测：`query.test.ts` 补充 `toQueryEvent` 对 `self_check_warning` 的解析（正常 + 缺字段降级为 error）用例；`ChatPanel.test.ts` 补充收到该事件时渲染提醒块、未收到时不渲染的两个用例；`vue-tsc --build` 类型检查通过
 
 ## 5. 真实回归验证与收尾
 

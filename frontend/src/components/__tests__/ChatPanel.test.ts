@@ -67,6 +67,39 @@ describe('ChatPanel', () => {
     expect(wrapper.text()).toContain('第 2 页')
   })
 
+  it('self_check_warning 事件渲染为警示提醒块，不影响正文与来源展示', async () => {
+    vi.mocked(openStream).mockReturnValue(streamOf([
+      { eventType: 'chunk', data: { content: '这是一句正文内容。' } },
+      { eventType: 'self_check_warning', data: { message: '⚠️ 自检提示：以下内容未在参考资料中找到明确支撑：\n- 示例断言' } },
+      { eventType: 'done', data: {} }
+    ]) as never)
+    const wrapper = mount(ChatPanel, { props: { kbId: 'kb-1' }, global: { plugins: [ElementPlus] } })
+    await flushPromises()
+    await wrapper.find('textarea').setValue('这句话有没有依据？')
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+    await drainReveal()
+
+    expect(wrapper.text()).toContain('这是一句正文内容。')
+    expect(wrapper.find('.self-check-warning').exists()).toBe(true)
+    expect(wrapper.find('.self-check-warning').text()).toContain('未在参考资料中找到明确支撑')
+  })
+
+  it('未收到 self_check_warning 事件时不渲染提醒块', async () => {
+    vi.mocked(openStream).mockReturnValue(streamOf([
+      { eventType: 'chunk', data: { content: '这是一句正文内容。' } },
+      { eventType: 'done', data: {} }
+    ]) as never)
+    const wrapper = mount(ChatPanel, { props: { kbId: 'kb-1' }, global: { plugins: [ElementPlus] } })
+    await flushPromises()
+    await wrapper.find('textarea').setValue('这句话有没有依据？')
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+    await drainReveal()
+
+    expect(wrapper.find('.self-check-warning').exists()).toBe(false)
+  })
+
   it('refusal 显示为正常检索不足状态，而不是模型回答', async () => {
     vi.mocked(openStream).mockReturnValue(streamOf([
       { eventType: 'refusal', data: { message: '未在当前知识库中检索到足够依据' } }

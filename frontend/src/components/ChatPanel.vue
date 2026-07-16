@@ -254,6 +254,7 @@ function applyEvent(message: Message, event: QueryEvent) {
       message.role = 'refusal'
       message.content = event.data.message
       break
+    case 'self_check_warning': message.selfCheckWarning = event.data.message; break
     case 'error':
       message.role = 'error'
       message.content = event.data.message
@@ -339,6 +340,7 @@ watch(
                 <small v-if="citation.score !== null">相关度 {{ citation.score.toFixed(3) }}</small>
               </article>
             </div>
+            <p v-if="message.selfCheckWarning" class="self-check-warning">{{ message.selfCheckWarning }}</p>
           </article>
         </div>
         <form class="composer" @submit.prevent="ask">
@@ -412,6 +414,16 @@ watch(
 .citation-card strong, .citation-card span, .citation-card small { display: block; }
 .citation-card p { margin: 5px 0; white-space: pre-wrap; }
 .citation-location, .citation-card small { color: var(--el-text-color-secondary); }
+.self-check-warning {
+  margin: 10px 0 0;
+  padding: 8px 10px;
+  border-radius: 5px;
+  border: 1px solid var(--el-color-warning-light-5);
+  background: var(--el-color-warning-light-9);
+  color: var(--el-text-color-primary);
+  font-size: 13px;
+  white-space: pre-wrap;
+}
 .composer { display: flex; align-items: flex-end; gap: 10px; }
 .composer .el-textarea { flex: 1; }
 @media (max-width: 760px) { .composer { flex-direction: column; align-items: stretch; } .message { max-width: 100%; } }

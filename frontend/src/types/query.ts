@@ -1,7 +1,7 @@
 /**
  * Query / SSE 事件类型 — v0 契约（11 节）。
  *
- * 五类 SSE 事件固定为：chunk / source / refusal / done / error。
+ * 六类 SSE 事件：chunk / source / refusal / self_check_warning / done / error。
  * Java `QueryEventType` 由 Controller 序列化为同名小写 `event:`；`QueryEvent`
  * 的单个 `citation`、`message` 等载荷字段直接写入 `data:` JSON。
  */
@@ -9,7 +9,7 @@
 import type { Citation } from './citation'
 
 /** SSE 事件类型枚举 */
-export type QueryEventType = 'chunk' | 'source' | 'refusal' | 'done' | 'error'
+export type QueryEventType = 'chunk' | 'source' | 'refusal' | 'self_check_warning' | 'done' | 'error'
 
 /**
  * `chunk` 事件载荷——流式正文增量。
@@ -48,6 +48,15 @@ export interface RefusalEventPayload {
 }
 
 /**
+ * `self_check_warning` 事件载荷——生成后自检发现疑似未支撑断言时的提醒。
+ * 可选事件：一次回答最多出现一次，不出现代表自检未发现问题；
+ * 不影响本轮 `chunk`/`source`/`done` 的展示，只是附加的质量提醒。
+ */
+export interface SelfCheckWarningEventPayload {
+  message: string
+}
+
+/**
  * `done` 事件载荷——流结束。
  * Java `QueryEvent.done()` 不携带业务字段，前端用其关闭 loading。
  */
@@ -63,11 +72,12 @@ export interface ErrorEventPayload {
   code?: string
 }
 
-/** 五类事件的联合类型，使用判别字段 `eventType` */
+/** 六类事件的联合类型，使用判别字段 `eventType` */
 export type QueryEvent =
   | { eventType: 'chunk'; data: ChunkEventPayload }
   | { eventType: 'source'; data: SourceEventPayload }
   | { eventType: 'refusal'; data: RefusalEventPayload }
+  | { eventType: 'self_check_warning'; data: SelfCheckWarningEventPayload }
   | { eventType: 'done'; data: DoneEventPayload }
   | { eventType: 'error'; data: ErrorEventPayload }
 
@@ -81,6 +91,8 @@ export interface Message {
   citations?: Citation[]
   /** 仅 refusal 角色的具体原因码；后端当前可能未提供 */
   refusalReason?: RefusalEventPayload['reason']
+  /** assistant 角色的生成后自检提醒；不存在代表本轮自检未发现问题 */
+  selfCheckWarning?: string
   /** 创建时间，前端调试用 */
   createdAt: string
 }

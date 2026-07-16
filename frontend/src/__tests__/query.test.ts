@@ -177,6 +177,25 @@ describe('toQueryEvent', () => {
     const evt = toQueryEvent({ event: 'chunk', data: 'not-json' })
     expect(evt).toEqual({ eventType: 'error', data: { message: 'SSE 协议错误: SSE data 不是合法 JSON' } })
   })
+
+  it('self_check_warning 事件载荷完整', () => {
+    const evt = toQueryEvent({
+      event: 'self_check_warning',
+      data: '{"message":"⚠️ 自检提示：以下内容未在参考资料中找到明确支撑"}'
+    })
+    expect(evt.eventType).toBe('self_check_warning')
+    if (evt.eventType === 'self_check_warning') {
+      expect(evt.data.message).toBe('⚠️ 自检提示：以下内容未在参考资料中找到明确支撑')
+    }
+  })
+
+  it('self_check_warning 缺少 message 时降级为协议 error', () => {
+    const evt = toQueryEvent({ event: 'self_check_warning', data: '{}' })
+    expect(evt).toEqual({
+      eventType: 'error',
+      data: { message: 'SSE 协议错误: self_check_warning 事件缺少字符串 message' }
+    })
+  })
 })
 
 describe('openStream 接口契约', () => {
