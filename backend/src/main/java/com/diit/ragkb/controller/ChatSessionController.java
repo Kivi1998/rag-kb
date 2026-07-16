@@ -5,7 +5,6 @@ import com.diit.ragkb.model.ChatSession;
 import com.diit.ragkb.ragcore.conversation.ChatMessage;
 import com.diit.ragkb.service.ChatSessionService;
 import lombok.RequiredArgsConstructor;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
 
@@ -13,11 +12,13 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
-/** 多轮对话会话管理（需认证+租户上下文）。 */
+/**
+ * 多轮对话会话管理（需认证+租户上下文）。会话生命周期与 {@code rag.memory.enabled} 无关，
+ * 始终可用——{@code sessionId} 在 QueryRequest 上始终必填，关闭记忆子系统时消息历史降级为空。
+ */
 @RestController
 @RequestMapping("/api/v1/knowledge-bases/{kbId}/sessions")
 @RequiredArgsConstructor
-@ConditionalOnProperty(prefix = "rag.memory", name = "enabled", havingValue = "true")
 public class ChatSessionController {
 
     private final ChatSessionService chatSessionService;
@@ -31,6 +32,6 @@ public class ChatSessionController {
 
     @GetMapping("/{sessionId}/messages")
     public ApiResponse<List<ChatMessage>> getMessages(@PathVariable UUID kbId, @PathVariable UUID sessionId) {
-        return ApiResponse.ok(chatSessionService.getMessages(sessionId));
+        return ApiResponse.ok(chatSessionService.getMessages(kbId, sessionId));
     }
 }

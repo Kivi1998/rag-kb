@@ -7,5 +7,6 @@ import java.util.UUID;
 
 public interface ChatMessageRepository extends MongoRepository<ChatMessageDocument, String> {
 
-    List<ChatMessageDocument> findBySessionIdAndOrganizationIdOrderByCreatedAtAsc(UUID sessionId, UUID organizationId);
+    List<ChatMessageDocument> findBySessionIdAndOrganizationIdAndMemberIdOrderByCreatedAtAsc(UUID sessionId,
+            UUID organizationId, UUID memberId);
 }

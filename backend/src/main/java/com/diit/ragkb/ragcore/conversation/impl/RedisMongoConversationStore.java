@@ -69,8 +69,9 @@ public class RedisMongoConversationStore implements ConversationStore {
     }
 
     @Override
-    public List<ChatMessage> archivedMessages(UUID organizationId, UUID sessionId) {
-        return chatMessageRepository.findBySessionIdAndOrganizationIdOrderByCreatedAtAsc(sessionId, organizationId)
+    public List<ChatMessage> archivedMessages(UUID organizationId, UUID memberId, UUID sessionId) {
+        return chatMessageRepository
+                .findBySessionIdAndOrganizationIdAndMemberIdOrderByCreatedAtAsc(sessionId, organizationId, memberId)
                 .stream()
                 .map(doc -> new ChatMessage(doc.getRole(), doc.getContent(), doc.isKeyFact(), doc.getCreatedAt()))
                 .toList();

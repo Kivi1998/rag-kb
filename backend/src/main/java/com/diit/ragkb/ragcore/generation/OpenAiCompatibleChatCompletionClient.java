@@ -52,12 +52,14 @@ public class OpenAiCompatibleChatCompletionClient implements ChatCompletionClien
                     Map.of("role", "system", "content", systemPrompt),
                     Map.of("role", "user", "content", userPrompt)));
             String body = objectMapper.writeValueAsString(requestBody);
-            HttpRequest request = HttpRequest.newBuilder(URI.create(properties.getEndpoint()))
+            HttpRequest.Builder builder = HttpRequest.newBuilder(URI.create(properties.getEndpoint()))
                     .timeout(Duration.ofMillis(properties.getTimeoutMs()))
                     .header("Content-Type", "application/json")
-                    .header("Authorization", "Bearer " + properties.getApiKey())
-                    .POST(HttpRequest.BodyPublishers.ofString(body, StandardCharsets.UTF_8))
-                    .build();
+                    .POST(HttpRequest.BodyPublishers.ofString(body, StandardCharsets.UTF_8));
+            if (properties.getApiKey() != null && !properties.getApiKey().isBlank()) {
+                builder.header("Authorization", "Bearer " + properties.getApiKey());
+            }
+            HttpRequest request = builder.build();
             HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
             if (response.statusCode() < 200 || response.statusCode() >= 300) {
                 throw new ModelClientException("生成服务返回 HTTP " + response.statusCode());

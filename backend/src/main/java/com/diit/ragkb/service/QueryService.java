@@ -61,21 +61,26 @@ public class QueryService {
 
         ChatSessionService chatSessionService = chatSessionServiceProvider.getIfAvailable();
         if (chatSessionService != null) {
-            chatSessionService.touchSession(sessionId); // 校验归属并续期，越权/不存在 → 抛异常映射 404
+            chatSessionService.touchSession(knowledgeBaseId, sessionId); // 校验归属并续期，越权/不存在 → 抛异常映射 404
         }
 
         String resolvedQuestion = question;
         String profileContext = null;
+        RetrievalOptions retrievalOptions = RetrievalOptions.defaults();
         ConversationMemoryOrchestrator orchestrator = memoryOrchestratorProvider.getIfAvailable();
         if (orchestrator != null) {
             MemoryContext memoryContext = orchestrator.prepareContext(organizationId, memberId, sessionId, question);
             resolvedQuestion = memoryContext.resolvedQuestion();
             profileContext = memoryContext.hasProfileContext() ? memoryContext.profileSystemContext() : null;
+            if (memoryContext.resolvedQuestionVector() != null) {
+                // 复用记忆子系统已经算好的 resolvedQuestion 向量，避免检索阶段重复调用 Embedding。
+                retrievalOptions = retrievalOptions.withPrecomputedQueryVector(memoryContext.resolvedQuestionVector());
+            }
         }
 
         long retrievalStartedAt = System.nanoTime();
         RetrievalResult result = retriever.retrieveWithDecision(organizationId, knowledgeBaseId, resolvedQuestion,
-                RetrievalOptions.defaults());
+                retrievalOptions);
         long retrievalLatencyMs = elapsedMs(retrievalStartedAt);
         QueryAuditSnapshot audit = QueryAuditSnapshot.from(traceId, organizationId, knowledgeBaseId, memberId,
                 retrievalLatencyMs, result.chunks(), result.diagnostics(), result.refused(), result.refusalReason());

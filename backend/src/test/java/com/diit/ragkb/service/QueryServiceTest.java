@@ -129,7 +129,7 @@ class QueryServiceTest {
 
         service.prepare(kbId, sessionId, "问题");
 
-        verify(chatSessionService, org.mockito.Mockito.times(1)).touchSession(sessionId);
+        verify(chatSessionService, org.mockito.Mockito.times(1)).touchSession(kbId, sessionId);
     }
 
     @Test
@@ -142,7 +142,7 @@ class QueryServiceTest {
         when(kbService.getByIdAndCurrentOrg(kbId)).thenReturn(new KnowledgeBase());
         KnowledgeDocumentRepository documents = mock(KnowledgeDocumentRepository.class);
         ChatSessionService chatSessionService = mock(ChatSessionService.class);
-        when(chatSessionService.touchSession(sessionId))
+        when(chatSessionService.touchSession(kbId, sessionId))
                 .thenThrow(new com.diit.ragkb.exception.ResourceNotFoundException("会话不存在"));
         ObjectProvider<ChatSessionService> sessionProvider = mock(ObjectProvider.class);
         when(sessionProvider.getIfAvailable()).thenReturn(chatSessionService);
@@ -172,7 +172,7 @@ class QueryServiceTest {
 
         ConversationMemoryOrchestrator orchestrator = mock(ConversationMemoryOrchestrator.class);
         com.diit.ragkb.ragcore.conversation.MemoryContext memoryContext =
-                new com.diit.ragkb.ragcore.conversation.MemoryContext("重疾险犹豫期过了还能退保吗", "用户偏好：常问保险条款");
+                new com.diit.ragkb.ragcore.conversation.MemoryContext("重疾险犹豫期过了还能退保吗", "用户偏好：常问保险条款", null);
         when(orchestrator.prepareContext(eq(orgId), any(), eq(sessionId), eq("那它呢"))).thenReturn(memoryContext);
         ObjectProvider<ConversationMemoryOrchestrator> orchestratorProvider = mock(ObjectProvider.class);
         when(orchestratorProvider.getIfAvailable()).thenReturn(orchestrator);
@@ -207,6 +207,41 @@ class QueryServiceTest {
         assertEquals(List.of("用户偏好：常问保险条款"), capturedSystemContext);
         verify(orchestrator, org.mockito.Mockito.times(1)).recordTurn(eq(orgId), eq(kbId), any(), eq(sessionId),
                 eq("那它呢"), eq("答案"));
+    }
+
+    @Test
+    void reusesMemoryOrchestratorVectorInsteadOfLettingRetrieverEmbedAgain() {
+        // 回归测试：记忆子系统已经算出 resolvedQuestion 向量时，应该把它带给检索阶段复用，
+        // 而不是让 QueryService 对同一句话让检索链路再调用一次 Embedding。
+        UUID orgId = UUID.randomUUID();
+        UUID kbId = UUID.randomUUID();
+        UUID sessionId = UUID.randomUUID();
+        TenantContext.set(orgId, UUID.randomUUID(), "MEMBER");
+        KnowledgeBaseService kbService = mock(KnowledgeBaseService.class);
+        when(kbService.getByIdAndCurrentOrg(kbId)).thenReturn(new KnowledgeBase());
+        KnowledgeDocumentRepository documents = mock(KnowledgeDocumentRepository.class);
+
+        List<Float> precomputedVector = List.of(0.5f, 0.6f);
+        ConversationMemoryOrchestrator orchestrator = mock(ConversationMemoryOrchestrator.class);
+        com.diit.ragkb.ragcore.conversation.MemoryContext memoryContext =
+                new com.diit.ragkb.ragcore.conversation.MemoryContext("重疾险犹豫期过了还能退保吗", "", precomputedVector);
+        when(orchestrator.prepareContext(eq(orgId), any(), eq(sessionId), any())).thenReturn(memoryContext);
+        ObjectProvider<ConversationMemoryOrchestrator> orchestratorProvider = mock(ObjectProvider.class);
+        when(orchestratorProvider.getIfAvailable()).thenReturn(orchestrator);
+
+        Retriever retriever = mock(Retriever.class);
+        when(retriever.retrieveWithDecision(any(), any(), any(), any()))
+                .thenReturn(RetrievalResult.refuse("拒答"));
+        QueryService service = new QueryService(retriever, mock(AnswerGenerator.class), kbService, documents,
+                emptyProvider(), orchestratorProvider);
+
+        service.prepare(kbId, sessionId, "那它呢");
+
+        org.mockito.ArgumentCaptor<com.diit.ragkb.ragcore.retrieval.RetrievalOptions> optionsCaptor =
+                org.mockito.ArgumentCaptor.forClass(com.diit.ragkb.ragcore.retrieval.RetrievalOptions.class);
+        verify(retriever).retrieveWithDecision(eq(orgId), eq(kbId), eq("重疾险犹豫期过了还能退保吗"),
+                optionsCaptor.capture());
+        assertEquals(precomputedVector, optionsCaptor.getValue().precomputedQueryVector());
     }
 
     private Retriever retriever(RetrievalResult result) {

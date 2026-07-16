@@ -20,6 +20,11 @@ public interface ConversationStore {
      */
     List<ChatMessage> recentRawMessages(UUID organizationId, UUID sessionId);
 
-    /** MongoDB 长期存档查询（供 `GET .../sessions/{sessionId}/messages` 接口使用）。 */
-    List<ChatMessage> archivedMessages(UUID organizationId, UUID sessionId);
+    /**
+     * MongoDB 长期存档查询（供 `GET .../sessions/{sessionId}/messages` 接口使用）。
+     *
+     * <p>查询本身强制携带 memberId 校验，不依赖调用方已经做过归属校验——避免未来新增的调用方
+     * （管理后台、批量导出等）绕过 {@code ChatSessionService} 的归属检查直接越权读取他人消息。</p>
+     */
+    List<ChatMessage> archivedMessages(UUID organizationId, UUID memberId, UUID sessionId);
 }

@@ -22,8 +22,15 @@ import java.util.UUID;
  */
 public class MemoryItemStoreImpl implements MemoryItemStore {
 
-    /** 语义去重阈值：ES cosine kNN 场景下 _score 大致落在 0~1，超过此值视为重复。 */
-    private static final double DEDUP_SIMILARITY_THRESHOLD = 0.92;
+    /**
+     * 语义去重阈值，语义是"原始余弦相似度"，而非 ES 返回的 {@code _score}。
+     *
+     * <p>ES 对 {@code cosine} 相似度的 dense_vector 字段做了 {@code _score = (1 + cosine) / 2}
+     * 归一化（保证非负），并非原始余弦值本身；直接拿原始余弦阈值与 {@code _score} 比较会让判定
+     * 阈值变松（原始余弦 ~0.84 就会产生 {@code _score} ≈ 0.92），因此比较前必须先用
+     * {@link #dedupScoreThreshold()} 换算成 {@code _score} 量纲。</p>
+     */
+    private static final double DEDUP_COSINE_SIMILARITY_THRESHOLD = 0.92;
 
     private final MemoryIndex memoryIndex;
     private final MemoryItemRepository memoryItemRepository;
@@ -41,11 +48,25 @@ public class MemoryItemStoreImpl implements MemoryItemStore {
                                                             List<Float> candidateVector) {
         List<MemoryIndex.ScoredMemoryRecord> candidates =
                 memoryIndex.searchProfileItems(organizationId, memberId, candidateVector, 1);
-        if (candidates.isEmpty() || candidates.get(0).score() < DEDUP_SIMILARITY_THRESHOLD) {
+        if (candidates.isEmpty() || candidates.get(0).score() < dedupScoreThreshold()) {
             return Optional.empty();
         }
         String memoryId = candidates.get(0).record().memoryId();
-        return memoryItemRepository.findById(memoryId);
+        return memoryItemRepository.findById(memoryId)
+                .filter(document -> belongsToTenant(document, organizationId, memberId));
+    }
+
+    /** 原始余弦阈值换算成 ES {@code _score} 量纲：{@code _score = (1 + cosine) / 2}。 */
+    private static double dedupScoreThreshold() {
+        return (1 + DEDUP_COSINE_SIMILARITY_THRESHOLD) / 2.0;
+    }
+
+    /**
+     * 二次校验租户归属，不完全信任上游 ES kNN 过滤的结果——防止索引 bug、映射迁移等原因
+     * 导致跨租户的 memory_id 被返回后，仍从 MongoDB 里读出并使用另一租户的画像数据。
+     */
+    private static boolean belongsToTenant(MemoryItemDocument document, UUID organizationId, UUID memberId) {
+        return organizationId.equals(document.getOrganizationId()) && memberId.equals(document.getMemberId());
     }
 
     @Override
@@ -67,15 +88,21 @@ public class MemoryItemStoreImpl implements MemoryItemStore {
         // 候选池比 topK 更大：ES 只负责"语义相关"，最终排序还要叠加 effective_importance。
         List<MemoryIndex.ScoredMemoryRecord> candidates =
                 memoryIndex.searchProfileItems(organizationId, memberId, queryVector, Math.max(topK * 3, 10));
-        List<MemoryItemDocument> scored = new ArrayList<>();
+        List<String> candidateIds = candidates.stream().map(candidate -> candidate.record().memoryId()).toList();
         Instant now = Instant.now();
-        for (MemoryIndex.ScoredMemoryRecord candidate : candidates) {
-            memoryItemRepository.findById(candidate.record().memoryId()).ifPresent(scored::add);
+        List<MemoryItemDocument> scored = new ArrayList<>();
+        // 批量 findAllById 替代逐条 findById，避免每次问答产生 N 次串行 Mongo 往返；
+        // 同时二次校验租户归属，不完全信任上游 ES 过滤结果。
+        for (MemoryItemDocument document : memoryItemRepository.findAllById(candidateIds)) {
+            if (belongsToTenant(document, organizationId, memberId)) {
+                scored.add(document);
+            }
         }
         scored.sort(Comparator.comparingDouble((MemoryItemDocument doc) -> effectiveImportance(doc, now)).reversed());
         List<MemoryItemDocument> selected = scored.stream().limit(topK).toList();
-        for (MemoryItemDocument document : selected) {
-            reinforce(document, now);
+        selected.forEach(document -> reinforceInPlace(document, now));
+        if (!selected.isEmpty()) {
+            memoryItemRepository.saveAll(selected); // 批量落库，替代逐条 save
         }
         return selected;
     }
@@ -91,10 +118,10 @@ public class MemoryItemStoreImpl implements MemoryItemStore {
         return stale.size();
     }
 
-    private void reinforce(MemoryItemDocument document, Instant now) {
+    /** 只更新内存中的对象字段，落库交给调用方批量 saveAll，避免逐条 save 造成 N+1。 */
+    private void reinforceInPlace(MemoryItemDocument document, Instant now) {
         document.setAccessCount(document.getAccessCount() + 1);
         document.setLastAccessedAt(now);
-        memoryItemRepository.save(document);
     }
 
     /** effective_importance = importance × decay(now - lastAccessedAt)，decay 用半衰期指数衰减。 */

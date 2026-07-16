@@ -68,6 +68,26 @@ class SlidingWindowAssemblerTest {
         assertFalse(summarizer.lastCompressedBatch.contains(keyFact), "关键事实消息不应出现在被压缩的批次里");
     }
 
+    @Test
+    void summarizerFailureDegradesToNoSummaryInsteadOfThrowing() {
+        // 回归测试：摘要 LLM 调用失败时必须 fail-open，不能让异常向上传播导致整个问答请求失败。
+        ConversationSummarizer failingSummarizer = messagesToCompress -> {
+            throw new RuntimeException("模拟 LLM 调用超时");
+        };
+        SlidingWindowAssembler assembler = new SlidingWindowAssembler(failingSummarizer);
+        String longText = "重".repeat(300);
+        List<ChatMessage> messages = List.of(
+                ChatMessage.user(longText + "1", Instant.parse("2026-07-15T00:00:00Z")),
+                ChatMessage.assistant(longText + "2", Instant.parse("2026-07-15T00:01:00Z")),
+                ChatMessage.user("那它过了还能退吗", Instant.parse("2026-07-15T00:02:00Z")));
+
+        ConversationWindow window = assembler.assemble(messages, 50);
+
+        assertFalse(window.hasSummary(), "摘要失败时应退化为无摘要，而不是抛异常");
+        assertEquals(1, window.recentMessages().size());
+        assertEquals("那它过了还能退吗", window.recentMessages().get(0).content());
+    }
+
     private static final class RecordingSummarizer implements ConversationSummarizer {
         int callCount = 0;
         String summaryToReturn = "";

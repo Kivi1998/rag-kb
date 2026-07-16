@@ -47,16 +47,19 @@ public class ConversationMemoryOrchestrator {
         String resolvedQuestion = coreferenceResolver.resolve(question, window.recentMessages());
 
         String profileContext = "";
+        List<Float> resolvedQuestionVector = null;
         try {
             EmbeddingResult embedding = embeddingClient.embed(List.of(resolvedQuestion));
             if (!embedding.vectors().isEmpty()) {
+                resolvedQuestionVector = embedding.vectors().get(0);
                 profileContext = userProfileInjector.buildSystemContext(organizationId, memberId,
-                        embedding.vectors().get(0));
+                        resolvedQuestionVector);
             }
         } catch (RuntimeException ex) {
             log.warn("记忆检索用的向量化失败，本轮跳过画像注入: sessionId={}", sessionId, ex);
         }
-        return new MemoryContext(resolvedQuestion, profileContext);
+        // 把这里算好的向量带给检索阶段复用，避免同一句 resolvedQuestion 被检索链路重复调用 Embedding。
+        return new MemoryContext(resolvedQuestion, profileContext, resolvedQuestionVector);
     }
 
     /** 写直达持久化本轮问答 + 异步触发画像提炼；不抛异常，失败只记日志。 */

@@ -66,7 +66,12 @@
 - [x] 10.1 `QueryController.QueryRequest` 移除 `history`/`rewrite` 字段，新增必填 `sessionId` 校验
 - [x] 10.2 `QueryService.prepare()` 编排新增步骤：取滑动窗口+语义历史 → 指代消解 → 现有 `HybridRetriever` 检索（保持不变）→ 画像注入生成 → 写直达持久化 → 异步触发画像提炼
 - [x] 10.3 更新现有 `QueryServiceTest`/`QueryControllerTest`，覆盖 sessionId 缺失/无效场景
-- [x] 10.4 安全测试：记忆相关数据读写全路径强制 `org_id`/`member_id` 校验（比照 `RagCoreContractTest` 风格）—— `ElasticsearchMemoryIndexTest` 覆盖过滤条件
+- [x] 10.4 安全测试：记忆相关数据读写全路径强制 `org_id`/`member_id` 校验（比照 `RagCoreContractTest` 风格）—— `ElasticsearchMemoryIndexTest` 新增
+      `searchSessionHistoryDoesNotLeakOtherOrganizationsSession`/`searchProfileItemsDoesNotLeakOtherMembersProfileWithinSameOrganization`
+      两个真正的跨租户负向用例（两租户各自造数据，验证互相查不到，而不只是断言请求体含过滤字段）；
+      `MemoryItemStoreImplTest` 新增 `findSimilarExistingRejectsCrossTenantDocumentEvenIfEsMatched`/
+      `topKForGenerationFiltersOutCrossTenantDocuments` 覆盖 MongoDB 层的二次租户校验；
+      `RedisMongoConversationStoreTest` 新增 `archivedMessagesQueriesMongoWithMemberIdScope` 覆盖长期存档查询的 memberId 强制校验
 
 ## 11. 前端适配
 

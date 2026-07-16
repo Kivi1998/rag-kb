@@ -181,6 +181,30 @@ class HybridRetrieverTest {
     }
 
     @Test
+    void reusesPrecomputedQueryVectorInsteadOfCallingEmbeddingAgain() {
+        // 回归测试：记忆子系统已经算好 resolvedQuestion 向量时，检索阶段不应再调用一次 Embedding。
+        Chunk chunk = chunk("vector-hit");
+        List<Float> precomputed = List.of(0.3f, 0.4f);
+        HybridCandidateSource source = new HybridCandidateSource() {
+            @Override public List<RetrievedChunk> searchBm25(SearchRequest request) { return List.of(); }
+            @Override public List<RetrievedChunk> searchKnn(VectorSearchRequest request) {
+                assertEquals(precomputed, request.queryVector());
+                return List.of(new RetrievedChunk(chunk, null, 1, null, null, 0.9));
+            }
+        };
+        EmbeddingClient embedding = texts -> { throw new AssertionError("已有预计算向量时不应再调用 Embedding"); };
+        @SuppressWarnings("unchecked") ObjectProvider<RerankerClient> reranker = mock(ObjectProvider.class);
+        when(reranker.getIfAvailable()).thenReturn(null);
+
+        RetrievalResult result = new HybridRetriever(source, embedding, reranker)
+                .retrieveWithDecision(UUID.randomUUID(), UUID.randomUUID(), "SearchService",
+                        new RetrievalOptions(30, 1, false).withPrecomputedQueryVector(precomputed));
+
+        assertTrue(!result.refused());
+        assertEquals("vector-hit", result.chunks().get(0).chunk().id());
+    }
+
+    @Test
     void emptyQuestionIsRefusedWithoutCallingModels() {
         HybridCandidateSource source = mock(HybridCandidateSource.class);
         EmbeddingClient embedding = mock(EmbeddingClient.class);

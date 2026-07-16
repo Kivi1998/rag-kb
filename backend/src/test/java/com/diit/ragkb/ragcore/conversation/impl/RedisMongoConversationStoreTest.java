@@ -79,6 +79,23 @@ class RedisMongoConversationStoreTest {
     }
 
     @Test
+    void archivedMessagesQueriesMongoWithMemberIdScope() {
+        // 回归测试：查询本身必须携带 memberId，不能只依赖调用方（ChatSessionService）预先做归属校验，
+        // 否则未来绕过 Service 层直接调用本方法的路径会造成同组织内跨成员越权读取。
+        ChatMessageDocument document = new ChatMessageDocument(sessionId, orgId, kbId, memberId, "user", "你好",
+                false, Instant.now());
+        when(repository.findBySessionIdAndOrganizationIdAndMemberIdOrderByCreatedAtAsc(sessionId, orgId, memberId))
+                .thenReturn(List.of(document));
+
+        List<ChatMessage> result = store.archivedMessages(orgId, memberId, sessionId);
+
+        assertEquals(1, result.size());
+        assertEquals("你好", result.get(0).content());
+        verify(repository, times(1))
+                .findBySessionIdAndOrganizationIdAndMemberIdOrderByCreatedAtAsc(sessionId, orgId, memberId);
+    }
+
+    @Test
     void recentRawMessagesDeserializesFromRedis() {
         ChatMessage message = ChatMessage.assistant("重疾险犹豫期过了还能退保吗", Instant.parse("2026-07-15T00:00:00Z"));
         String json = "{\"role\":\"assistant\",\"content\":\"重疾险犹豫期过了还能退保吗\",\"keyFact\":false,"

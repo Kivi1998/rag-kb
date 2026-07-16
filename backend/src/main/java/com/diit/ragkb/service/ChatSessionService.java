@@ -13,7 +13,7 @@ import com.diit.ragkb.repository.OrganizationRepository;
 import com.diit.ragkb.security.TenantContext;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -23,13 +23,17 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * 会话生命周期管理：创建、归属校验（跨组织/跨成员一律 404，不泄露会话是否存在）、
+ * 会话生命周期管理：创建、归属校验（跨组织/跨知识库/跨成员一律 404，不泄露会话是否存在）、
  * 状态机流转（ACTIVE/IDLE/ARCHIVED，读时按 lastActiveAt 计算，不需要定时任务维护）。
+ *
+ * <p>会话生命周期基于 Postgres {@code chat_session} 表，与 {@code rag.memory.enabled}
+ * 门控的 Redis/MongoDB/ES 记忆子系统无关——{@code sessionId} 在 QueryRequest 上始终必填，
+ * 因此本服务必须始终可用；只有 {@link #getMessages} 依赖的长期存档查询在记忆子系统关闭时
+ * 才降级为空列表。</p>
  */
 @Slf4j
 @Service
 @RequiredArgsConstructor
-@ConditionalOnProperty(prefix = "rag.memory", name = "enabled", havingValue = "true")
 public class ChatSessionService {
 
     private final ChatSessionRepository chatSessionRepository;
@@ -37,7 +41,7 @@ public class ChatSessionService {
     private final OrganizationRepository organizationRepository;
     private final KnowledgeBaseRepository knowledgeBaseRepository;
     private final MemberRepository memberRepository;
-    private final ConversationStore conversationStore;
+    private final ObjectProvider<ConversationStore> conversationStoreProvider;
     private final RagMemoryProperties properties;
 
     @Transactional
@@ -54,19 +58,23 @@ public class ChatSessionService {
         return chatSessionRepository.save(session);
     }
 
-    /** 校验归属并续期（有新消息时无论原状态如何都续期回 ACTIVE）。 */
+    /** 校验归属（含 kbId）并续期（有新消息时无论原状态如何都续期回 ACTIVE）。 */
     @Transactional
-    public ChatSession touchSession(UUID sessionId) {
-        ChatSession session = getOwnedSession(sessionId);
+    public ChatSession touchSession(UUID kbId, UUID sessionId) {
+        ChatSession session = getOwnedSession(kbId, sessionId);
         session.setStatus(ChatSessionStatus.ACTIVE);
         session.setLastActiveAt(Instant.now());
         return chatSessionRepository.save(session);
     }
 
     @Transactional(readOnly = true)
-    public List<ChatMessage> getMessages(UUID sessionId) {
-        ChatSession session = getOwnedSession(sessionId);
-        return conversationStore.archivedMessages(requireOrganizationId(), session.getId());
+    public List<ChatMessage> getMessages(UUID kbId, UUID sessionId) {
+        ChatSession session = getOwnedSession(kbId, sessionId);
+        ConversationStore conversationStore = conversationStoreProvider.getIfAvailable();
+        if (conversationStore == null) {
+            return List.of(); // rag.memory 关闭时长期存档未接入，退化为空历史而非报错
+        }
+        return conversationStore.archivedMessages(requireOrganizationId(), requireMemberId(), session.getId());
     }
 
     /** 只读地推断当前有效状态，不落库；落库的状态更新只在 {@link #touchSession} 时发生。 */
@@ -81,9 +89,9 @@ public class ChatSessionService {
         return ChatSessionStatus.ARCHIVED;
     }
 
-    private ChatSession getOwnedSession(UUID sessionId) {
+    private ChatSession getOwnedSession(UUID kbId, UUID sessionId) {
         return chatSessionRepository
-                .findByIdAndOrgIdAndMemberId(sessionId, requireOrganizationId(), requireMemberId())
+                .findByIdAndOrgIdAndKbIdAndMemberId(sessionId, requireOrganizationId(), kbId, requireMemberId())
                 .orElseThrow(() -> new ResourceNotFoundException("会话不存在"));
     }
 
