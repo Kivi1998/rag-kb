@@ -92,7 +92,7 @@ openspec/        需求规格与变更记录
 
 ### 6. Rerank 与检索优化
 
-- 文档：[拒答阈值校准报告](eval/reports/refusal-threshold-calibration-20260714.md)（rerank 分数拒答门槛怎么定的）、[候选池大小调优实验](eval/reports/candidate-pool-size-tuning-20260715.md)（candidateLimit 从 50 降到 10/20/30 的 Recall/延迟实测对比）、[延后事项清单](TODOS.md)（RRF 融合动态权重等待办）
+- 文档：[总体架构](docs/architecture.md)决策 7（拒答阈值 `MIN_RERANK_SCORE=0.06` 的实验方法与结论摘要）、[拒答阈值校准报告](eval/reports/refusal-threshold-calibration-20260714.md)（完整数据与阈值扫描表）、[复现脚本](eval/scripts/analyze_refusal_threshold.py)、[候选池大小调优实验](eval/reports/candidate-pool-size-tuning-20260715.md)（candidateLimit 从 50 降到 10/20/30 的 Recall/延迟实测对比）、[延后事项清单](TODOS.md)（RRF 融合动态权重等待办）
 - 代码：[`RerankerClient.java`](backend/src/main/java/com/diit/ragkb/ragcore/rerank/RerankerClient.java)（接口）、[`OpenAiCompatibleRerankerClient.java`](backend/src/main/java/com/diit/ragkb/ragcore/rerank/OpenAiCompatibleRerankerClient.java)（Cross-Encoder 兼容实现，当前对接硅基流动 `BAAI/bge-reranker-v2-m3`）
 
 ### 7. 多轮对话与记忆管理

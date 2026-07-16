@@ -80,6 +80,16 @@ MongoDB（会话消息长期存档 + 用户画像，只服务记忆子系统）/
 - 删除会话选择硬删除（级联清理 Elasticsearch→MongoDB/Redis→Postgres），而非软删除标记：用户对"删除"的直觉预期就是清除，且没有强需求要保留已删除会话用于审计/恢复；删除不影响 `memory_items` 用户画像（画像是 member 维度长期记忆，与会话生命周期无关）；
 - 前端用 `localStorage` 记录每个知识库最后活跃的会话 ID 实现"刷新回到刚才那个对话"，而非引入路由级 `sessionId` 参数——因为当前 `kbId` 本身就不是路由参数（由 `kbStore.selectedKbId` 驱动），引入 URL 级会话参数需要同时改造 kbId 的路由方式，改动面明显更大。
 
+### 决策 7：拒答阈值（`MIN_RERANK_SCORE=0.06`）是真实实验校准出来的，不是拍脑袋定的
+
+- **原始问题**：`HybridRetriever` 最早只有 `MIN_RRF_SCORE=0.01` 一道拒答门槛，三轮实测拒答 F1 均为 0——RRF 分数分母含 `rank_constant=60`，任何 top-1 候选几乎必然超过该阈值，从未真正拦截过任何一道拒答题；
+- **实验方法**（完整记录见 [拒答阈值校准报告](../eval/reports/refusal-threshold-calibration-20260714.md)，复现脚本见 [`eval/scripts/analyze_refusal_threshold.py`](../eval/scripts/analyze_refusal_threshold.py)）：
+  1. 扩展 `EvalRetrievalRunner`，在 150 题人工标注评估集（`eval-set-v2.jsonl`）上跑一次真实检索（硅基流动 `bge-m3` + `bge-reranker-v2-m3`），把每题 top-1 候选的 rerank 分数作为诊断字段（`_top_rerank_score`）一起吐出，不影响正式评测 schema；
+  2. 按人工标注的 `expect_refusal` 把 150 题分成"应拒答"（25 道）与"应回答"（125 道）两组，观察两组 rerank 分数的分布差异；
+  3. 用 `analyze_refusal_threshold.py` 对候选阈值 t（0 到 1，步长 0.005）逐个计算"rerank 分数 < t 就拒答"规则下的精确率/召回率/F1，选 F1 最优点；
+- **结果**：t=0.06 时 F1=0.564 全局最优，命中 11/25 道拒答题，代价是误伤 3/125 道应答题（均为语料信息密度低、细节湮没在长文档里的冷门题，如"作者单位邮编""开发机显卡型号"）；
+- **已知机制性局限（不是调参能解决的）**：按拒答子类型（`refusal_reason`）细分后发现，t=0.06 只对 **LOW_CONFIDENCE**（4/4 全中）和 **OUT_OF_SCOPE**（10 中 9）有效；**NO_RETRIEVAL**（如"随机数种子设的多少"——检索到的 chunk 主题对了，具体数值恰好没写）与 **SAFETY**（检索到的内容本身没问题，但组织后外发涉及合规）两类的 rerank 分数普遍很高（NO_RETRIEVAL 8 道题 0.178–0.921，SAFETY 甚至有 0.972），reranker 衡量的是"主题相关性"而非"该问题的具体答案是否存在于此内容"，天花板明确。这两类需要生成阶段的事实核验/独立内容安全分类器，单一检索分数阈值解决不了（NO_RETRIEVAL 的事实核验机制正在设计，SAFETY 暂不在本次范围内）。
+
 ## 四、当前重构边界
 
 - 已删除：RAGFlow Client、RAGFlow dataset/chat/session 管理、旧文档摄取、旧 SSE 问答、相关前后端页面与测试；
