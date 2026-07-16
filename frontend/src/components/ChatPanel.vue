@@ -69,26 +69,21 @@ async function switchToSession(id: string) {
   writeLastSessionId(props.kbId, id)
 }
 
-/** 新建一个全新会话，清空当前展示内容。 */
-async function startNewConversation() {
-  sessionReady.value = false
+/**
+ * 重置为"尚未创建会话"的空白状态，不调用创建会话接口——真正的 chat_session 记录推迟到
+ * 用户实际发送第一条消息时才在 {@link ask} 里懒创建。这样每次挂载/切知识库/点"新建对话"
+ * 都不会在 Postgres 里留下从未真正使用过的空会话，历史列表也就不会被这些空占位淤积。
+ */
+function resetToNewConversation() {
   sessionId.value = null
   messages.value = []
-  if (!props.kbId) return
-  try {
-    const newId = await createSession('', props.kbId, headers())
-    sessionId.value = newId
-    sessionReady.value = true
-    writeLastSessionId(props.kbId, newId)
-  } catch (error) {
-    console.error('创建会话失败', error)
-  }
+  sessionReady.value = true
 }
 
 /**
  * 进入知识库/刷新页面时：优先尝试恢复 localStorage 记录的上一个会话（含历史消息），
  * 而不是总是新建——这是"F5 刷新回到刚才那个对话"的关键；恢复失败（如该会话已被
- * 删除，接口返回 404）时退回创建新会话，不阻断使用。
+ * 删除，接口返回 404）时退回到空白新对话状态，不阻断使用。
  */
 async function initializeSession() {
   sessionReady.value = false
@@ -104,7 +99,7 @@ async function initializeSession() {
       console.warn('恢复历史会话失败，改为新建会话', error)
     }
   }
-  await startNewConversation()
+  resetToNewConversation()
 }
 
 async function handleSelectSession(id: string) {
@@ -119,16 +114,13 @@ async function handleSelectSession(id: string) {
 
 function handleCreateFromSidebar() {
   cancel()
-  void startNewConversation()
+  resetToNewConversation()
 }
 
-async function handleSessionDeleted(deletedId: string) {
+function handleSessionDeleted(deletedId: string) {
   if (deletedId === sessionId.value) {
     cancel()
-    await startNewConversation()
-    // 新会话此时还不在侧边栏已加载的列表里（新建对话按钮走的是自身 create() 里的 refresh，
-    // 这里是被动触发，需要单独刷新），否则用户会看到侧边栏没有高亮项、也找不到刚新建的这条。
-    void historySidebar.value?.refresh()
+    resetToNewConversation()
   }
 }
 
@@ -150,7 +142,20 @@ function createAssistantMessage(): Message {
 
 async function ask() {
   const text = question.value.trim()
-  if (!text || sending.value || !sessionId.value) return
+  if (!text || sending.value) return
+  // 懒创建：只有真正发送第一条消息时才建会话，避免历史列表里出现从未使用过的空会话。
+  if (!sessionId.value) {
+    try {
+      const newId = await createSession('', props.kbId, headers())
+      sessionId.value = newId
+      writeLastSessionId(props.kbId, newId)
+    } catch (error) {
+      console.error('创建会话失败', error)
+      return
+    }
+  }
+  const currentSessionId = sessionId.value
+  if (!currentSessionId) return // 理论上不会发生，仅用于类型收窄
   const userMessage: Message = { id: crypto.randomUUID(), role: 'user', content: text, createdAt: new Date().toISOString() }
   const assistantMessage = createAssistantMessage()
   messages.value.push(userMessage, assistantMessage)
@@ -202,7 +207,7 @@ async function ask() {
   try {
     for await (const event of openStream({
       url: queryStreamUrl('', props.kbId),
-      body: { question: text, sessionId: sessionId.value }, headers: headers(), signal: controller.signal
+      body: { question: text, sessionId: currentSessionId }, headers: headers(), signal: controller.signal
     })) {
       if (event.eventType === 'chunk') {
         pending += event.data.content

@@ -256,8 +256,8 @@ class ChatSessionServiceTest {
         older.setTitle("较早的对话");
         older.setLastActiveAt(Instant.now().minus(1, ChronoUnit.HOURS));
         ChatSessionRepository sessionRepository = mock(ChatSessionRepository.class);
-        when(sessionRepository.findByOrgIdAndKbIdAndMemberIdOrderByLastActiveAtDesc(eq(orgId), eq(kbId), eq(memberId),
-                any())).thenReturn(List.of(newer, older));
+        when(sessionRepository.findByOrgIdAndKbIdAndMemberIdAndTitleIsNotNullOrderByLastActiveAtDesc(eq(orgId),
+                eq(kbId), eq(memberId), any())).thenReturn(List.of(newer, older));
         ChatSessionService service = new ChatSessionService(sessionRepository, mock(KnowledgeBaseService.class),
                 mock(OrganizationRepository.class), mock(KnowledgeBaseRepository.class),
                 mock(MemberRepository.class), emptyConversationStoreProvider(), emptyMemoryIndexProvider(),
@@ -268,8 +268,29 @@ class ChatSessionServiceTest {
         assertEquals(2, sessions.size());
         assertEquals("最近的对话", sessions.get(0).title());
         assertEquals("较早的对话", sessions.get(1).title());
-        verify(sessionRepository, times(1))
-                .findByOrgIdAndKbIdAndMemberIdOrderByLastActiveAtDesc(eq(orgId), eq(kbId), eq(memberId), any());
+        verify(sessionRepository, times(1)).findByOrgIdAndKbIdAndMemberIdAndTitleIsNotNullOrderByLastActiveAtDesc(
+                eq(orgId), eq(kbId), eq(memberId), any());
+    }
+
+    @Test
+    void listSessionsExcludesSessionsWithoutAnyMessages() {
+        // 未发生过任何问答的空会话（title 为空）不应出现在历史列表里，避免每次挂载/新建对话都产生的占位记录淤积。
+        UUID orgId = UUID.randomUUID();
+        UUID memberId = UUID.randomUUID();
+        UUID kbId = UUID.randomUUID();
+        TenantContext.set(orgId, memberId, "MEMBER");
+        ChatSessionRepository sessionRepository = mock(ChatSessionRepository.class);
+        // repository 方法本身按 title IS NOT NULL 过滤，这里验证 service 调用的正是这个过滤方法而非无过滤版本。
+        when(sessionRepository.findByOrgIdAndKbIdAndMemberIdAndTitleIsNotNullOrderByLastActiveAtDesc(eq(orgId),
+                eq(kbId), eq(memberId), any())).thenReturn(List.of());
+        ChatSessionService service = new ChatSessionService(sessionRepository, mock(KnowledgeBaseService.class),
+                mock(OrganizationRepository.class), mock(KnowledgeBaseRepository.class),
+                mock(MemberRepository.class), emptyConversationStoreProvider(), emptyMemoryIndexProvider(),
+                new RagMemoryProperties());
+
+        List<ChatSessionService.ChatSessionSummary> sessions = service.listSessions(kbId);
+
+        assertTrue(sessions.isEmpty());
     }
 
     @Test

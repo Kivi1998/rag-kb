@@ -12,6 +12,7 @@ public interface ChatSessionRepository extends JpaRepository<ChatSession, UUID> 
 
     Optional<ChatSession> findByIdAndOrgIdAndKbIdAndMemberId(UUID id, UUID orgId, UUID kbId, UUID memberId);
 
-    List<ChatSession> findByOrgIdAndKbIdAndMemberIdOrderByLastActiveAtDesc(UUID orgId, UUID kbId, UUID memberId,
-            Pageable pageable);
+    /** 只返回已有标题（即已发生过至少一轮问答）的会话，尚未使用过的空会话不出现在历史列表里。 */
+    List<ChatSession> findByOrgIdAndKbIdAndMemberIdAndTitleIsNotNullOrderByLastActiveAtDesc(UUID orgId, UUID kbId,
+            UUID memberId, Pageable pageable);
 }
