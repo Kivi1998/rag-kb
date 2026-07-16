@@ -52,10 +52,33 @@ function writeLastSessionId(kbId: string, id: string) {
 /** LLM 回答含 Markdown 语法（**加粗**、列表、代码块等），此前直接文本插值导致
  * 语法符号原样显示。仅对话回答需要渲染；用户自己打的话按纯文本展示，避免用户
  * 输入里的 `*`/`#` 被意外解释成 Markdown。渲染结果必须过 DOMPurify 净化后才能
- * 用 v-html 注入，防止检索到的文档内容里混入的 HTML/脚本片段被当作真实标签执行。 */
+ * 用 v-html 注入，防止检索到的文档内容里混入的 HTML/脚本片段被当作真实标签执行。
+ *
+ * 正文里的 `[资料N]` 在 markdown 解析前先转成可点击的 `<sup>`（data-ref 记录编号），
+ * 点击后由 handleCitationClick 滚动+高亮到下方对应的引用卡片；DOMPurify 默认允许
+ * class/data-* 属性通过，不需要额外放宽白名单。 */
 function renderMarkdown(content: string): string {
-  const html = marked.parse(content, { async: false, breaks: true }) as string
+  const withCitationRefs = content.replace(
+    /\[资料(\d+)\]/g,
+    '<sup class="citation-ref" data-ref="$1" role="button" tabindex="0">[$1]</sup>'
+  )
+  const html = marked.parse(withCitationRefs, { async: false, breaks: true }) as string
   return DOMPurify.sanitize(html)
+}
+
+/** 点击正文里的 `[资料N]`（渲染为 `.citation-ref`）时，滚动到同一条消息下方对应的
+ * 引用卡片并短暂高亮，帮助核对出处；点击其他内容不做任何处理。 */
+function handleCitationClick(event: MouseEvent) {
+  const target = (event.target as HTMLElement | null)?.closest('.citation-ref')
+  if (!target) return
+  const ref = target.getAttribute('data-ref')
+  if (!ref) return
+  const messageArticle = target.closest('.message')
+  const card = messageArticle?.querySelector(`.citation-card[data-index="${ref}"]`)
+  if (!(card instanceof HTMLElement)) return
+  card.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  card.classList.add('citation-card-highlighted')
+  window.setTimeout(() => card.classList.remove('citation-card-highlighted'), 1600)
 }
 
 const canSend = computed(() => !!props.kbId && !!question.value.trim() && !sending.value && sessionReady.value)
@@ -329,11 +352,17 @@ watch(
               v-if="message.role === 'assistant' && message.content"
               class="message-content message-content-markdown"
               v-html="renderMarkdown(message.content)"
+              @click="handleCitationClick"
             />
             <p v-else class="message-content">{{ message.content || (sending ? '正在生成…' : '') }}</p>
             <div v-if="message.citations?.length" class="citations">
               <p class="citation-title">参考来源</p>
-              <article v-for="(citation, index) in message.citations" :key="`${citation.documentId}-${index}`" class="citation-card">
+              <article
+                v-for="(citation, index) in message.citations"
+                :key="`${citation.documentId}-${index}`"
+                :data-index="index + 1"
+                class="citation-card"
+              >
                 <strong>[{{ index + 1 }}] {{ citation.documentName || '文档不可访问' }}</strong>
                 <span v-if="citationLocation(citation)" class="citation-location">{{ citationLocation(citation) }}</span>
                 <p>{{ citation.snippet }}</p>
@@ -408,9 +437,28 @@ watch(
 .message-content-markdown :deep(h2),
 .message-content-markdown :deep(h3) { margin: 10px 0 6px; font-size: 1.05em; }
 .message-content-markdown :deep(a) { color: var(--el-color-primary); }
+.message-content-markdown :deep(.citation-ref) {
+  color: var(--el-color-primary);
+  cursor: pointer;
+  font-weight: 600;
+  padding: 0 1px;
+}
+.message-content-markdown :deep(.citation-ref:hover) { text-decoration: underline; }
 .citations { margin-top: 10px; border-top: 1px dashed var(--el-border-color); padding-top: 8px; }
 .citation-title { margin: 0 0 7px; color: var(--el-text-color-secondary); font-size: 12px; }
-.citation-card { margin: 6px 0; padding: 8px; border-radius: 5px; background: var(--brand-surface-soft); border: 1px solid var(--brand-border-soft); font-size: 13px; }
+.citation-card {
+  margin: 6px 0;
+  padding: 8px;
+  border-radius: 5px;
+  background: var(--brand-surface-soft);
+  border: 1px solid var(--brand-border-soft);
+  font-size: 13px;
+  transition: background-color 0.3s ease, border-color 0.3s ease;
+}
+.citation-card-highlighted {
+  background: var(--el-color-primary-light-8);
+  border-color: var(--el-color-primary-light-5);
+}
 .citation-card strong, .citation-card span, .citation-card small { display: block; }
 .citation-card p { margin: 5px 0; white-space: pre-wrap; }
 .citation-location, .citation-card small { color: var(--el-text-color-secondary); }
