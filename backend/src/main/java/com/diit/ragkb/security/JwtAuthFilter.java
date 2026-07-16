@@ -71,6 +71,23 @@ public class JwtAuthFilter extends OncePerRequestFilter {
                 || path.equals("/actuator/prometheus");
     }
 
+    /**
+     * {@code OncePerRequestFilter} 默认在 Servlet 异步补发（ASYNC dispatch）时跳过本过滤器
+     * （{@code shouldNotFilterAsyncDispatch()} 默认 true）——这个默认值是为 session 态认证设计的，
+     * 那种场景下 {@code SecurityContextRepository} 会在每次 dispatch 时从 session 里重新装载
+     * Authentication，不需要过滤器重复跑。但本项目是无状态 JWT 认证，没有这层持久化：
+     * SseEmitter 流式问答控制器方法一返回，容器就已经完成本次 REQUEST dispatch（哪怕后台生成
+     * 还没跑完），真正的响应收尾发生在后续的 ASYNC dispatch 里；如果本过滤器在那次 dispatch 上
+     * 被跳过，SecurityContextHolder 里就没有 Authentication，下游 AuthorizationFilter
+     * 会直接拒绝，导致 SSE 响应的最终关闭失败（响应已提交、异常无法被正常处理，浏览器收不到
+     * 流结束信号，前端卡在"生成中"）。返回 false 让本过滤器在 ASYNC dispatch 时也重新校验一遍
+     * （复用同一个请求头，逻辑幂等，代价是多一次 Redis/DB 查询）。
+     */
+    @Override
+    protected boolean shouldNotFilterAsyncDispatch() {
+        return false;
+    }
+
     /** 是否是免租户上下文但需 JWT 的端点(如改密) */
     private boolean isAuthOnlyEndpoint(HttpServletRequest request) {
         return request.getRequestURI().equals("/api/v1/auth/change-password");
