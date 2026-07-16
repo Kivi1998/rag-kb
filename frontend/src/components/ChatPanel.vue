@@ -122,10 +122,13 @@ function handleCreateFromSidebar() {
   void startNewConversation()
 }
 
-function handleSessionDeleted(deletedId: string) {
+async function handleSessionDeleted(deletedId: string) {
   if (deletedId === sessionId.value) {
     cancel()
-    void startNewConversation()
+    await startNewConversation()
+    // 新会话此时还不在侧边栏已加载的列表里（新建对话按钮走的是自身 create() 里的 refresh，
+    // 这里是被动触发，需要单独刷新），否则用户会看到侧边栏没有高亮项、也找不到刚新建的这条。
+    void historySidebar.value?.refresh()
   }
 }
 
