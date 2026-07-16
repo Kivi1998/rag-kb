@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { ref } from 'vue'
-import { ArrowLeftBold, ArrowRightBold, Delete, Plus } from '@element-plus/icons-vue'
+import { Delete, Plus } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useAuthStore } from '@/stores/authStore'
 import { deleteSession, listSessions } from '@/api/queryApi'
+import SidebarToggleIcon from '@/components/icons/SidebarToggleIcon.vue'
 import type { ChatSessionSummary } from '@/types/query'
 
 const props = defineProps<{ kbId: string; activeSessionId: string | null }>()
@@ -79,7 +80,7 @@ defineExpose({ refresh })
       :aria-label="expanded ? '收起历史对话' : '展开历史对话'"
       @click="toggle"
     >
-      <el-icon><component :is="expanded ? ArrowLeftBold : ArrowRightBold" /></el-icon>
+      <el-icon><SidebarToggleIcon /></el-icon>
     </button>
     <div v-if="expanded" class="panel">
       <div class="panel-header">
