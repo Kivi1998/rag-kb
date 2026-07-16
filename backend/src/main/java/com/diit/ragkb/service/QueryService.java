@@ -5,12 +5,15 @@ import com.diit.ragkb.ragcore.audit.QueryAuditSnapshot;
 import com.diit.ragkb.ragcore.conversation.ConversationMemoryOrchestrator;
 import com.diit.ragkb.ragcore.conversation.MemoryContext;
 import com.diit.ragkb.ragcore.generation.AnswerGenerator;
+import com.diit.ragkb.ragcore.generation.AnswerSelfChecker;
 import com.diit.ragkb.ragcore.generation.CitationBuilder;
 import com.diit.ragkb.ragcore.generation.FactVerificationGate;
 import com.diit.ragkb.ragcore.generation.GenerationMetrics;
+import com.diit.ragkb.ragcore.generation.SelfCheckResult;
 import com.diit.ragkb.ragcore.model.Citation;
 import com.diit.ragkb.ragcore.model.QueryEvent;
 import com.diit.ragkb.ragcore.model.RetrievedChunk;
+import com.diit.ragkb.ragcore.rerank.RerankerClient;
 import com.diit.ragkb.ragcore.retrieval.RetrievalOptions;
 import com.diit.ragkb.ragcore.retrieval.RetrievalResult;
 import com.diit.ragkb.ragcore.retrieval.Retriever;
@@ -37,17 +40,20 @@ public class QueryService {
     private final KnowledgeDocumentRepository documentRepository;
     private final ObjectProvider<ChatSessionService> chatSessionServiceProvider;
     private final ObjectProvider<ConversationMemoryOrchestrator> memoryOrchestratorProvider;
+    private final ObjectProvider<RerankerClient> rerankerProvider;
 
     public QueryService(Retriever retriever, AnswerGenerator answerGenerator, KnowledgeBaseService knowledgeBaseService,
                         KnowledgeDocumentRepository documentRepository,
                         ObjectProvider<ChatSessionService> chatSessionServiceProvider,
-                        ObjectProvider<ConversationMemoryOrchestrator> memoryOrchestratorProvider) {
+                        ObjectProvider<ConversationMemoryOrchestrator> memoryOrchestratorProvider,
+                        ObjectProvider<RerankerClient> rerankerProvider) {
         this.retriever = retriever;
         this.answerGenerator = answerGenerator;
         this.knowledgeBaseService = knowledgeBaseService;
         this.documentRepository = documentRepository;
         this.chatSessionServiceProvider = chatSessionServiceProvider;
         this.memoryOrchestratorProvider = memoryOrchestratorProvider;
+        this.rerankerProvider = rerankerProvider;
     }
 
     public PreparedQuery prepare(UUID knowledgeBaseId, UUID sessionId, String question) {
@@ -112,6 +118,9 @@ public class QueryService {
         GenerationMetrics metrics = gate.refusedByFactVerification()
                 ? rawMetrics.withFactVerificationRefusalReason("NO_RETRIEVAL")
                 : rawMetrics;
+        if (!gate.refusedByFactVerification()) {
+            runSelfCheck(answerBuilder.toString(), query.citations(), eventConsumer);
+        }
         ChatSessionService chatSessionService = chatSessionServiceProvider.getIfAvailable();
         if (chatSessionService != null) {
             // 会话标题只依赖问题文本，与本轮是否被事实核验拒答无关（纯 Postgres 关注点）。
@@ -125,6 +134,21 @@ public class QueryService {
                     query.sessionId(), query.question(), answerBuilder.toString());
         }
         return metrics;
+    }
+
+    /**
+     * 生成后自检：独立于生成模型之外，核查正文是否有资料支撑；不影响审计状态与会话记忆，
+     * 只是附加的质量提醒。Reranker 未配置时直接跳过（fail-open，与 Reranker 调用异常时的行为一致）。
+     */
+    private void runSelfCheck(String answerText, List<Citation> citations, Consumer<QueryEvent> eventConsumer) {
+        RerankerClient reranker = rerankerProvider.getIfAvailable();
+        if (reranker == null) {
+            return;
+        }
+        SelfCheckResult result = new AnswerSelfChecker(reranker).check(answerText, citations);
+        if (result.hasUnsupportedClaims()) {
+            eventConsumer.accept(QueryEvent.selfCheckWarning(result.buildWarningMessage()));
+        }
     }
 
     private UUID requireOrganizationId() {

@@ -160,6 +160,38 @@ class HybridRetrieverTest {
     }
 
     @Test
+    void filtersOutLowScoreCandidatesEvenWhenNotRankedFirst() {
+        Chunk high1 = chunk("high-1");
+        Chunk low = chunk("low-credibility");
+        Chunk high2 = chunk("high-2");
+        HybridCandidateSource source = new HybridCandidateSource() {
+            @Override public List<RetrievedChunk> searchBm25(SearchRequest request) {
+                return List.of(new RetrievedChunk(high1, 1, null, null, null, 1.0),
+                        new RetrievedChunk(low, 2, null, null, null, 0.9),
+                        new RetrievedChunk(high2, 3, null, null, null, 0.8));
+            }
+            @Override public List<RetrievedChunk> searchKnn(VectorSearchRequest request) { return List.of(); }
+        };
+        EmbeddingClient embedding = texts -> new EmbeddingResult("test", List.of(List.of(0.1f, 0.2f)));
+        RerankerClient reranker3 = (query, candidates, topK) -> candidates.stream()
+                .map(c -> new RetrievedChunk(c.chunk(), c.bm25Rank(), c.vectorRank(), c.rrfScore(),
+                        scoreFor(c.chunk().id()), scoreFor(c.chunk().id())))
+                .toList();
+        @SuppressWarnings("unchecked") ObjectProvider<RerankerClient> reranker = mock(ObjectProvider.class);
+        when(reranker.getIfAvailable()).thenReturn(reranker3);
+
+        RetrievalResult result = new HybridRetriever(source, embedding, reranker)
+                .retrieveWithDecision(UUID.randomUUID(), UUID.randomUUID(), "q", new RetrievalOptions(30, 3, true));
+
+        assertTrue(!result.refused());
+        assertEquals(List.of("high-1", "high-2"), result.chunks().stream().map(c -> c.chunk().id()).toList());
+    }
+
+    private double scoreFor(String chunkId) {
+        return "low-credibility".equals(chunkId) ? 0.02 : 0.9;
+    }
+
+    @Test
     void rerankFallbackSkipsRerankScoreGate() {
         Chunk chunk = chunk("only");
         HybridCandidateSource source = new HybridCandidateSource() {

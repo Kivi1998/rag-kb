@@ -42,4 +42,12 @@ class PromptAssemblerTest {
         assertTrue(prompt.contains("不是真实知识库内容"));
         assertTrue(prompt.contains("JWT 黑名单存的是 Redis"));
     }
+
+    @Test
+    void systemPromptIncludesMultiPassageFusionGuidance() {
+        String prompt = assembler.systemPrompt();
+
+        assertTrue(prompt.contains("已按相关性从高到低排序"));
+        assertTrue(prompt.contains("优先采信排序更靠前、相关性更高的资料"));
+    }
 }

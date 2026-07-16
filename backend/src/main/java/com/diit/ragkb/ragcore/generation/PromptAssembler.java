@@ -26,6 +26,10 @@ public class PromptAssembler {
             + "不写多余的背景铺垫；面向内部同事，默认对方有基础技术背景，但不熟悉本知识库涉及的具体项目细节，"
             + "避免不必要的术语堆砌。";
 
+    /** 多段融合：参考资料已按相关性降序排列，模型需要知道矛盾时如何取舍，而不是简单罗列所有说法。 */
+    private static final String MULTI_PASSAGE_FUSION = "参考资料已按相关性从高到低排序；"
+            + "如果多条资料对同一问题的表述有出入，优先采信排序更靠前、相关性更高的资料，不要简单罗列矛盾说法。";
+
     /**
      * few-shot 示例：演示"先输出 found 判断行、再输出正文并标注 [资料N]"这套格式，
      * 覆盖 found:true/false 两种情形。示例本身不是真实知识库内容，必须明确声明，
@@ -52,7 +56,8 @@ public class PromptAssembler {
      * 只影响生成风格/关注点，不改变"只依据参考资料回答"这条硬约束。
      */
     public String systemPrompt(String additionalContext) {
-        String base = BASE_INSTRUCTION + "\n\n" + LENGTH_AND_TONE + "\n\n" + FEW_SHOT_EXAMPLES;
+        String base = BASE_INSTRUCTION + "\n\n" + LENGTH_AND_TONE + "\n\n" + MULTI_PASSAGE_FUSION + "\n\n"
+                + FEW_SHOT_EXAMPLES;
         if (additionalContext == null || additionalContext.isBlank()) {
             return base;
         }

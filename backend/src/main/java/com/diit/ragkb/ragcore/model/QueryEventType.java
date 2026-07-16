@@ -5,6 +5,8 @@ public enum QueryEventType {
     CHUNK("chunk"),
     SOURCE("source"),
     REFUSAL("refusal"),
+    /** 生成后自检发现疑似未支撑断言时的提醒；可选，不影响其他事件的推送。 */
+    SELF_CHECK_WARNING("self_check_warning"),
     DONE("done"),
     ERROR("error");
 

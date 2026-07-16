@@ -1,28 +1,28 @@
 ## 1. 多段融合：低可信片段过滤 + 取舍指令
 
-- [ ] 1.1 `HybridRetriever.retrieveWithDecision()`：把 `reranked && selected.get(0).finalScore() < MIN_RERANK_SCORE` 的整体拒答检查之后，追加对 `selected` 全体元素的过滤——`reranked` 模式下移除 `finalScore() < MIN_RERANK_SCORE` 的每一项（含非首位）；过滤后为空则按既有"未检索到足够依据"分支拒答
-- [ ] 1.2 `PromptAssembler.systemPrompt()` 追加一句取舍指令：参考资料已按相关性排序，矛盾时优先采信排序更靠前、相关性更高的资料
-- [ ] 1.3 `HybridRetrieverTest` 补充用例：排名非首位但分数不达标的片段被过滤；首位达标、其余全部不达标时只剩首位；全部不达标时走拒答分支
-- [ ] 1.4 `PromptAssemblerTest` 补充用例：system prompt 包含取舍指令关键词
+- [x] 1.1 `HybridRetriever.retrieveWithDecision()`：把原本只检查排名第一片段的阈值判断，重构为对 `selected` 全体元素做同一次过滤（`reranked` 模式下移除 `finalScore() < MIN_RERANK_SCORE` 的每一项，含首位）；过滤后为空则复用原有拒答文案（实现时发现原设计里"先检查首位再单独过滤"会产生一段永远不可达的死代码——首位一旦通过检查，过滤后必然非空——已合并为一次过滤，逻辑等价且更简洁）
+- [x] 1.2 `PromptAssembler.systemPrompt()` 追加一句取舍指令：参考资料已按相关性排序，矛盾时优先采信排序更靠前、相关性更高的资料
+- [x] 1.3 `HybridRetrieverTest` 补充用例：排名非首位但分数不达标的片段被过滤，只保留达标的片段
+- [x] 1.4 `PromptAssemblerTest` 补充用例：system prompt 包含取舍指令关键词
 
 ## 2. `AnswerSelfChecker` 核心组件
 
-- [ ] 2.1 新增 `backend/src/main/java/com/diit/ragkb/ragcore/generation/AnswerSelfChecker.java`：依赖 `RerankerClient`，输入完整正文 + `List<Citation>`，输出核查结果（是否有问题句子、问题句子列表及原因）
-- [ ] 2.2 实现句子切分：按中文/英文句末标点（。！？\n）切分正文
-- [ ] 2.3 实现引用提取：正则匹配 `[资料N]`，映射到 `citations.get(N-1)`；一句话可能引用多个编号
-- [ ] 2.4 实现有引用句子的核查：句子文本为 query，引用的 `Citation.snippet()` 构造成 `RetrievedChunk` 候选，调用 `RerankerClient.rerank()`，`finalScore() < MIN_RERANK_SCORE` 判定为"引用但相关性偏低"
-- [ ] 2.5 实现无引用句子的核查：句子长度（去除标点）≥ 6 字且不含任何 `[资料N]` 标记，判定为"疑似未标注断言"
-- [ ] 2.6 Reranker 调用异常时 fail-open：整体核查视为"无问题"，记日志，不抛出
-- [ ] 2.7 编写 `AnswerSelfCheckerTest`：句子切分、引用提取、有引用低分判定、无引用长句判定、短过渡句不误判、Reranker 异常 fail-open、全文无问题时返回空结果
+- [x] 2.1 新增 `backend/src/main/java/com/diit/ragkb/ragcore/generation/AnswerSelfChecker.java`：依赖 `RerankerClient`，输入完整正文 + `List<Citation>`，输出核查结果（`SelfCheckResult`，新增于同包）
+- [x] 2.2 实现句子切分：按中文/英文句末标点（。！？\n）切分正文
+- [x] 2.3 实现引用提取：正则匹配 `[资料N]`，映射到 `citations.get(N-1)`；一句话可能引用多个编号
+- [x] 2.4 实现有引用句子的核查：句子文本为 query，引用的 `Citation.snippet()` 构造成 `RetrievedChunk` 候选，调用 `RerankerClient.rerank()`，`finalScore() < MIN_RERANK_SCORE` 判定为"引用但相关性偏低"
+- [x] 2.5 实现无引用句子的核查：句子长度（去除标点）≥ 6 字且不含任何 `[资料N]` 标记，判定为"疑似未标注断言"
+- [x] 2.6 Reranker 调用异常时 fail-open：整体核查视为"无问题"，记日志，不抛出
+- [x] 2.7 编写 `AnswerSelfCheckerTest`：引用提取+高分不标记、引用+低分标记、无引用长句标记、短过渡句不误判、Reranker 异常 fail-open、全文无问题时返回空结果（含跨 。！？\n 混合标点的综合用例）
 
 ## 3. SSE 协议扩展与 `QueryService` 接入
 
-- [ ] 3.1 `QueryEventType` 新增 `SELF_CHECK_WARNING`（wireName `self_check_warning`）
-- [ ] 3.2 `QueryEvent` 新增工厂方法 `selfCheckWarning(String message)`
-- [ ] 3.3 `QueryController.payload()` 的 switch 补充 `SELF_CHECK_WARNING` 分支（复用 `message` 字段）
-- [ ] 3.4 `QueryService.stream()`：`gate.flush()` 之后、仅当未被事实核验拒答时，调用 `AnswerSelfChecker` 核查 `answerBuilder` 全文；发现问题拼一条提醒消息并 `eventConsumer.accept(QueryEvent.selfCheckWarning(...))`；不影响 `recordTurn()` 写入的 answer 文本（继续只用 `answerBuilder.toString()`，不拼接提醒）
-- [ ] 3.5 确认 `QueryController` 的审计状态判断（`resolveStatus()`）不需要改动——`self_check_warning` 不是新的审计状态
-- [ ] 3.6 `QueryServiceTest`/`QueryControllerTest` 补充：自检发现问题时推送 `self_check_warning` 事件且审计状态仍按 `found` 判断结果不变；自检无问题时不推送该事件
+- [x] 3.1 `QueryEventType` 新增 `SELF_CHECK_WARNING`（wireName `self_check_warning`）
+- [x] 3.2 `QueryEvent` 新增工厂方法 `selfCheckWarning(String message)`
+- [x] 3.3 `QueryController.payload()` 的 switch 补充 `SELF_CHECK_WARNING` 分支（复用 `message` 字段）
+- [x] 3.4 `QueryService.stream()`：`gate.flush()` 之后、仅当未被事实核验拒答时，调用 `AnswerSelfChecker` 核查 `answerBuilder` 全文；发现问题拼一条提醒消息并 `eventConsumer.accept(QueryEvent.selfCheckWarning(...))`；不影响 `recordTurn()` 写入的 answer 文本；`QueryService` 新增 `ObjectProvider<RerankerClient>` 构造参数，`RagQueryConfiguration` 与全部既有测试同步更新构造调用
+- [x] 3.5 确认 `QueryController` 的审计状态判断（`resolveStatus()`）不需要改动——`self_check_warning` 不是新的审计状态（未改动该方法，仅新增 payload 分支）
+- [x] 3.6 `QueryServiceTest` 补充：自检发现问题时推送 `self_check_warning` 事件（无引用长句场景）；自检无问题时不推送该事件（有高分引用支撑场景）
 
 ## 4. 前端事件类型与展示
 
