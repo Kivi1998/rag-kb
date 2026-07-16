@@ -57,7 +57,7 @@ openspec/        需求规格与变更记录
 
 检索问答全链路（真实 Xinference Embedding/Rerank + DeepSeek 生成模型）已完成端到端人工验证：上传 → 解析 → 切块 → 向量化 → ES 索引 → BM25+kNN+RRF → Rerank → SSE 问答 → 引用，全部走通。
 
-切分与检索质量已完成正式离线评测：150 题人工标注评估集（`eval/datasets/eval-set-v2.jsonl`，26 篇本科毕设真实文档 / 885 个 V3 切块）× 产品完整混合检索链（BM25 + bge-m3 kNN + RRF + bge-reranker-v2-m3，含已校准的 rerank 分数拒答门槛），实测 **Recall@1 = 0.816、Recall@5 = 0.904、MRR = 0.849、拒答 F1 = 0.564**（硅基流动在线模型，报告见 `eval/reports/eval-v2-calibrated-20260714.md`）。拒答门槛对"检索真找不到相关内容"（OUT_OF_SCOPE/LOW_CONFIDENCE）有效，对"主题相关但事实缺失"（NO_RETRIEVAL）和"内容合规"（SAFETY）类拒答存在机制性局限，需独立方案（详见指南与 TODOS）。评估集为 AI 单标注人构建，业务专家盲标复核待补。方法论与完整状态见 [解析-切块-评估指南](docs/解析-切块-评估指南.md)。
+切分与检索质量已完成正式离线评测：150 题人工标注评估集（`eval/datasets/eval-set-v2.jsonl`，26 篇本科毕设真实文档 / 885 个 V3 切块）× 产品完整混合检索链（BM25 + bge-m3 kNN + RRF + bge-reranker-v2-m3，含已校准的 rerank 分数拒答门槛），实测 **Recall@1 = 0.816、Recall@5 = 0.904、MRR = 0.849、拒答 F1 = 0.564**（硅基流动在线模型，报告见 `eval/reports/eval-v2-calibrated-20260714.md`）。拒答门槛对"检索真找不到相关内容"（OUT_OF_SCOPE/LOW_CONFIDENCE）有效；"主题相关但事实缺失"（NO_RETRIEVAL）类已通过生成阶段事实核验补上（8/8 命中，见第 9 节）；"内容合规"（SAFETY）类拒答仍无方案，需独立内容安全分类器（详见 TODOS）。评估集为 AI 单标注人构建，业务专家盲标复核待补。方法论与完整状态见 [解析-切块-评估指南](docs/解析-切块-评估指南.md)。
 
 以下仍需在目标环境单独验收：日均 5000 次查询容量、拒答/降级/跨组织隔离的自动化用例、生产网络 TLS/CORS 和 24 小时稳定性。
 
@@ -92,7 +92,7 @@ openspec/        需求规格与变更记录
 
 ### 6. Rerank 与检索优化
 
-- 文档：[总体架构](docs/architecture.md)决策 7（拒答阈值 `MIN_RERANK_SCORE=0.06` 的实验方法与结论摘要）、[拒答阈值校准报告](eval/reports/refusal-threshold-calibration-20260714.md)（完整数据与阈值扫描表）、[复现脚本](eval/scripts/analyze_refusal_threshold.py)、[候选池大小调优实验](eval/reports/candidate-pool-size-tuning-20260715.md)（candidateLimit 从 50 降到 10/20/30 的 Recall/延迟实测对比）、[延后事项清单](TODOS.md)（RRF 融合动态权重等待办）
+- 文档：[总体架构](docs/architecture.md)决策 7（拒答阈值 `MIN_RERANK_SCORE=0.06` 的实验方法与结论摘要）、决策 9（该阈值扩展到全部候选片段的低可信片段过滤，2026-07-16）、[拒答阈值校准报告](eval/reports/refusal-threshold-calibration-20260714.md)（完整数据与阈值扫描表）、[复现脚本](eval/scripts/analyze_refusal_threshold.py)、[候选池大小调优实验](eval/reports/candidate-pool-size-tuning-20260715.md)（candidateLimit 从 50 降到 10/20/30 的 Recall/延迟实测对比）、[延后事项清单](TODOS.md)（RRF 融合动态权重等待办）
 - 代码：[`RerankerClient.java`](backend/src/main/java/com/diit/ragkb/ragcore/rerank/RerankerClient.java)（接口）、[`OpenAiCompatibleRerankerClient.java`](backend/src/main/java/com/diit/ragkb/ragcore/rerank/OpenAiCompatibleRerankerClient.java)（Cross-Encoder 兼容实现，当前对接硅基流动 `BAAI/bge-reranker-v2-m3`）
 
 ### 7. 多轮对话与记忆管理
@@ -108,6 +108,13 @@ openspec/        需求规格与变更记录
 - 背景：多轮对话记忆功能上线后，前端此前每次挂载/刷新都无条件新建会话、不消费已有的会话生命周期与长期存档能力，导致"刷新即清空对话"、也没有历史对话入口；本能力补齐前端消费侧
 - 代码（后端）：`ChatSessionService.listSessions/deleteSession`（新增 `GET`/`DELETE .../sessions` 接口；标题为首条用户消息前 30 字，写入时算好存 `chat_session.title`，避免列表查询 N+1 现取）、`MemoryIndex.deleteBySession`/`ChatMessageRepository.deleteBySessionIdAndOrganizationIdAndMemberId`/`ConversationStore.deleteSession`（硬删除级联清理 ES→Mongo/Redis→Postgres，不影响 `memory_items` 长期画像）
 - 代码（前端）：[`ChatHistorySidebar.vue`](frontend/src/components/ChatHistorySidebar.vue)（可折叠历史侧边栏：列表/切换/删除/新建对话）、`ChatPanel.vue` 用 `localStorage`（`rag-kb:last-session:{kbId}`）记录当前会话，刷新/重新进入时优先恢复历史而非总是新建，恢复失败（如已删除）时自动退回新建
+
+### 9. 生成阶段防幻觉：事实核验与自检
+
+- 文档：[总体架构](docs/architecture.md) 决策 8（NO_RETRIEVAL 事实核验）、决策 9（多段融合与生成后自检）；[NO_RETRIEVAL brainstorming 设计文档](docs/superpowers/specs/2026-07-16-no-retrieval-fact-verification-design.md)、[多段融合与自检 brainstorming 设计文档](docs/superpowers/specs/2026-07-16-multi-passage-fusion-and-self-check-design.md)；OpenSpec change 已归档：`openspec/changes/archive/2026-07-16-no-retrieval-fact-verification/`、`openspec/changes/archive/2026-07-16-multi-passage-fusion-and-self-check/`
+- 背景：第 6 节的 rerank 拒答阈值只对"检索真找不到相关内容"有效，对"检索到的内容主题相关但没具体答案"（NO_RETRIEVAL）与"断言没有资料支撑"两类幻觉风险无能为力，需要生成阶段补两道防线
+- 代码：[`FactVerificationGate.java`](backend/src/main/java/com/diit/ragkb/ragcore/generation/FactVerificationGate.java)（生成模型先输出 `{"found": true|false}` 判断行，`found:false` 转固定话术拒答，`SOURCE` 事件延迟到 `found:true` 后发送）、[`AnswerSelfChecker.java`](backend/src/main/java/com/diit/ragkb/ragcore/generation/AnswerSelfChecker.java)（生成后复用 Reranker 逐句核查资料支撑，新增 `self_check_warning` SSE 事件）
+- **真实回归验证与已知局限（如实记录，不美化）**：[NO_RETRIEVAL 验证报告](eval/reports/no-retrieval-fact-verification-validation-20260716.md) 8/8 命中；[多段融合与自检验证报告](eval/reports/multi-passage-fusion-and-self-check-validation-20260716.md) 显示自检复用的 `MIN_RERANK_SCORE=0.06` 阈值只能拦住"完全文不对题"的编造，对"部分相关的编造"基本拦不住（6 个真实样本 4/6 命中），阈值需要专门校准、本次未做，详见 TODOS
 
 ### 评测框架（跨模块）
 

@@ -88,7 +88,20 @@ MongoDB（会话消息长期存档 + 用户画像，只服务记忆子系统）/
   2. 按人工标注的 `expect_refusal` 把 150 题分成"应拒答"（25 道）与"应回答"（125 道）两组，观察两组 rerank 分数的分布差异；
   3. 用 `analyze_refusal_threshold.py` 对候选阈值 t（0 到 1，步长 0.005）逐个计算"rerank 分数 < t 就拒答"规则下的精确率/召回率/F1，选 F1 最优点；
 - **结果**：t=0.06 时 F1=0.564 全局最优，命中 11/25 道拒答题，代价是误伤 3/125 道应答题（均为语料信息密度低、细节湮没在长文档里的冷门题，如"作者单位邮编""开发机显卡型号"）；
-- **已知机制性局限（不是调参能解决的）**：按拒答子类型（`refusal_reason`）细分后发现，t=0.06 只对 **LOW_CONFIDENCE**（4/4 全中）和 **OUT_OF_SCOPE**（10 中 9）有效；**NO_RETRIEVAL**（如"随机数种子设的多少"——检索到的 chunk 主题对了，具体数值恰好没写）与 **SAFETY**（检索到的内容本身没问题，但组织后外发涉及合规）两类的 rerank 分数普遍很高（NO_RETRIEVAL 8 道题 0.178–0.921，SAFETY 甚至有 0.972），reranker 衡量的是"主题相关性"而非"该问题的具体答案是否存在于此内容"，天花板明确。这两类需要生成阶段的事实核验/独立内容安全分类器，单一检索分数阈值解决不了（NO_RETRIEVAL 的事实核验机制正在设计，SAFETY 暂不在本次范围内）。
+- **已知机制性局限（不是调参能解决的）**：按拒答子类型（`refusal_reason`）细分后发现，t=0.06 只对 **LOW_CONFIDENCE**（4/4 全中）和 **OUT_OF_SCOPE**（10 中 9）有效；**NO_RETRIEVAL**（如"随机数种子设的多少"——检索到的 chunk 主题对了，具体数值恰好没写）与 **SAFETY**（检索到的内容本身没问题，但组织后外发涉及合规）两类的 rerank 分数普遍很高（NO_RETRIEVAL 8 道题 0.178–0.921，SAFETY 甚至有 0.972），reranker 衡量的是"主题相关性"而非"该问题的具体答案是否存在于此内容"，天花板明确。这两类需要生成阶段的事实核验/独立内容安全分类器，单一检索分数阈值解决不了——**NO_RETRIEVAL 的事实核验机制见决策 8**，SAFETY 仍不在范围内。
+
+### 决策 8：NO_RETRIEVAL 拒答靠生成模型自判，不是独立核验调用
+
+- **方案**（详见 [brainstorming 设计文档](superpowers/specs/2026-07-16-no-retrieval-fact-verification-design.md)）：`PromptAssembler` 要求生成模型在正文之前先输出一行 `{"found": true|false}`，判断参考资料是否包含问题的具体答案；新增 `FactVerificationGate`（`ragcore/generation/`）拦截解析这一行，`found:false` 时丢弃已缓冲内容、转为固定话术拒答（"未在当前知识库中检索到该问题的具体答案"），不新增一次独立的核验 LLM 调用（成本/延迟更低，复用同一次生成请求的结构化输出）；
+- **关键架构联动**：`SOURCE` 引用事件的发送时机从"生成开始前"推迟到"`FactVerificationGate` 确认 `found:true` 之后"，避免"已经展示引用来源却又拒答"的自相矛盾；
+- **审计正确性**：`GenerationMetrics` 新增 `factVerificationRefusalReason` 字段，`QueryController` 的审计状态判断同时检查检索阶段与生成阶段两种拒答来源——生成阶段拒答此前会被误记为 `COMPLETED`（因为审计快照在 `prepare()` 阶段就已固化），这是实现过程中发现并修复的问题；
+- **真实回归验证**（`eval/reports/no-retrieval-fact-verification-validation-20260716.md`）：8 道 NO_RETRIEVAL 标注题命中拒答 8/8；25 道抽样应答题里 2 道被误判拒答，排查后确认根因是检索召回本身没找到该找的 chunk（与本机制无关）。
+
+### 决策 9：多段融合与生成后自检——复用 Reranker，而非新增 LLM 调用或依赖生成模型自查
+
+- **多段融合**（详见 [brainstorming 设计文档](superpowers/specs/2026-07-16-multi-passage-fusion-and-self-check-design.md)）：`HybridRetriever` 的 `MIN_RERANK_SCORE` 阈值检查从只看排名第一的片段，扩展到全部候选片段——排名靠后但分数不达标的片段直接过滤，不进生成 prompt 也不出现在参考来源里；`PromptAssembler` 追加一句取舍指令，片段矛盾时优先采信排序更靠前的资料；
+- **生成后自检（防幻觉"两道闸"的第二道）**：新增 `AnswerSelfChecker`，复用现有 Reranker 对生成正文逐句核查——带 `[资料N]` 标记的句子核查该句与其引用资料的语义相关性，没有任何引用标记的实质性句子直接判定为疑似未标注断言；核查方判定权衡上明确选择"独立于生成模型之外"（而非同一模型自查自己），因为让编造内容的同一个模型去检查自己有没有编造，说服力有限；
+- **已知局限（真实验证发现，未解决）**：`eval/reports/multi-passage-fusion-and-self-check-validation-20260716.md` 用真实语料构造的 6 条测试句子里，Reranker 复用的 `MIN_RERANK_SCORE=0.06` 阈值只能拦住"完全文不对题"的编造（分数低至 0.00003），对"部分相关的编造"（如张冠李戴到相邻主题，分数 0.15–0.53）基本拦不住，4/6 命中预期。机制方向正确但阈值不是为这个场景校准的，需要类似决策 7 那样规模的标注集才能负责任地重新定阈值，本次未做，留作后续。
 
 ## 四、当前重构边界
 

@@ -123,7 +123,8 @@ top1 分数低于阈值即拒答；139/139 后端测试通过，新增 3 个单�
 
 按预期收益排序的后续项：
 
-- **NO_RETRIEVAL 类拒答方案（最高优先，当前完全无解）**：需要生成阶段的事实核验——判断检索到的 chunk 是否真的陈述了被问及的具体数值/事实，而非仅主题相关。可能方向：生成后二次校验 prompt、或结构化字段抽取比对。
+- ~~**NO_RETRIEVAL 类拒答方案**~~ **已完成（2026-07-16，PR #17）**：生成模型自判 `{"found": true/false}` + `FactVerificationGate` 拦截解析，8/8 命中标注题，详见 `docs/architecture.md` 决策 8、`eval/reports/no-retrieval-fact-verification-validation-20260716.md`。
+- **自检阈值需要专门校准（新发现，2026-07-16，最高优先）**：`multi-passage-fusion-and-self-check`（PR #19）新增的 `AnswerSelfChecker` 复用 `MIN_RERANK_SCORE=0.06` 判断句子有没有资料支撑，真实验证（`eval/reports/multi-passage-fusion-and-self-check-validation-20260716.md`）显示这个阈值只能拦住"完全文不对题"的编造，对"部分相关的编造"（分数 0.15-0.53，共享表面词汇但断言内容是编的）基本拦不住，6 个样本只命中 4 个。需要类似 NO_RETRIEVAL 当初 150 题规模的"编造 vs 真实复述"标注集才能负责任地重新定阈值，当前 6 个样本不足以支撑校准。
 - **SAFETY 类拒答方案**：需要独立的内容安全/合规分类器（如是否涉及个人信息聚合外发），与检索相关性正交，rerank 分数天生管不了。
 - **业务专家盲标复核**：v2 为 AI 单标注人构建（锚点定位+人工复核），按标注指南 §6 第③步抽 30% 双人独立标注，Jaccard ≥ 0.8 后补齐验收门 6。
 - **ES 中文分析器**：`content_search` 仍是 standard analyzer 字级切分，加 IK/smartcn 并让 `heading_path` 参与召回，观察 module/config 短板类（Recall@5 0.77-0.83）能否抬升。
