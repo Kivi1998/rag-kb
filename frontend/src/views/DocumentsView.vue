@@ -13,20 +13,22 @@ const kbStore = useKbStore()
 const kbId = computed(() => route.params.kbId as string)
 const kb = computed(() => kbStore.kbs.find((item) => item.id === kbId.value))
 
-/** 路由参数变化（如从这个页面直接切到另一个知识库的文档页）时，同步 kbStore 的
- * 当前知识库，保持左侧列表高亮、以及"返回问答"回去时还是这个知识库。 */
-watch(
-  () => route.params.kbId,
-  () => {
-    if (kb.value) kbStore.selectedKbId = kb.value.id
-  },
-  { immediate: true }
-)
-
+/** 首次挂载时确保知识库列表已加载，再同步一次 kbStore 的当前知识库。 */
 onMounted(async () => {
   if (kbStore.kbs.length === 0) await kbStore.loadKbs()
   if (kb.value) kbStore.selectedKbId = kb.value.id
 })
+
+/** 路由参数变化（如从这个页面直接切到另一个知识库的文档页，组件实例被复用、不会
+ * 重新走 onMounted）时，同步 kbStore 的当前知识库，保持左侧列表高亮、以及
+ * "返回问答"回去时还是这个知识库。不设 immediate，避免和上面 onMounted 的首次
+ * 同步重复执行一次。 */
+watch(
+  () => route.params.kbId,
+  () => {
+    if (kb.value) kbStore.selectedKbId = kb.value.id
+  }
+)
 
 function backToWorkspace() {
   router.push({ name: 'kb' })
