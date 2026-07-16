@@ -24,6 +24,11 @@
 - **WHEN** 已认证成员请求不属于本组织或非本人创建的 `sessionId`
 - **THEN** 系统返回 HTTP 404，不返回任何该会话的消息内容
 
+#### Scenario: 跨知识库访问会话被拒
+
+- **WHEN** 已认证成员通过知识库 A 的 URL 路径（`kbId`）请求一个实际归属知识库 B 的 `sessionId`（即使该成员在组织内同时拥有 A、B 两个知识库的会话）
+- **THEN** 系统返回 HTTP 404，不返回任何该会话的消息内容（会话归属校验必须同时核对 `org_id`/`kb_id`/`member_id` 三者，缺一不可）
+
 ### Requirement: 短期记忆滑动窗口
 
 系统 SHALL 在检索前从 Redis 按 token 预算（默认 1000 token）取该会话最近的原始消息作为滑动窗口上下文；超出预算时，系统 SHALL 触发摘要压缩（调用 LLM 生成摘要替换最旧的消息），而非直接丢弃；标记为关键事实的消息 SHALL 始终保留原文，不参与摘要压缩。
@@ -130,7 +135,7 @@
 
 ### Requirement: 记忆数据的多租户隔离
 
-系统 SHALL 对会话、消息、画像条目的所有读写路径强制校验 `org_id`/`member_id`边界，禁止跨组织或跨成员访问。
+系统 SHALL 对会话、消息、画像条目的所有读写路径强制校验 `org_id`/`member_id` 边界（会话另需 `kb_id`），禁止跨组织、跨知识库或跨成员访问；MongoDB 层读取画像/消息文档时 SHALL 二次校验其 `org_id`/`member_id` 与调用方一致，不得完全依赖上游 Elasticsearch 过滤结果的正确性。
 
 #### Scenario: 跨成员画像隔离
 
@@ -141,3 +146,8 @@
 
 - **WHEN** 已认证成员尝试查询不属于本组织的会话消息
 - **THEN** 系统返回 HTTP 404，不泄露该会话是否存在
+
+#### Scenario: Elasticsearch 过滤失效时 MongoDB 层兜底拒绝
+
+- **WHEN** 因索引 bug、映射迁移等原因，Elasticsearch 语义检索返回了不属于当前调用方（`org_id`/`member_id` 不匹配）的 `memory_id`
+- **THEN** MongoDB 层读取该文档后二次校验发现租户不匹配，拒绝返回，不将该文档当作命中结果使用

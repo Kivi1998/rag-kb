@@ -77,13 +77,15 @@ rag-kb 现状（详见 `docs/superpowers/specs/2026-07-15-conversation-memory-de
 
 **为什么只做生成侧**：影响检索需要额外设计"画像内容如何映射到检索参数"的规则，复杂度和不确定性都更高（可能引入难以调试的"因为画像误导致检索范围收窄导致漏检"这类隐藏 bug）；只影响生成侧风险可控——画像判断错了，最多是回答风格不够贴合，不会造成检索质量的隐性下降。
 
+**2026-07-15 review 修复澄清**：`/review` 评审门发现 `ConversationMemoryOrchestrator.prepareContext()` 在画像检索时算好的 `resolvedQuestion` 向量被丢弃，导致 `QueryService.prepare()` 之后调用 `HybridRetriever.retrieveWithDecision()` 又对同一句 `resolvedQuestion` 重复调用一次 Embedding（每次问答多打一次 Embedding API）。修复方式是把这个向量通过 `MemoryContext.resolvedQuestionVector()` → `RetrievalOptions.precomputedQueryVector()` 带给检索阶段复用。**这只是同一段文本向量的复用/效率优化，不改变本决策**——复用的是"指代消解后的问题"本身的向量，不是画像内容，检索阶段的排序/过滤逻辑完全不变，画像内容依旧只出现在生成阶段的 System 上下文里。
+
 ## Risks / Trade-offs
 
 - **[风险] 新增两个数据库技术栈（Redis 新实例 + MongoDB）带来运维负担** → 缓解：严格限定 MongoDB 只服务本能力（不迁移任何现有 Postgres 业务表），`ConversationStore`/`MemoryItemStore` 接口化，未来若判断维护成本不划算，可以在不影响调用方的前提下换回纯 Postgres 实现
 - **[风险] 写直达策略下，每轮对话多两次同步写入（Redis+Mongo），增加请求延迟** → 缓解：当前规模下这个开销可忽略；`MemoryExtractor` 画像提炼保持异步，不在关键路径上增加延迟
 - **[风险] 指代消解/画像提炼都是额外的 LLM 调用，增加成本和延迟** → 缓解：指代消解仅在 `history` 非空时触发，且失败降级不阻断；画像提炼完全异步，不影响用户感知延迟
 - **[风险] 用户画像提炼可能产生不准确或过时的偏好判断，影响回答风格** → 缓解：遗忘机制保证过时画像自然衰减；画像只影响生成风格不影响检索正确性，即使误判也不会导致检索质量下降
-- **[风险] 跨租户数据泄露——会话/画像数据必须严格按 org_id/member_id 隔离** → 缓解：`chat_session` 复用现有 Hibernate `tenantFilter` 机制；MongoDB/ES 侧的查询在应用层强制携带 `org_id`/`member_id` 过滤，比照现有 `ElasticsearchHybridCandidateSource.tenantFilters()` 的强制过滤模式，配套安全测试覆盖跨租户访问被拒场景
+- **[风险] 跨租户数据泄露——会话/画像数据必须严格按 org_id/member_id（会话另需 kb_id）隔离** → 缓解：`chat_session` 复用现有 Hibernate `tenantFilter` 机制且 `ChatSessionRepository` 查询同时携带 `org_id`/`kb_id`/`member_id` 三重条件；MongoDB/ES 侧的查询在应用层强制携带 `org_id`/`member_id` 过滤，比照现有 `ElasticsearchHybridCandidateSource.tenantFilters()` 的强制过滤模式；MongoDB 层读回文档后二次比对租户字段，不完全信任上游 ES 过滤结果。**2026-07-15 review 修复记录**：首次实现时 `GET .../messages` 遗漏了 kb_id 校验（同组织同成员可跨 kb 读取会话），且配套的"跨租户测试"实际只断言了请求体包含过滤字段、未真正验证隔离效果——均已修复，现有 `ChatSessionServiceTest.touchSessionThrowsWhenSessionBelongsToDifferentKnowledgeBase`、`ElasticsearchMemoryIndexTest.searchSessionHistoryDoesNotLeakOtherOrganizationsSession`/`searchProfileItemsDoesNotLeakOtherMembersProfileWithinSameOrganization`、`MemoryItemStoreImplTest.findSimilarExistingRejectsCrossTenantDocumentEvenIfEsMatched`/`topKForGenerationFiltersOutCrossTenantDocuments` 是真正构造两个租户数据、验证互相不可见的负向用例。
 
 ## Migration Plan
 

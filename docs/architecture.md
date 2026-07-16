@@ -61,13 +61,16 @@ MongoDB（会话消息长期存档 + 用户画像，只服务记忆子系统）/
 
 - 所有检索请求先完成组织、知识库和角色校验；
 - Elasticsearch 查询由服务端强制注入 `org_id` 与 `kb_id` 过滤；
-- 跨组织访问按资源不存在处理，并作为自动化测试发布门禁。
+- 跨组织访问按资源不存在处理，并作为自动化测试发布门禁；
+- 会话生命周期（`chat_session`）额外强制 `kb_id` 归属校验（2026-07-15 review 修复：此前 `GET .../messages` 只校验 org/member，未核对 URL 里的 kbId 与会话真实归属 kb 是否一致，同组织同成员可跨 kb 读取对话历史）；
+- MongoDB 层（`ChatMessageRepository`/`MemoryItemStoreImpl`）不完全信任上游 Elasticsearch 过滤结果，读回文档后二次比对 `org_id`/`member_id`，作为纵深防御，防止未来 ES 过滤逻辑出 bug 时直接跨租户泄露数据。
 
 ### 决策 5：多轮对话记忆是学习性质的能力储备，非当前刚需
 
 - 短期记忆（滑动窗口+语义历史检索+摘要压缩）与长期记忆（用户画像+读时衰减遗忘机制）已实现，详见 [brainstorming 设计文档](superpowers/specs/2026-07-15-conversation-memory-design.md)；
 - 存储引入 Redis 专属实例（与 JWT 黑名单逻辑隔离）+ MongoDB（只服务本子系统），当前规模（单节点、日均 5000 次查询）本不需要这套复杂度，是为学习生产级架构、给未来用户规模增长预先建设；
-- 画像只影响生成阶段的 System 上下文，不影响 `HybridRetriever` 的检索参数；
+- 画像内容只影响生成阶段的 System 上下文，不影响 `HybridRetriever` 的检索排序/过滤参数；但指代消解后的 `resolvedQuestion` 向量本身，在画像检索阶段算好后会通过 `MemoryContext`/`RetrievalOptions` 带给检索阶段直接复用（纯粹是避免同一句话被调用两次 Embedding 的效率优化，不构成"画像影响检索"）；
+- 会话生命周期管理（`ChatSessionService`）不受 `rag.memory.enabled` 开关门控、常驻注册——因为 `sessionId` 在 `QueryRequest` 上始终必填，即使记忆子系统（Redis 滑动窗口/MongoDB 长期存档/ES 语义检索）关闭，会话归属校验也必须生效，不能变成摆设；
 - 同样不引入 LangChain/LlamaIndex 等编排框架，指代消解/摘要压缩/画像提炼均为自研 prompt + 现有模型客户端。
 
 ## 四、当前重构边界
