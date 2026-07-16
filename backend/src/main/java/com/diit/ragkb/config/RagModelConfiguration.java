@@ -5,6 +5,8 @@ import com.diit.ragkb.ragcore.embedding.OpenAiCompatibleEmbeddingClient;
 import com.diit.ragkb.ragcore.generation.AnswerGenerator;
 import com.diit.ragkb.ragcore.generation.OpenAiCompatibleAnswerGenerator;
 import com.diit.ragkb.ragcore.generation.PromptAssembler;
+import com.diit.ragkb.ragcore.nli.HttpNliClient;
+import com.diit.ragkb.ragcore.nli.NliClient;
 import com.diit.ragkb.ragcore.rerank.OpenAiCompatibleRerankerClient;
 import com.diit.ragkb.ragcore.rerank.RerankerClient;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -15,7 +17,7 @@ import org.springframework.context.annotation.Configuration;
 
 /** 模型客户端装配；未配置端点时不创建 Bean，调用方必须走可识别的降级路径。 */
 @Configuration
-@EnableConfigurationProperties(RagModelProperties.class)
+@EnableConfigurationProperties({RagModelProperties.class, RagNliProperties.class})
 public class RagModelConfiguration {
 
     @Bean
@@ -35,5 +37,11 @@ public class RagModelConfiguration {
     public AnswerGenerator answerGenerator(RagModelProperties properties, ObjectMapper objectMapper,
                                            PromptAssembler promptAssembler) {
         return new OpenAiCompatibleAnswerGenerator(properties.getGeneration(), objectMapper, promptAssembler);
+    }
+
+    @Bean
+    @ConditionalOnProperty(prefix = "rag.nli", name = "enabled", havingValue = "true")
+    public NliClient nliClient(RagNliProperties properties, ObjectMapper objectMapper) {
+        return new HttpNliClient(properties, objectMapper);
     }
 }

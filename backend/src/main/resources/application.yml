@@ -130,6 +130,11 @@ rag:
       timeout-ms: ${RAG_GENERATION_TIMEOUT_MS:60000}
       # OpenAI 标准流会在最后一个 data 块给出 usage；不兼容的网关可显式关闭。
       include-usage: ${RAG_GENERATION_INCLUDE_USAGE:true}
+  nli:
+    # 本机部署的 NLI 网关（nli-gateway/），用于生成后自检；未启用时自检直接跳过（fail-open）。
+    enabled: ${RAG_NLI_ENABLED:false}
+    endpoint: ${RAG_NLI_ENDPOINT:}
+    timeout-ms: ${RAG_NLI_TIMEOUT_MS:15000}
   elasticsearch:
     # 只有 T107 管道与 ES 均完成部署后开启；向量维度必须与 Embedding 模型完全一致。
     enabled: ${RAG_ES_ENABLED:false}
