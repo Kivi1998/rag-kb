@@ -20,10 +20,10 @@
 
 ## 4. 真实回归验证工具
 
-- [ ] 4.1 仿照 `eval/scripts/EvalRetrievalRunner.java` 风格，新增独立 Java 评测工具，直接复用 `HybridRetriever`/`AnswerGenerator` 生产代码（不经 HTTP）
-- [ ] 4.2 工具跑通 150 题评估集中 8 道 NO_RETRIEVAL 标注题，统计命中拒答的比例
-- [ ] 4.3 从应答题中抽样 20-30 道（覆盖不同难度），统计被误判为拒答的比例
-- [ ] 4.4 产出实验报告（格式仿照 `eval/reports/refusal-threshold-calibration-20260714.md`），如实记录命中率/误伤率，不确定或效果不佳之处直接写明
+- [x] 4.1 仿照 `eval/scripts/EvalRetrievalRunner.java` 风格，新增独立 Java 评测工具，直接复用 `HybridRetriever`/`AnswerGenerator` 生产代码（不经 HTTP）
+- [x] 4.2 工具跑通 150 题评估集中 8 道 NO_RETRIEVAL 标注题，统计命中拒答的比例（结果：8/8 命中）
+- [x] 4.3 从应答题中抽样 20-30 道（覆盖不同难度），统计被误判为拒答的比例（结果：2/25 误伤，根因排查为检索召回缺口而非核验机制过严）
+- [x] 4.4 产出实验报告（格式仿照 `eval/reports/refusal-threshold-calibration-20260714.md`），如实记录命中率/误伤率，不确定或效果不佳之处直接写明（`eval/reports/no-retrieval-fact-verification-validation-20260716.md`）
 
 ## 5. 验证与收尾
 
