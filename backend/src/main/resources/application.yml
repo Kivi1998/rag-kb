@@ -8,8 +8,18 @@ spring:
   application:
     name: rag-kb
   autoconfigure:
-    # 本项目只使用 rag.elasticsearch.* 自研连接；禁止 Boot 按 localhost:9200 偷建第二个客户端。
-    exclude: org.springframework.boot.autoconfigure.elasticsearch.ElasticsearchRestClientAutoConfiguration
+    exclude:
+      # 本项目只使用 rag.elasticsearch.* 自研连接；禁止 Boot 按 localhost:9200 偷建第二个客户端。
+      - org.springframework.boot.autoconfigure.elasticsearch.ElasticsearchRestClientAutoConfiguration
+      # MongoDB 只服务会话记忆子系统，由 RagMemoryConfiguration 按 rag.memory.enabled 显式装配，
+      # 禁止 Boot 按默认 localhost:27017 偷建连接（rag.memory 关闭时不应尝试连接任何 Mongo）。
+      # MongoRepositoriesAutoConfiguration 必须一起排除：它是独立于 MongoDataAutoConfiguration 的
+      # 自动装配，会无视 RagMemoryConfiguration 的条件、自行扫描classpath 上的 MongoRepository
+      # 接口并尝试注册（2026-07-15 真实踩过：只排除 MongoDataAutoConfiguration 时，
+      # ChatMessageRepository/MemoryItemRepository 仍被这个类扫描到并因缺 MongoTemplate 而报错）。
+      - org.springframework.boot.autoconfigure.mongo.MongoAutoConfiguration
+      - org.springframework.boot.autoconfigure.data.mongo.MongoDataAutoConfiguration
+      - org.springframework.boot.autoconfigure.data.mongo.MongoRepositoriesAutoConfiguration
 
   # 数据库 — 从 application-secret.yml 或环境变量覆盖
   datasource:
@@ -48,12 +58,13 @@ spring:
       secret: ${JWT_SECRET:}
       expiration-seconds: ${JWT_EXPIRATION_SECONDS:86400}  # 默认 24 小时
 
-  # Redis
+  # Redis（DB 由 REDIS_DATABASE 指定，默认 0，专供 JWT 黑名单；会话记忆用单独的逻辑 DB，见 rag.memory.redis-database）
   data:
     redis:
       host: ${REDIS_HOST:localhost}
       port: ${REDIS_PORT:6379}
       password: ${REDIS_PASSWORD:}
+      database: ${REDIS_DATABASE:0}
 
 rag:
   upload:
@@ -136,6 +147,17 @@ rag:
     enabled: ${RAG_QUERY_ENABLED:false}
     stream-timeout-ms: ${RAG_QUERY_STREAM_TIMEOUT_MS:120000}
     worker-threads: ${RAG_QUERY_WORKER_THREADS:8}
+  memory:
+    # 多轮对话与记忆管理；关闭时问答退化为无记忆单轮（sessionId 仍必填，但不做滑动窗口/画像注入）。
+    enabled: ${RAG_MEMORY_ENABLED:false}
+    redis-database: ${RAG_MEMORY_REDIS_DATABASE:1}
+    mongo-uri: ${RAG_MEMORY_MONGO_URI:}
+    memory-index-name: ${RAG_MEMORY_ES_INDEX_NAME:rag_memory_v1}
+    token-budget: ${RAG_MEMORY_TOKEN_BUDGET:1000}
+    decay-half-life-days: ${RAG_MEMORY_DECAY_HALF_LIFE_DAYS:30}
+    profile-top-k: ${RAG_MEMORY_PROFILE_TOP_K:5}
+    session-active-minutes: ${RAG_MEMORY_SESSION_ACTIVE_MINUTES:30}
+    session-idle-hours: ${RAG_MEMORY_SESSION_IDLE_HOURS:2}
 
 # Actuator
 management:

@@ -5,7 +5,8 @@ import { createPinia, setActivePinia } from 'pinia'
 
 vi.mock('@/api/queryApi', () => ({
   openStream: vi.fn(),
-  queryStreamUrl: vi.fn(() => '/api/v1/knowledge-bases/kb-1/query')
+  queryStreamUrl: vi.fn(() => '/api/v1/knowledge-bases/kb-1/query'),
+  createSession: vi.fn(() => Promise.resolve('session-1'))
 }))
 
 import ChatPanel from '@/components/ChatPanel.vue'
@@ -44,6 +45,7 @@ describe('ChatPanel', () => {
       { eventType: 'done', data: {} }
     ]) as never)
     const wrapper = mount(ChatPanel, { props: { kbId: 'kb-1' }, global: { plugins: [ElementPlus] } })
+    await flushPromises() // 等待挂载时自动创建的会话(createSession)完成，否则 sessionId 未就绪、canSend 恒为 false
     await wrapper.find('textarea').setValue('如何排查启动失败？')
     await wrapper.find('form').trigger('submit')
     await flushPromises()
@@ -51,7 +53,7 @@ describe('ChatPanel', () => {
 
     expect(openStream).toHaveBeenCalledWith(expect.objectContaining({
       url: '/api/v1/knowledge-bases/kb-1/query',
-      body: { question: '如何排查启动失败？' },
+      body: { question: '如何排查启动失败？', sessionId: 'session-1' },
       headers: { Authorization: 'Bearer token-1', 'X-Org-Id': 'org-1' }
     }))
     expect(wrapper.text()).toContain('请检查数据库连接。')
@@ -64,6 +66,7 @@ describe('ChatPanel', () => {
       { eventType: 'refusal', data: { message: '未在当前知识库中检索到足够依据' } }
     ]) as never)
     const wrapper = mount(ChatPanel, { props: { kbId: 'kb-1' }, global: { plugins: [ElementPlus] } })
+    await flushPromises() // 等待挂载时自动创建的会话(createSession)完成，否则 sessionId 未就绪、canSend 恒为 false
     await wrapper.find('textarea').setValue('不存在的问题')
     await wrapper.find('form').trigger('submit')
     await flushPromises()
@@ -77,6 +80,7 @@ describe('ChatPanel', () => {
       { eventType: 'done', data: {} }
     ]) as never)
     const wrapper = mount(ChatPanel, { props: { kbId: 'kb-1' }, global: { plugins: [ElementPlus] } })
+    await flushPromises() // 等待挂载时自动创建的会话(createSession)完成，否则 sessionId 未就绪、canSend 恒为 false
     await wrapper.find('textarea').setValue('结果如何？')
     await wrapper.find('form').trigger('submit')
     await flushPromises()
@@ -94,6 +98,7 @@ describe('ChatPanel', () => {
       { eventType: 'done', data: {} }
     ]) as never)
     const wrapper = mount(ChatPanel, { props: { kbId: 'kb-1' }, global: { plugins: [ElementPlus] } })
+    await flushPromises() // 等待挂载时自动创建的会话(createSession)完成，否则 sessionId 未就绪、canSend 恒为 false
     await wrapper.find('textarea').setValue('问题')
     await wrapper.find('form').trigger('submit')
     await flushPromises()
@@ -112,14 +117,18 @@ describe('ChatPanel', () => {
   it('回车直接发送', async () => {
     vi.mocked(openStream).mockReturnValue(streamOf([{ eventType: 'done', data: {} }]) as never)
     const wrapper = mount(ChatPanel, { props: { kbId: 'kb-1' }, global: { plugins: [ElementPlus] } })
+    await flushPromises() // 等待挂载时自动创建的会话(createSession)完成，否则 sessionId 未就绪、canSend 恒为 false
     await wrapper.find('textarea').setValue('回车发送测试')
     await wrapper.find('textarea').trigger('keydown', { key: 'Enter' })
     await flushPromises()
-    expect(openStream).toHaveBeenCalledWith(expect.objectContaining({ body: { question: '回车发送测试' } }))
+    expect(openStream).toHaveBeenCalledWith(expect.objectContaining({
+      body: { question: '回车发送测试', sessionId: 'session-1' }
+    }))
   })
 
   it('shift+回车换行，不发送', async () => {
     const wrapper = mount(ChatPanel, { props: { kbId: 'kb-1' }, global: { plugins: [ElementPlus] } })
+    await flushPromises() // 等待挂载时自动创建的会话(createSession)完成，否则 sessionId 未就绪、canSend 恒为 false
     await wrapper.find('textarea').setValue('第一行')
     await wrapper.find('textarea').trigger('keydown', { key: 'Enter', shiftKey: true })
     await flushPromises()
@@ -128,6 +137,7 @@ describe('ChatPanel', () => {
 
   it('中文输入法候选词确认（isComposing）时的回车不触发发送', async () => {
     const wrapper = mount(ChatPanel, { props: { kbId: 'kb-1' }, global: { plugins: [ElementPlus] } })
+    await flushPromises() // 等待挂载时自动创建的会话(createSession)完成，否则 sessionId 未就绪、canSend 恒为 false
     await wrapper.find('textarea').setValue('拼音候选中')
     await wrapper.find('textarea').trigger('keydown', { key: 'Enter', isComposing: true })
     await flushPromises()

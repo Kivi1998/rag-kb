@@ -59,9 +59,15 @@ public class OpenAiCompatibleAnswerGenerator implements AnswerGenerator {
     @Override
     public GenerationMetrics streamWithMetrics(String question, List<RetrievedChunk> contexts,
                                                Consumer<QueryEvent> eventConsumer) {
+        return streamWithMetrics(question, contexts, null, eventConsumer);
+    }
+
+    @Override
+    public GenerationMetrics streamWithMetrics(String question, List<RetrievedChunk> contexts,
+                                               String additionalSystemContext, Consumer<QueryEvent> eventConsumer) {
         try {
             String body = objectMapper.writeValueAsString(new ChatCompletionRequest(properties.getModel(), List.of(
-                    new ChatMessage("system", promptAssembler.systemPrompt()),
+                    new ChatMessage("system", promptAssembler.systemPrompt(additionalSystemContext)),
                     new ChatMessage("user", promptAssembler.userPrompt(question, contexts))), true, 0,
                     new StreamOptions(properties.isIncludeUsage())));
             HttpRequest.Builder builder = HttpRequest.newBuilder(URI.create(properties.getEndpoint()))

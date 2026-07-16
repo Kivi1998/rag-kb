@@ -27,7 +27,6 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import org.slf4j.MDC;
 
 import java.io.IOException;
-import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
@@ -55,7 +54,7 @@ public class QueryController {
         response.setHeader("X-RAG-Trace-Id", traceId);
         QueryService.PreparedQuery prepared;
         try {
-            prepared = queryService.prepare(kbId, request.getQuestion(), traceId);
+            prepared = queryService.prepare(kbId, request.getSessionId(), request.getQuestion(), traceId);
         } catch (RuntimeException ex) {
             recordPreRetrievalFailure(traceId, kbId, ex);
             throw ex;
@@ -147,15 +146,8 @@ public class QueryController {
         /** 空问题由 Retriever 走正常 refusal SSE，而不是 HTTP 400。 */
         @NotNull(message = "问题不能为空")
         private String question;
-        /** 首期接口兼容前端历史字段；当前不参与 Prompt，避免扩张上下文和泄露旧轮次。 */
-        private List<ChatTurn> history = List.of();
-        /** 首期固定关闭 LLM Query Rewrite，防止类名、错误码、配置 key 被改写。 */
-        private Boolean rewrite;
-    }
-
-    @Data
-    public static class ChatTurn {
-        private String role;
-        private String content;
+        /** 多轮对话会话标识，须由 {@code POST .../sessions} 预先创建；缺失或不属于当前成员 → 400/404。 */
+        @NotNull(message = "sessionId 不能为空")
+        private UUID sessionId;
     }
 }

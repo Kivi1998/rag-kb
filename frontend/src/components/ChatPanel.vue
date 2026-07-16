@@ -4,7 +4,7 @@ import { CircleClose, Promotion } from '@element-plus/icons-vue'
 import DOMPurify from 'dompurify'
 import { marked } from 'marked'
 import { useAuthStore } from '@/stores/authStore'
-import { openStream, queryStreamUrl } from '@/api/queryApi'
+import { createSession, openStream, queryStreamUrl } from '@/api/queryApi'
 import type { Citation } from '@/types/citation'
 import type { Message, QueryEvent } from '@/types/query'
 
@@ -22,6 +22,9 @@ const messages = ref<Message[]>([])
 const sending = ref(false)
 const streamAbort = ref<AbortController | null>(null)
 const transcript = ref<HTMLElement | null>(null)
+/** 多轮对话会话标识；每个知识库/每次新对话对应一个会话，切换知识库时重新创建，不复用。 */
+const sessionId = ref<string | null>(null)
+const sessionReady = ref(false)
 
 /** LLM 回答含 Markdown 语法（**加粗**、列表、代码块等），此前直接文本插值导致
  * 语法符号原样显示。仅对话回答需要渲染；用户自己打的话按纯文本展示，避免用户
@@ -32,7 +35,20 @@ function renderMarkdown(content: string): string {
   return DOMPurify.sanitize(html)
 }
 
-const canSend = computed(() => !!props.kbId && !!question.value.trim() && !sending.value)
+const canSend = computed(() => !!props.kbId && !!question.value.trim() && !sending.value && sessionReady.value)
+
+/** 进入知识库/新建对话时创建新会话；不复用上一个知识库的 sessionId。 */
+async function createNewSession() {
+  sessionReady.value = false
+  sessionId.value = null
+  if (!props.kbId) return
+  try {
+    sessionId.value = await createSession('', props.kbId, headers())
+    sessionReady.value = true
+  } catch (error) {
+    console.error('创建会话失败', error)
+  }
+}
 
 /** 网络流可能已经结束，但打字机还在把缓冲区剩余内容匀速吐出——这段时间点
  * "取消生成"，仅 abort 网络请求毫无意义（请求早就完成了）。ask() 内部把
@@ -52,7 +68,7 @@ function createAssistantMessage(): Message {
 
 async function ask() {
   const text = question.value.trim()
-  if (!text || sending.value) return
+  if (!text || sending.value || !sessionId.value) return
   const userMessage: Message = { id: crypto.randomUUID(), role: 'user', content: text, createdAt: new Date().toISOString() }
   const assistantMessage = createAssistantMessage()
   messages.value.push(userMessage, assistantMessage)
@@ -104,7 +120,7 @@ async function ask() {
   try {
     for await (const event of openStream({
       url: queryStreamUrl('', props.kbId),
-      body: { question: text }, headers: headers(), signal: controller.signal
+      body: { question: text, sessionId: sessionId.value }, headers: headers(), signal: controller.signal
     })) {
       if (event.eventType === 'chunk') {
         pending += event.data.content
@@ -188,7 +204,16 @@ function citationLocation(citation: Citation) {
   return parts.filter(Boolean).join(' · ')
 }
 
-watch(() => props.kbId, () => { messages.value = []; question.value = ''; cancel() })
+watch(
+  () => props.kbId,
+  () => {
+    messages.value = []
+    question.value = ''
+    cancel()
+    void createNewSession()
+  },
+  { immediate: true }
+)
 </script>
 
 <template>
