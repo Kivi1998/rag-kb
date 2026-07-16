@@ -9,6 +9,7 @@ import com.diit.ragkb.model.Member;
 import com.diit.ragkb.model.Organization;
 import com.diit.ragkb.ragcore.conversation.ChatMessage;
 import com.diit.ragkb.ragcore.conversation.ConversationStore;
+import com.diit.ragkb.ragcore.conversation.MemoryIndex;
 import com.diit.ragkb.repository.ChatSessionRepository;
 import com.diit.ragkb.repository.KnowledgeBaseRepository;
 import com.diit.ragkb.repository.MemberRepository;
@@ -16,6 +17,7 @@ import com.diit.ragkb.repository.OrganizationRepository;
 import com.diit.ragkb.security.TenantContext;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.InOrder;
 import org.springframework.beans.factory.ObjectProvider;
 
 import java.time.Instant;
@@ -28,6 +30,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 /** 会话创建、归属校验（跨组织/跨知识库/跨成员一律 404，不泄露会话是否存在）、状态机续期。 */
@@ -55,7 +58,7 @@ class ChatSessionServiceTest {
         MemberRepository memberRepository = mock(MemberRepository.class);
         when(memberRepository.getReferenceById(memberId)).thenReturn(new Member());
         ChatSessionService service = new ChatSessionService(sessionRepository, kbService, orgRepository, kbRepository,
-                memberRepository, emptyConversationStoreProvider(), new RagMemoryProperties());
+                memberRepository, emptyConversationStoreProvider(), emptyMemoryIndexProvider(), new RagMemoryProperties());
 
         ChatSession created = service.createSession(kbId);
 
@@ -76,7 +79,7 @@ class ChatSessionServiceTest {
                 .thenReturn(Optional.empty());
         ChatSessionService service = new ChatSessionService(sessionRepository, mock(KnowledgeBaseService.class),
                 mock(OrganizationRepository.class), mock(KnowledgeBaseRepository.class),
-                mock(MemberRepository.class), emptyConversationStoreProvider(), new RagMemoryProperties());
+                mock(MemberRepository.class), emptyConversationStoreProvider(), emptyMemoryIndexProvider(), new RagMemoryProperties());
 
         assertThrows(ResourceNotFoundException.class, () -> service.touchSession(kbId, sessionId));
     }
@@ -98,7 +101,7 @@ class ChatSessionServiceTest {
                 .thenReturn(Optional.empty());
         ChatSessionService service = new ChatSessionService(sessionRepository, mock(KnowledgeBaseService.class),
                 mock(OrganizationRepository.class), mock(KnowledgeBaseRepository.class),
-                mock(MemberRepository.class), emptyConversationStoreProvider(), new RagMemoryProperties());
+                mock(MemberRepository.class), emptyConversationStoreProvider(), emptyMemoryIndexProvider(), new RagMemoryProperties());
 
         assertThrows(ResourceNotFoundException.class, () -> service.touchSession(foreignKbId, sessionId));
     }
@@ -120,7 +123,7 @@ class ChatSessionServiceTest {
         when(sessionRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
         ChatSessionService service = new ChatSessionService(sessionRepository, mock(KnowledgeBaseService.class),
                 mock(OrganizationRepository.class), mock(KnowledgeBaseRepository.class),
-                mock(MemberRepository.class), emptyConversationStoreProvider(), new RagMemoryProperties());
+                mock(MemberRepository.class), emptyConversationStoreProvider(), emptyMemoryIndexProvider(), new RagMemoryProperties());
 
         ChatSession touched = service.touchSession(kbId, sessionId);
 
@@ -142,7 +145,7 @@ class ChatSessionServiceTest {
                 .thenReturn(Optional.of(session));
         ChatSessionService service = new ChatSessionService(sessionRepository, mock(KnowledgeBaseService.class),
                 mock(OrganizationRepository.class), mock(KnowledgeBaseRepository.class),
-                mock(MemberRepository.class), emptyConversationStoreProvider(), new RagMemoryProperties());
+                mock(MemberRepository.class), emptyConversationStoreProvider(), emptyMemoryIndexProvider(), new RagMemoryProperties());
 
         List<ChatMessage> messages = service.getMessages(kbId, sessionId);
 
@@ -166,11 +169,180 @@ class ChatSessionServiceTest {
         when(conversationStore.archivedMessages(orgId, memberId, sessionId)).thenReturn(stored);
         ChatSessionService service = new ChatSessionService(sessionRepository, mock(KnowledgeBaseService.class),
                 mock(OrganizationRepository.class), mock(KnowledgeBaseRepository.class),
-                mock(MemberRepository.class), providerOf(conversationStore), new RagMemoryProperties());
+                mock(MemberRepository.class), providerOf(conversationStore), emptyMemoryIndexProvider(), new RagMemoryProperties());
 
         List<ChatMessage> messages = service.getMessages(kbId, sessionId);
 
         assertEquals(stored, messages);
+    }
+
+    @Test
+    void maybeSetTitleSetsTitleOnFirstMessage() {
+        UUID orgId = UUID.randomUUID();
+        UUID memberId = UUID.randomUUID();
+        UUID kbId = UUID.randomUUID();
+        UUID sessionId = UUID.randomUUID();
+        ChatSession session = new ChatSession();
+        session.setId(sessionId);
+        ChatSessionRepository sessionRepository = mock(ChatSessionRepository.class);
+        when(sessionRepository.findByIdAndOrgIdAndKbIdAndMemberId(sessionId, orgId, kbId, memberId))
+                .thenReturn(Optional.of(session));
+        when(sessionRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        ChatSessionService service = new ChatSessionService(sessionRepository, mock(KnowledgeBaseService.class),
+                mock(OrganizationRepository.class), mock(KnowledgeBaseRepository.class),
+                mock(MemberRepository.class), emptyConversationStoreProvider(), emptyMemoryIndexProvider(), new RagMemoryProperties());
+
+        service.maybeSetTitle(orgId, kbId, memberId, sessionId, "重疾险犹豫期过了还能退保吗，这个问题我想问很久了");
+
+        assertEquals("重疾险犹豫期过了还能退保吗，这个问题我想问很久了".codePoints().limit(30)
+                .collect(StringBuilder::new, StringBuilder::appendCodePoint, StringBuilder::append).toString(),
+                session.getTitle());
+        verify(sessionRepository, times(1)).save(session);
+    }
+
+    @Test
+    void maybeSetTitleDoesNotOverwriteExistingTitle() {
+        UUID orgId = UUID.randomUUID();
+        UUID memberId = UUID.randomUUID();
+        UUID kbId = UUID.randomUUID();
+        UUID sessionId = UUID.randomUUID();
+        ChatSession session = new ChatSession();
+        session.setId(sessionId);
+        session.setTitle("已有标题");
+        ChatSessionRepository sessionRepository = mock(ChatSessionRepository.class);
+        when(sessionRepository.findByIdAndOrgIdAndKbIdAndMemberId(sessionId, orgId, kbId, memberId))
+                .thenReturn(Optional.of(session));
+        ChatSessionService service = new ChatSessionService(sessionRepository, mock(KnowledgeBaseService.class),
+                mock(OrganizationRepository.class), mock(KnowledgeBaseRepository.class),
+                mock(MemberRepository.class), emptyConversationStoreProvider(), emptyMemoryIndexProvider(), new RagMemoryProperties());
+
+        service.maybeSetTitle(orgId, kbId, memberId, sessionId, "第二轮的问题不应该覆盖标题");
+
+        assertEquals("已有标题", session.getTitle());
+        verify(sessionRepository, never()).save(any());
+    }
+
+    @Test
+    void maybeSetTitleNoOpsWhenSessionNotFound() {
+        UUID orgId = UUID.randomUUID();
+        UUID memberId = UUID.randomUUID();
+        UUID kbId = UUID.randomUUID();
+        UUID sessionId = UUID.randomUUID();
+        ChatSessionRepository sessionRepository = mock(ChatSessionRepository.class);
+        when(sessionRepository.findByIdAndOrgIdAndKbIdAndMemberId(sessionId, orgId, kbId, memberId))
+                .thenReturn(Optional.empty());
+        ChatSessionService service = new ChatSessionService(sessionRepository, mock(KnowledgeBaseService.class),
+                mock(OrganizationRepository.class), mock(KnowledgeBaseRepository.class),
+                mock(MemberRepository.class), emptyConversationStoreProvider(), emptyMemoryIndexProvider(), new RagMemoryProperties());
+
+        service.maybeSetTitle(orgId, kbId, memberId, sessionId, "会话已被并发删除");
+
+        verify(sessionRepository, never()).save(any());
+    }
+
+    @Test
+    void listSessionsQueriesRepositoryWithTenantScopeAndOrdersByLastActive() {
+        // 跨租户隔离验证：查询本身携带 org/kb/member 三重条件，不会拿到其他租户/知识库/成员的会话。
+        UUID orgId = UUID.randomUUID();
+        UUID memberId = UUID.randomUUID();
+        UUID kbId = UUID.randomUUID();
+        TenantContext.set(orgId, memberId, "MEMBER");
+        ChatSession newer = new ChatSession();
+        newer.setId(UUID.randomUUID());
+        newer.setTitle("最近的对话");
+        newer.setLastActiveAt(Instant.now());
+        ChatSession older = new ChatSession();
+        older.setId(UUID.randomUUID());
+        older.setTitle("较早的对话");
+        older.setLastActiveAt(Instant.now().minus(1, ChronoUnit.HOURS));
+        ChatSessionRepository sessionRepository = mock(ChatSessionRepository.class);
+        when(sessionRepository.findByOrgIdAndKbIdAndMemberIdOrderByLastActiveAtDesc(eq(orgId), eq(kbId), eq(memberId),
+                any())).thenReturn(List.of(newer, older));
+        ChatSessionService service = new ChatSessionService(sessionRepository, mock(KnowledgeBaseService.class),
+                mock(OrganizationRepository.class), mock(KnowledgeBaseRepository.class),
+                mock(MemberRepository.class), emptyConversationStoreProvider(), emptyMemoryIndexProvider(),
+                new RagMemoryProperties());
+
+        List<ChatSessionService.ChatSessionSummary> sessions = service.listSessions(kbId);
+
+        assertEquals(2, sessions.size());
+        assertEquals("最近的对话", sessions.get(0).title());
+        assertEquals("较早的对话", sessions.get(1).title());
+        verify(sessionRepository, times(1))
+                .findByOrgIdAndKbIdAndMemberIdOrderByLastActiveAtDesc(eq(orgId), eq(kbId), eq(memberId), any());
+    }
+
+    @Test
+    void deleteSessionThrowsForForeignOrCrossKbSession() {
+        UUID orgId = UUID.randomUUID();
+        UUID memberId = UUID.randomUUID();
+        UUID kbId = UUID.randomUUID();
+        UUID sessionId = UUID.randomUUID();
+        TenantContext.set(orgId, memberId, "MEMBER");
+        ChatSessionRepository sessionRepository = mock(ChatSessionRepository.class);
+        when(sessionRepository.findByIdAndOrgIdAndKbIdAndMemberId(sessionId, orgId, kbId, memberId))
+                .thenReturn(Optional.empty());
+        MemoryIndex memoryIndex = mock(MemoryIndex.class);
+        ConversationStore conversationStore = mock(ConversationStore.class);
+        ChatSessionService service = new ChatSessionService(sessionRepository, mock(KnowledgeBaseService.class),
+                mock(OrganizationRepository.class), mock(KnowledgeBaseRepository.class),
+                mock(MemberRepository.class), providerOf(conversationStore), providerOf(memoryIndex),
+                new RagMemoryProperties());
+
+        assertThrows(ResourceNotFoundException.class, () -> service.deleteSession(kbId, sessionId));
+        verify(memoryIndex, never()).deleteBySession(any(), any());
+        verify(conversationStore, never()).deleteSession(any(), any(), any());
+        verify(sessionRepository, never()).delete(any());
+    }
+
+    @Test
+    void deleteSessionCascadesAcrossAllStoresInOrder() {
+        UUID orgId = UUID.randomUUID();
+        UUID memberId = UUID.randomUUID();
+        UUID kbId = UUID.randomUUID();
+        UUID sessionId = UUID.randomUUID();
+        TenantContext.set(orgId, memberId, "MEMBER");
+        ChatSession session = new ChatSession();
+        session.setId(sessionId);
+        ChatSessionRepository sessionRepository = mock(ChatSessionRepository.class);
+        when(sessionRepository.findByIdAndOrgIdAndKbIdAndMemberId(sessionId, orgId, kbId, memberId))
+                .thenReturn(Optional.of(session));
+        MemoryIndex memoryIndex = mock(MemoryIndex.class);
+        ConversationStore conversationStore = mock(ConversationStore.class);
+        ChatSessionService service = new ChatSessionService(sessionRepository, mock(KnowledgeBaseService.class),
+                mock(OrganizationRepository.class), mock(KnowledgeBaseRepository.class),
+                mock(MemberRepository.class), providerOf(conversationStore), providerOf(memoryIndex),
+                new RagMemoryProperties());
+
+        service.deleteSession(kbId, sessionId);
+
+        InOrder order = inOrder(memoryIndex, conversationStore, sessionRepository);
+        order.verify(memoryIndex).deleteBySession(orgId, sessionId);
+        order.verify(conversationStore).deleteSession(orgId, memberId, sessionId);
+        order.verify(sessionRepository).delete(session);
+    }
+
+    @Test
+    void deleteSessionOnlyDeletesPostgresRowWhenMemorySubsystemDisabled() {
+        // rag.memory.enabled=false 时 MemoryIndex/ConversationStore 均取不到 bean，只删 Postgres 行。
+        UUID orgId = UUID.randomUUID();
+        UUID memberId = UUID.randomUUID();
+        UUID kbId = UUID.randomUUID();
+        UUID sessionId = UUID.randomUUID();
+        TenantContext.set(orgId, memberId, "MEMBER");
+        ChatSession session = new ChatSession();
+        session.setId(sessionId);
+        ChatSessionRepository sessionRepository = mock(ChatSessionRepository.class);
+        when(sessionRepository.findByIdAndOrgIdAndKbIdAndMemberId(sessionId, orgId, kbId, memberId))
+                .thenReturn(Optional.of(session));
+        ChatSessionService service = new ChatSessionService(sessionRepository, mock(KnowledgeBaseService.class),
+                mock(OrganizationRepository.class), mock(KnowledgeBaseRepository.class),
+                mock(MemberRepository.class), emptyConversationStoreProvider(), emptyMemoryIndexProvider(),
+                new RagMemoryProperties());
+
+        service.deleteSession(kbId, sessionId);
+
+        verify(sessionRepository, times(1)).delete(session);
     }
 
     @SuppressWarnings("unchecked")
@@ -184,6 +356,20 @@ class ChatSessionServiceTest {
     private ObjectProvider<ConversationStore> providerOf(ConversationStore store) {
         ObjectProvider<ConversationStore> provider = mock(ObjectProvider.class);
         when(provider.getIfAvailable()).thenReturn(store);
+        return provider;
+    }
+
+    @SuppressWarnings("unchecked")
+    private ObjectProvider<MemoryIndex> emptyMemoryIndexProvider() {
+        ObjectProvider<MemoryIndex> provider = mock(ObjectProvider.class);
+        when(provider.getIfAvailable()).thenReturn(null);
+        return provider;
+    }
+
+    @SuppressWarnings("unchecked")
+    private ObjectProvider<MemoryIndex> providerOf(MemoryIndex memoryIndex) {
+        ObjectProvider<MemoryIndex> provider = mock(ObjectProvider.class);
+        when(provider.getIfAvailable()).thenReturn(memoryIndex);
         return provider;
     }
 }

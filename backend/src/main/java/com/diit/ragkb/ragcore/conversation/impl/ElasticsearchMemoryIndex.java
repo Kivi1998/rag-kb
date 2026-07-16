@@ -85,6 +85,21 @@ public class ElasticsearchMemoryIndex implements MemoryIndex {
     }
 
     @Override
+    public void deleteBySession(UUID organizationId, UUID sessionId) {
+        Map<String, Object> query = Map.of("query", Map.of("bool", Map.of("filter", List.of(
+                Map.of("term", Map.of("org_id", organizationId.toString())),
+                Map.of("term", Map.of("session_id", sessionId.toString())),
+                Map.of("term", Map.of("memory_type", MemoryType.SESSION_MESSAGE.name()))))));
+        Request request = new Request("POST", "/" + memoryProperties.getMemoryIndexName() + "/_delete_by_query");
+        request.setJsonEntity(writeJson(query));
+        try {
+            restClient.performRequest(request);
+        } catch (IOException ex) {
+            throw new ElasticsearchIndexException("删除会话记忆条目失败", ex);
+        }
+    }
+
+    @Override
     public List<ScoredMemoryRecord> searchSessionHistory(UUID organizationId, UUID sessionId, List<Float> queryVector,
                                                          int topK) {
         List<Map<String, Object>> filters = List.of(

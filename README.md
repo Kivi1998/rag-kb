@@ -13,7 +13,7 @@
 - 独立 Parser Gateway 提供 OCR、ASR、Office 图片提取和字幕时间戳；
 - 结构感知切块（V3）：多风格层级识别、递归多级级联、表格分组+表头重复、句子边界重叠、chunk 元数据（sectionPath/contentType/isKeyClause/prev-nextChunkId）；
 - Elasticsearch BM25 + kNN + RRF、可选 Rerank、服务端引用与 SSE 问答；
-- 多轮对话与记忆管理：滑动窗口+语义历史检索+摘要压缩、用户画像+读时衰减遗忘机制、指代消解（2026-07-15 新增，学习性质的能力储备，当前规模非刚需驱动）；
+- 多轮对话与记忆管理：滑动窗口+语义历史检索+摘要压缩、用户画像+读时衰减遗忘机制、指代消解（2026-07-15 新增，学习性质的能力储备，当前规模非刚需驱动）；历史会话列表：可折叠侧边栏切换/删除历史对话，刷新页面自动恢复上一次会话；
 - 离线评测（Recall@k/MRR/拒答 F1 框架 + 150 题真实语料评估集 eval-set-v2）、查询审计、指标与生产同构验收栈。
 
 ## 技术架构
@@ -97,10 +97,17 @@ openspec/        需求规格与变更记录
 
 ### 7. 多轮对话与记忆管理
 
-- 文档：[brainstorming 设计文档](docs/superpowers/specs/2026-07-15-conversation-memory-design.md)（架构决策与备选方案对比）、[OpenSpec change](openspec/changes/conversation-memory/)（proposal/design/specs/tasks）
+- 文档：[brainstorming 设计文档](docs/superpowers/specs/2026-07-15-conversation-memory-design.md)（架构决策与备选方案对比）、[OpenSpec change: conversation-memory](openspec/changes/conversation-memory/)（proposal/design/specs/tasks）
 - 代码：[`ConversationMemoryOrchestrator.java`](backend/src/main/java/com/diit/ragkb/ragcore/conversation/ConversationMemoryOrchestrator.java)（编排入口：滑动窗口→指代消解→画像检索/生成后持久化+异步提炼）、[`SlidingWindowAssembler.java`](backend/src/main/java/com/diit/ragkb/ragcore/conversation/SlidingWindowAssembler.java)（token 预算滑动窗口+摘要压缩，压缩失败 fail-open）、[`DeepSeekCoreferenceResolver.java`](backend/src/main/java/com/diit/ragkb/ragcore/conversation/impl/DeepSeekCoreferenceResolver.java)（窄范围指代消解）、[`MemoryItemStoreImpl.java`](backend/src/main/java/com/diit/ragkb/ragcore/conversation/impl/MemoryItemStoreImpl.java)（用户画像语义去重+读时衰减遗忘机制，读回 MongoDB 后二次校验租户归属）、[`ElasticsearchMemoryIndex.java`](backend/src/main/java/com/diit/ragkb/ragcore/conversation/impl/ElasticsearchMemoryIndex.java)（统一记忆索引 `rag_memory_v1`）、[`ChatSessionService.java`](backend/src/main/java/com/diit/ragkb/service/ChatSessionService.java)（会话生命周期，不受 `rag.memory.enabled` 门控、始终校验 org/kb/member 三重归属）、[`RagSessionPropertiesConfiguration.java`](backend/src/main/java/com/diit/ragkb/config/RagSessionPropertiesConfiguration.java)（把会话生命周期用到的配置从 `RagMemoryConfiguration` 的特性开关中解耦出来常驻注册）
 - 存储：Redis（`rag-kb-dev-redis` 专属实例，逻辑 DB 1）+ MongoDB（`chat_messages`/`memory_items`）+ Elasticsearch（复用现有集群，新索引）+ Postgres（`chat_session` 元数据）
 - `/review` 评审门发现并修复的 10 项问题（2026-07-15）：跨知识库会话消息泄露、记忆关闭时 sessionId 不校验、画像读取未二次核实租户、ES cosine 去重阈值未做 `(1+cos)/2` 归一化换算、摘要压缩失败缺 fail-open、画像生成 N+1 查询、同一问题重复调用 Embedding 等，详见 `git log` 中 `fix: 修复 /review 评审门发现的10项问题` 提交
+
+### 8. 历史会话列表
+
+- 文档：[brainstorming 设计文档](docs/superpowers/specs/2026-07-15-conversation-history-list-design.md)、[OpenSpec change: conversation-history-list](openspec/changes/conversation-history-list/)
+- 背景：多轮对话记忆功能上线后，前端此前每次挂载/刷新都无条件新建会话、不消费已有的会话生命周期与长期存档能力，导致"刷新即清空对话"、也没有历史对话入口；本能力补齐前端消费侧
+- 代码（后端）：`ChatSessionService.listSessions/deleteSession`（新增 `GET`/`DELETE .../sessions` 接口；标题为首条用户消息前 30 字，写入时算好存 `chat_session.title`，避免列表查询 N+1 现取）、`MemoryIndex.deleteBySession`/`ChatMessageRepository.deleteBySessionIdAndOrganizationIdAndMemberId`/`ConversationStore.deleteSession`（硬删除级联清理 ES→Mongo/Redis→Postgres，不影响 `memory_items` 长期画像）
+- 代码（前端）：[`ChatHistorySidebar.vue`](frontend/src/components/ChatHistorySidebar.vue)（可折叠历史侧边栏：列表/切换/删除/新建对话）、`ChatPanel.vue` 用 `localStorage`（`rag-kb:last-session:{kbId}`）记录当前会话，刷新/重新进入时优先恢复历史而非总是新建，恢复失败（如已删除）时自动退回新建
 
 ### 评测框架（跨模块）
 

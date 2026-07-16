@@ -131,6 +131,19 @@ class ElasticsearchMemoryIndexTest {
     }
 
     @Test
+    void deleteBySessionSendsDeleteByQueryWithOrgAndSessionFilter() {
+        var index = new ElasticsearchMemoryIndex(restClient, esProperties(), memoryProperties(), new ObjectMapper());
+        latestPath.set(null);
+
+        index.deleteBySession(orgId, sessionId);
+
+        assertTrue(latestPath.get().endsWith("/_delete_by_query"));
+        assertTrue(latestBody.get().contains("\"org_id\":\"" + orgId + "\""));
+        assertTrue(latestBody.get().contains("\"session_id\":\"" + sessionId + "\""));
+        assertTrue(latestBody.get().contains("\"memory_type\":\"SESSION_MESSAGE\""));
+    }
+
+    @Test
     void upsertSendsVectorAndFields() {
         var index = new ElasticsearchMemoryIndex(restClient, esProperties(), memoryProperties(), new ObjectMapper());
         MemoryRecord record = new MemoryRecord("mem-1", orgId, memberId, sessionId, MemoryType.SESSION_MESSAGE,

@@ -107,6 +107,12 @@ public class QueryService {
                     if (event.content() != null) answerBuilder.append(event.content());
                     eventConsumer.accept(event);
                 });
+        ChatSessionService chatSessionService = chatSessionServiceProvider.getIfAvailable();
+        if (chatSessionService != null) {
+            // 会话标题与 rag.memory.enabled 无关（纯 Postgres 关注点），独立于下面的记忆编排调用。
+            chatSessionService.maybeSetTitle(query.organizationId(), query.knowledgeBaseId(), query.memberId(),
+                    query.sessionId(), query.question());
+        }
         ConversationMemoryOrchestrator orchestrator = memoryOrchestratorProvider.getIfAvailable();
         if (orchestrator != null) {
             orchestrator.recordTurn(query.organizationId(), query.knowledgeBaseId(), query.memberId(),

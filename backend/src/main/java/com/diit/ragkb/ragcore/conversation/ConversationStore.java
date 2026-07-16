@@ -27,4 +27,10 @@ public interface ConversationStore {
      * （管理后台、批量导出等）绕过 {@code ChatSessionService} 的归属检查直接越权读取他人消息。</p>
      */
     List<ChatMessage> archivedMessages(UUID organizationId, UUID memberId, UUID sessionId);
+
+    /**
+     * 会话被用户删除时的级联清理：删除 MongoDB 长期存档消息与 Redis 滑动窗口 key。
+     * 与 {@link #archivedMessages} 一样强制携带 memberId，不依赖调用方已做归属校验。
+     */
+    void deleteSession(UUID organizationId, UUID memberId, UUID sessionId);
 }

@@ -4,7 +4,8 @@ import { CircleClose, Promotion } from '@element-plus/icons-vue'
 import DOMPurify from 'dompurify'
 import { marked } from 'marked'
 import { useAuthStore } from '@/stores/authStore'
-import { createSession, openStream, queryStreamUrl } from '@/api/queryApi'
+import { createSession, getSessionMessages, openStream, queryStreamUrl } from '@/api/queryApi'
+import ChatHistorySidebar from '@/components/ChatHistorySidebar.vue'
 import type { Citation } from '@/types/citation'
 import type { Message, QueryEvent } from '@/types/query'
 
@@ -22,9 +23,31 @@ const messages = ref<Message[]>([])
 const sending = ref(false)
 const streamAbort = ref<AbortController | null>(null)
 const transcript = ref<HTMLElement | null>(null)
-/** 多轮对话会话标识；每个知识库/每次新对话对应一个会话，切换知识库时重新创建，不复用。 */
+/** 当前知识库的活跃会话标识。 */
 const sessionId = ref<string | null>(null)
 const sessionReady = ref(false)
+const historySidebar = ref<InstanceType<typeof ChatHistorySidebar> | null>(null)
+
+/** localStorage 记录每个知识库最后活跃的会话，供刷新/重新进入时恢复历史，而不是总是新建。 */
+function lastSessionStorageKey(kbId: string): string {
+  return `rag-kb:last-session:${kbId}`
+}
+
+function readLastSessionId(kbId: string): string | null {
+  try {
+    return localStorage.getItem(lastSessionStorageKey(kbId))
+  } catch {
+    return null // 隐私模式等场景 localStorage 不可用，退化为总是新建，不阻断使用
+  }
+}
+
+function writeLastSessionId(kbId: string, id: string) {
+  try {
+    localStorage.setItem(lastSessionStorageKey(kbId), id)
+  } catch {
+    // 同上，写入失败不影响当前会话正常使用
+  }
+}
 
 /** LLM 回答含 Markdown 语法（**加粗**、列表、代码块等），此前直接文本插值导致
  * 语法符号原样显示。仅对话回答需要渲染；用户自己打的话按纯文本展示，避免用户
@@ -37,16 +60,75 @@ function renderMarkdown(content: string): string {
 
 const canSend = computed(() => !!props.kbId && !!question.value.trim() && !sending.value && sessionReady.value)
 
-/** 进入知识库/新建对话时创建新会话；不复用上一个知识库的 sessionId。 */
-async function createNewSession() {
+/** 切换到某个已存在的会话：拉取其历史消息并 hydrate；供"刷新恢复"与"点击历史列表项"共用。 */
+async function switchToSession(id: string) {
+  const history = await getSessionMessages('', props.kbId, id, headers())
+  sessionId.value = id
+  messages.value = history
+  sessionReady.value = true
+  writeLastSessionId(props.kbId, id)
+}
+
+/** 新建一个全新会话，清空当前展示内容。 */
+async function startNewConversation() {
   sessionReady.value = false
   sessionId.value = null
+  messages.value = []
   if (!props.kbId) return
   try {
-    sessionId.value = await createSession('', props.kbId, headers())
+    const newId = await createSession('', props.kbId, headers())
+    sessionId.value = newId
     sessionReady.value = true
+    writeLastSessionId(props.kbId, newId)
   } catch (error) {
     console.error('创建会话失败', error)
+  }
+}
+
+/**
+ * 进入知识库/刷新页面时：优先尝试恢复 localStorage 记录的上一个会话（含历史消息），
+ * 而不是总是新建——这是"F5 刷新回到刚才那个对话"的关键；恢复失败（如该会话已被
+ * 删除，接口返回 404）时退回创建新会话，不阻断使用。
+ */
+async function initializeSession() {
+  sessionReady.value = false
+  sessionId.value = null
+  messages.value = []
+  if (!props.kbId) return
+  const remembered = readLastSessionId(props.kbId)
+  if (remembered) {
+    try {
+      await switchToSession(remembered)
+      return
+    } catch (error) {
+      console.warn('恢复历史会话失败，改为新建会话', error)
+    }
+  }
+  await startNewConversation()
+}
+
+async function handleSelectSession(id: string) {
+  if (id === sessionId.value || sending.value) return
+  cancel()
+  try {
+    await switchToSession(id)
+  } catch (error) {
+    console.error('切换历史会话失败', error)
+  }
+}
+
+function handleCreateFromSidebar() {
+  cancel()
+  void startNewConversation()
+}
+
+async function handleSessionDeleted(deletedId: string) {
+  if (deletedId === sessionId.value) {
+    cancel()
+    await startNewConversation()
+    // 新会话此时还不在侧边栏已加载的列表里（新建对话按钮走的是自身 create() 里的 refresh，
+    // 这里是被动触发，需要单独刷新），否则用户会看到侧边栏没有高亮项、也找不到刚新建的这条。
+    void historySidebar.value?.refresh()
   }
 }
 
@@ -154,6 +236,8 @@ async function ask() {
       stopRevealCallback = undefined
     }
     await scrollToBottom()
+    // 本轮问答可能刚生成了会话标题（首轮）或更新了最后活跃时间，刷新一下侧边栏列表。
+    void historySidebar.value?.refresh()
   }
 }
 
@@ -207,10 +291,9 @@ function citationLocation(citation: Citation) {
 watch(
   () => props.kbId,
   () => {
-    messages.value = []
     question.value = ''
     cancel()
-    void createNewSession()
+    void initializeSession()
   },
   { immediate: true }
 )
@@ -218,49 +301,63 @@ watch(
 
 <template>
   <section class="chat-panel" data-testid="chat-panel">
-    <header class="panel-header">
-      <div><h2>技术文档问答</h2><p>回答仅基于已完成索引的当前知识库文档。</p></div>
-      <el-button v-if="sending" type="danger" plain :icon="CircleClose" @click="cancel">取消生成</el-button>
-    </header>
-    <div ref="transcript" class="transcript" aria-live="polite">
-      <el-empty v-if="messages.length === 0" description="输入类名、错误码、配置项或技术问题开始检索" />
-      <article v-for="message in messages" :key="message.id" class="message" :class="`message-${message.role}`">
-        <span class="message-label">{{ message.role === 'user' ? '你' : message.role === 'refusal' ? '检索结果' : '知识库助手' }}</span>
-        <div
-          v-if="message.role === 'assistant' && message.content"
-          class="message-content message-content-markdown"
-          v-html="renderMarkdown(message.content)"
-        />
-        <p v-else class="message-content">{{ message.content || (sending ? '正在生成…' : '') }}</p>
-        <div v-if="message.citations?.length" class="citations">
-          <p class="citation-title">参考来源</p>
-          <article v-for="(citation, index) in message.citations" :key="`${citation.documentId}-${index}`" class="citation-card">
-            <strong>[{{ index + 1 }}] {{ citation.documentName || '文档不可访问' }}</strong>
-            <span v-if="citationLocation(citation)" class="citation-location">{{ citationLocation(citation) }}</span>
-            <p>{{ citation.snippet }}</p>
-            <small v-if="citation.score !== null">相关度 {{ citation.score.toFixed(3) }}</small>
+    <div class="chat-body">
+      <ChatHistorySidebar
+        ref="historySidebar"
+        :kb-id="props.kbId"
+        :active-session-id="sessionId"
+        @select="handleSelectSession"
+        @create="handleCreateFromSidebar"
+        @deleted="handleSessionDeleted"
+      />
+      <div class="chat-main">
+        <header class="panel-header">
+          <div><h2>技术文档问答</h2><p>回答仅基于已完成索引的当前知识库文档。</p></div>
+          <el-button v-if="sending" type="danger" plain :icon="CircleClose" @click="cancel">取消生成</el-button>
+        </header>
+        <div ref="transcript" class="transcript" aria-live="polite">
+          <el-empty v-if="messages.length === 0" description="输入类名、错误码、配置项或技术问题开始检索" />
+          <article v-for="message in messages" :key="message.id" class="message" :class="`message-${message.role}`">
+            <span class="message-label">{{ message.role === 'user' ? '你' : message.role === 'refusal' ? '检索结果' : '知识库助手' }}</span>
+            <div
+              v-if="message.role === 'assistant' && message.content"
+              class="message-content message-content-markdown"
+              v-html="renderMarkdown(message.content)"
+            />
+            <p v-else class="message-content">{{ message.content || (sending ? '正在生成…' : '') }}</p>
+            <div v-if="message.citations?.length" class="citations">
+              <p class="citation-title">参考来源</p>
+              <article v-for="(citation, index) in message.citations" :key="`${citation.documentId}-${index}`" class="citation-card">
+                <strong>[{{ index + 1 }}] {{ citation.documentName || '文档不可访问' }}</strong>
+                <span v-if="citationLocation(citation)" class="citation-location">{{ citationLocation(citation) }}</span>
+                <p>{{ citation.snippet }}</p>
+                <small v-if="citation.score !== null">相关度 {{ citation.score.toFixed(3) }}</small>
+              </article>
+            </div>
           </article>
         </div>
-      </article>
+        <form class="composer" @submit.prevent="ask">
+          <el-input
+            v-model="question"
+            type="textarea"
+            :rows="3"
+            maxlength="2000"
+            show-word-limit
+            :disabled="sending"
+            placeholder="例如：SearchService 启动失败如何排查？（Enter 发送，Shift+Enter 换行）"
+            @keydown="handleComposerKeydown"
+          />
+          <el-button type="primary" native-type="submit" :icon="Promotion" :loading="sending" :disabled="!canSend">发送</el-button>
+        </form>
+      </div>
     </div>
-    <form class="composer" @submit.prevent="ask">
-      <el-input
-        v-model="question"
-        type="textarea"
-        :rows="3"
-        maxlength="2000"
-        show-word-limit
-        :disabled="sending"
-        placeholder="例如：SearchService 启动失败如何排查？（Enter 发送，Shift+Enter 换行）"
-        @keydown="handleComposerKeydown"
-      />
-      <el-button type="primary" native-type="submit" :icon="Promotion" :loading="sending" :disabled="!canSend">发送</el-button>
-    </form>
   </section>
 </template>
 
 <style scoped>
-.chat-panel { display: flex; min-height: 0; flex: 1; flex-direction: column; gap: 14px; }
+.chat-panel { display: flex; min-height: 0; flex: 1; flex-direction: column; }
+.chat-body { display: flex; min-height: 0; flex: 1; }
+.chat-main { display: flex; min-height: 0; flex: 1; flex-direction: column; gap: 14px; padding-left: 14px; }
 .panel-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
 .panel-header h2 { margin: 0; font-size: 18px; }
 .panel-header p { margin: 5px 0 0; color: var(--el-text-color-secondary); font-size: 13px; }

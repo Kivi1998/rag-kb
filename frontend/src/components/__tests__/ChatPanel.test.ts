@@ -6,11 +6,14 @@ import { createPinia, setActivePinia } from 'pinia'
 vi.mock('@/api/queryApi', () => ({
   openStream: vi.fn(),
   queryStreamUrl: vi.fn(() => '/api/v1/knowledge-bases/kb-1/query'),
-  createSession: vi.fn(() => Promise.resolve('session-1'))
+  createSession: vi.fn(() => Promise.resolve('session-1')),
+  getSessionMessages: vi.fn(() => Promise.reject(new Error('HTTP 404'))),
+  listSessions: vi.fn(() => Promise.resolve([])),
+  deleteSession: vi.fn(() => Promise.resolve())
 }))
 
 import ChatPanel from '@/components/ChatPanel.vue'
-import { openStream } from '@/api/queryApi'
+import { createSession, getSessionMessages, openStream } from '@/api/queryApi'
 import { useAuthStore } from '@/stores/authStore'
 
 function streamOf<T>(events: T[]): AsyncGenerator<T> {
@@ -27,11 +30,14 @@ describe('ChatPanel', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     vi.clearAllMocks()
+    vi.mocked(createSession).mockResolvedValue('session-1')
+    vi.mocked(getSessionMessages).mockRejectedValue(new Error('HTTP 404'))
     vi.useFakeTimers()
     const auth = useAuthStore()
     auth.token = 'token-1'
     auth.orgId = 'org-1'
     if (!crypto.randomUUID) Object.defineProperty(crypto, 'randomUUID', { value: () => 'test-id' })
+    localStorage.clear() // 每个用例默认无历史会话记录，走"新建会话"路径；需要恢复行为的用例自行预置
   })
 
   afterEach(() => {
@@ -142,5 +148,50 @@ describe('ChatPanel', () => {
     await wrapper.find('textarea').trigger('keydown', { key: 'Enter', isComposing: true })
     await flushPromises()
     expect(openStream).not.toHaveBeenCalled()
+  })
+
+  it('localStorage 有记录的会话时，挂载时恢复历史消息而不是新建会话', async () => {
+    localStorage.setItem('rag-kb:last-session:kb-1', 'session-remembered')
+    vi.mocked(getSessionMessages).mockResolvedValue([
+      { id: 'm1', role: 'user', content: '之前问过的问题', createdAt: '2026-07-15T00:00:00Z' },
+      { id: 'm2', role: 'assistant', content: '之前的回答', createdAt: '2026-07-15T00:00:01Z' }
+    ])
+
+    const wrapper = mount(ChatPanel, { props: { kbId: 'kb-1' }, global: { plugins: [ElementPlus] } })
+    await flushPromises()
+
+    expect(getSessionMessages).toHaveBeenCalledWith('', 'kb-1', 'session-remembered', expect.anything())
+    expect(createSession).not.toHaveBeenCalled()
+    expect(wrapper.text()).toContain('之前问过的问题')
+    expect(wrapper.text()).toContain('之前的回答')
+  })
+
+  it('localStorage 记录的会话已失效（404）时退回创建新会话', async () => {
+    localStorage.setItem('rag-kb:last-session:kb-1', 'session-deleted')
+    vi.mocked(getSessionMessages).mockRejectedValue(new Error('HTTP 404 Not Found'))
+
+    const wrapper = mount(ChatPanel, { props: { kbId: 'kb-1' }, global: { plugins: [ElementPlus] } })
+    await flushPromises()
+
+    expect(getSessionMessages).toHaveBeenCalledWith('', 'kb-1', 'session-deleted', expect.anything())
+    expect(createSession).toHaveBeenCalledWith('', 'kb-1', expect.anything())
+    expect(localStorage.getItem('rag-kb:last-session:kb-1')).toBe('session-1')
+    // 恢复失败后应能正常提问，不应停留在"会话未就绪"状态。
+    vi.mocked(openStream).mockReturnValue(streamOf([{ eventType: 'done', data: {} }]) as never)
+    await wrapper.find('textarea').setValue('恢复失败后继续提问')
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+    expect(openStream).toHaveBeenCalledWith(expect.objectContaining({
+      body: { question: '恢复失败后继续提问', sessionId: 'session-1' }
+    }))
+  })
+
+  it('没有 localStorage 记录时创建新会话并写入 localStorage', async () => {
+    const wrapper = mount(ChatPanel, { props: { kbId: 'kb-1' }, global: { plugins: [ElementPlus] } })
+    await flushPromises()
+
+    expect(createSession).toHaveBeenCalledWith('', 'kb-1', expect.anything())
+    expect(localStorage.getItem('rag-kb:last-session:kb-1')).toBe('session-1')
+    expect(wrapper.find('[data-testid="chat-history-sidebar"]').exists()).toBe(true)
   })
 })

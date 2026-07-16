@@ -42,6 +42,10 @@ public class ChatSession {
     @Column(name = "last_active_at", nullable = false)
     private Instant lastActiveAt;
 
+    /** 首条用户消息前 30 字，写入时算好，只在为空时写一次；供历史会话列表展示，非首轮不覆盖。 */
+    @Column(length = 64)
+    private String title;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 

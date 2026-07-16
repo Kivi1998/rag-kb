@@ -77,6 +77,18 @@ public class RedisMongoConversationStore implements ConversationStore {
                 .toList();
     }
 
+    @Override
+    public void deleteSession(UUID organizationId, UUID memberId, UUID sessionId) {
+        // MongoDB 是权威存储，删除失败必须让调用方感知（不吞异常）。
+        chatMessageRepository.deleteBySessionIdAndOrganizationIdAndMemberId(sessionId, organizationId, memberId);
+        try {
+            memoryRedisTemplate.delete(redisKey(sessionId));
+        } catch (RuntimeException ex) {
+            // Redis 滑动窗口 key 本身有 TTL 会自然过期，且不再被任何检索路径引用，删除失败不影响功能正确性。
+            log.warn("会话删除时 Redis 滑动窗口 key 清理失败，将依赖 TTL 自然过期: sessionId={}", sessionId, ex);
+        }
+    }
+
     private String redisKey(UUID sessionId) {
         return "chat:session:" + sessionId + ":messages";
     }

@@ -96,6 +96,26 @@ class RedisMongoConversationStoreTest {
     }
 
     @Test
+    void deleteSessionRemovesMongoMessagesAndRedisWindow() {
+        store.deleteSession(orgId, memberId, sessionId);
+
+        verify(repository, times(1))
+                .deleteBySessionIdAndOrganizationIdAndMemberId(sessionId, orgId, memberId);
+        verify(redisTemplate, times(1)).delete("chat:session:" + sessionId + ":messages");
+    }
+
+    @Test
+    void deleteSessionToleratesRedisFailureSinceKeyHasTtl() {
+        // Redis 是非权威缓存、且滑动窗口 key 本身有 TTL，删除失败不应让整个删除操作失败。
+        when(redisTemplate.delete(anyString())).thenThrow(new RuntimeException("Redis 连接失败"));
+
+        store.deleteSession(orgId, memberId, sessionId);
+
+        verify(repository, times(1))
+                .deleteBySessionIdAndOrganizationIdAndMemberId(sessionId, orgId, memberId);
+    }
+
+    @Test
     void recentRawMessagesDeserializesFromRedis() {
         ChatMessage message = ChatMessage.assistant("重疾险犹豫期过了还能退保吗", Instant.parse("2026-07-15T00:00:00Z"));
         String json = "{\"role\":\"assistant\",\"content\":\"重疾险犹豫期过了还能退保吗\",\"keyFact\":false,"

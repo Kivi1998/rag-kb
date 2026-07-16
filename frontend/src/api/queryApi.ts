@@ -13,9 +13,11 @@
  */
 
 import type {
+  ChatSessionSummary,
   ChunkEventPayload,
   DoneEventPayload,
   ErrorEventPayload,
+  Message,
   QueryEvent,
   RefusalEventPayload,
   SourceEventPayload
@@ -255,4 +257,69 @@ export async function createSession(
     throw new Error('创建会话响应缺少 sessionId')
   }
   return sessionId
+}
+
+/** 单个会话消息查询路径。 */
+export function sessionMessagesUrl(baseUrl: string, kbId: string, sessionId: string): string {
+  return `${sessionUrl(baseUrl, kbId)}/${encodeURIComponent(sessionId)}/messages`
+}
+
+/** 单个会话资源路径（删除用）。 */
+export function sessionResourceUrl(baseUrl: string, kbId: string, sessionId: string): string {
+  return `${sessionUrl(baseUrl, kbId)}/${encodeURIComponent(sessionId)}`
+}
+
+/** 查询某知识库下当前成员最近活跃的历史会话列表，按最后活跃时间倒序。 */
+export async function listSessions(
+  baseUrl: string,
+  kbId: string,
+  headers: Readonly<Record<string, string>>
+): Promise<ChatSessionSummary[]> {
+  const response = await fetch(sessionUrl(baseUrl, kbId), { headers })
+  if (!response.ok) {
+    throw new Error(`查询历史会话失败: HTTP ${response.status} ${response.statusText}`)
+  }
+  const payload = (await response.json()) as { data?: ChatSessionSummary[] }
+  return payload.data ?? []
+}
+
+/**
+ * 拉取某会话的历史消息，转换为前端 `Message[]`。后端长期存档不保留引用来源，
+ * 因此恢复的历史消息不带 `citations`——这是持久化范围的既有限制，不是 bug。
+ */
+export async function getSessionMessages(
+  baseUrl: string,
+  kbId: string,
+  sessionId: string,
+  headers: Readonly<Record<string, string>>
+): Promise<Message[]> {
+  const response = await fetch(sessionMessagesUrl(baseUrl, kbId, sessionId), { headers })
+  if (!response.ok) {
+    throw new Error(`查询会话消息失败: HTTP ${response.status} ${response.statusText}`)
+  }
+  const payload = (await response.json()) as {
+    data?: Array<{ role: string; content: string; createdAt: string }>
+  }
+  return (payload.data ?? []).map((message) => ({
+    id: crypto.randomUUID(),
+    role: message.role === 'assistant' ? 'assistant' : 'user',
+    content: message.content,
+    createdAt: message.createdAt
+  }))
+}
+
+/** 硬删除某个历史会话，级联清理服务端全部相关数据。 */
+export async function deleteSession(
+  baseUrl: string,
+  kbId: string,
+  sessionId: string,
+  headers: Readonly<Record<string, string>>
+): Promise<void> {
+  const response = await fetch(sessionResourceUrl(baseUrl, kbId, sessionId), {
+    method: 'DELETE',
+    headers
+  })
+  if (!response.ok) {
+    throw new Error(`删除会话失败: HTTP ${response.status} ${response.statusText}`)
+  }
 }
