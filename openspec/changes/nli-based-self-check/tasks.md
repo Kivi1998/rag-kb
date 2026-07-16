@@ -1,17 +1,17 @@
 ## 1. `nli-gateway` Python 服务
 
-- [ ] 1.1 新建 `nli-gateway/` 目录，结构参照 `parser-gateway/`（`app/__init__.py`、`app/main.py`、`requirements.txt`、`.env.example`、`tests/`），但完全独立、不共享代码
-- [ ] 1.2 `app/main.py`：FastAPI 应用，启动时加载 `IDEA-CCNL/Erlangshen-Roberta-110M-NLI`（transformers），提供 `GET /health`
-- [ ] 1.3 实现 `POST /nli`：请求体 `{"premise": "...", "hypothesis": "..."}`，响应 `{"label": "entailment"|"neutral"|"contradiction", "entailment_prob": float, "neutral_prob": float, "contradiction_prob": float}`
-- [ ] 1.4 编写 Python 测试（`tests/test_nli.py`）：正常推理、premise/hypothesis 缺失时返回 4xx、health 端点
+- [x] 1.1 新建 `nli-gateway/` 目录，结构参照 `parser-gateway/`（`app/__init__.py`、`app/main.py`、`app/model.py`、`requirements.txt`、`.env.example`、`tests/`），但完全独立、不共享代码
+- [x] 1.2 `app/main.py` + `app/model.py`：FastAPI 应用，启动时（lifespan）加载 `IDEA-CCNL/Erlangshen-Roberta-110M-NLI`（`BertForSequenceClassification`/`BertTokenizer`），提供 `GET /health`；`requirements.txt` 里 torch/transformers 版本按实际可安装解析结果锁定（torch==2.13.0/transformers==5.14.1，本机环境 torch==2.5.1 已不可用）
+- [x] 1.3 实现 `POST /nli`：请求体 `{"premise": "...", "hypothesis": "..."}`，响应 `{"label": "entailment"|"neutral"|"contradiction", "entailment_prob": float, "neutral_prob": float, "contradiction_prob": float}`；真实模型冒烟测试确认输出顺序 [entailment, neutral, contradiction] 与模型卡片一致
+- [x] 1.4 编写 Python 测试（`tests/test_nli.py`，6 个用例）：正常推理、premise/hypothesis 缺失时返回 422、health 端点两种状态；全部通过
 
 ## 2. 后端 `NliClient`
 
-- [ ] 2.1 新增 `NliClient` 接口（`backend/src/main/java/com/diit/ragkb/ragcore/nli/NliClient.java`），方法签名如 `NliVerdict check(String premise, String hypothesis)`
-- [ ] 2.2 新增 `NliVerdict` record（label + 三个概率字段）
-- [ ] 2.3 新增 `HttpNliClient` 实现，HTTP 调用 `RAG_NLI_ENDPOINT`；新增 `RagModelProperties`（或独立配置类）里的 `rag.nli.enabled`/`endpoint`/`timeout-ms` 配置项
-- [ ] 2.4 Spring 配置：`rag.nli.enabled=true` 时注册 `NliClient` bean，`false`/未配置时不注册（`ObjectProvider<NliClient>` 取不到实例，走 fail-open）
-- [ ] 2.5 编写 `HttpNliClientTest`：正常调用解析、HTTP 异常抛 `ModelClientException`（参照 `OpenAiCompatibleRerankerClient` 的异常处理约定）
+- [x] 2.1 新增 `NliClient` 接口（`backend/src/main/java/com/diit/ragkb/ragcore/nli/NliClient.java`），方法签名 `NliVerdict check(String premise, String hypothesis)`
+- [x] 2.2 新增 `NliVerdict` record（label + 三个概率字段）
+- [x] 2.3 新增 `HttpNliClient` 实现，HTTP 调用 `RAG_NLI_ENDPOINT`；新增独立的 `RagNliProperties`（`rag.nli` 前缀，不嵌套进 `RagModelProperties`，因为不是 OpenAI 兼容端点、不需要 apiKey/model 字段），`application.yml` 新增 `rag.nli.*` 映射
+- [x] 2.4 Spring 配置：`RagModelConfiguration` 新增 `nliClient` bean，`@ConditionalOnProperty(prefix = "rag.nli", name = "enabled")`，`false`/未配置时不注册（`ObjectProvider<NliClient>` 取不到实例，走 fail-open）
+- [x] 2.5 编写 `HttpNliClientTest`（3 个用例，用 `com.sun.net.httpserver.HttpServer` 起本地测试服务器，仿照 `OpenAiCompatibleChatCompletionClientTest` 的写法）：正常调用解析、HTTP 非 2xx 抛 `ModelClientException`、响应缺字段抛 `ModelClientException`；完整后端测试套件通过，无回归
 
 ## 3. 阈值校准（必须先完成，产出真实数字后才能进入第 4 组）
 
