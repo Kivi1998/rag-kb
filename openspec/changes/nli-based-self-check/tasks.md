@@ -20,9 +20,9 @@
 - [x] 3.3 产出校准报告 `eval/reports/nli-threshold-calibration-20260716.md`——**负面结果**：形式上最优阈值 t=0.195（F1=0.837），但"应支撑"的 8 条样本 entailment_prob 全部很低（0.0006–0.2418，多数被判成 contradiction 而非 entailment），与"不该支撑"组高度重叠，F1 由 2 个孤立偏高点撑起，不是真实判别信号；排查确认不是截断问题（134 token，远低于上限），是 110M 模型对长篇技术中文的分布外问题
 - [x] 3.4 用此前 6 条样本回归对照：F1 从 0.837 掉到 0.667（比上次 Reranker 的 4/6 命中率更差），证实上面的负面结论不是偶然
 
-**⚠️ 暂停：第 3 组的真实校准结果不支持继续第 4 组。** 详见对话中给用户的报告，需要用户决策后再继续（换更大的 NLI 模型 / 放弃 NLI 路线保留 Reranker / 接受当前结果先上线再迭代 三选一，或用户另有指示）。
+**⚠️ 用户决策（2026-07-16）：暂缓第 4-5 组，保留第 1-3 组的基础设施先提交。** `nli-gateway`/`NliClient` 默认 `rag.nli.enabled=false`，不影响现有 Reranker 版本的 `AnswerSelfChecker`（未被这次改动触碰），因此不需要"注释掉"任何东西。后续待办已记入 `TODOS.md`："自检机制仍待解决"条目——换一个更大的 NLI 模型（如 325M 的 `Erlangshen-MacBERT-325M-NLI-Chinese`）重新跑 `analyze_nli_threshold.py` 校准，通过后再回来完成第 4-5 组。
 
-## 4. `AnswerSelfChecker` 重构（使用第 3 组产出的真实阈值）
+## 4. `AnswerSelfChecker` 重构（暂缓，等换更大模型重新校准通过后再做；使用第 3 组产出的真实阈值）
 
 - [ ] 4.1 `AnswerSelfChecker` 构造参数从 `RerankerClient` 改为 `NliClient`
 - [ ] 4.2 "有引用句子"核查逻辑改为：对每个引用资料调用 `NliClient.check(premise=资料原文, hypothesis=句子)`，取多次调用里 `entailment_prob` 最高的一次
