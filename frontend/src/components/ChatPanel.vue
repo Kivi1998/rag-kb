@@ -27,6 +27,10 @@ const transcript = ref<HTMLElement | null>(null)
 const sessionId = ref<string | null>(null)
 const sessionReady = ref(false)
 const historySidebar = ref<InstanceType<typeof ChatHistorySidebar> | null>(null)
+/** 引用来源不再默认全部展示在回答下方，点击正文里的 [资料N] 才在右侧弹出对应这一条。 */
+const citationDrawerVisible = ref(false)
+const selectedCitation = ref<Citation | null>(null)
+const selectedCitationIndex = ref<number | null>(null)
 
 /** localStorage 记录每个知识库最后活跃的会话，供刷新/重新进入时恢复历史，而不是总是新建。 */
 function lastSessionStorageKey(kbId: string): string {
@@ -55,8 +59,8 @@ function writeLastSessionId(kbId: string, id: string) {
  * 用 v-html 注入，防止检索到的文档内容里混入的 HTML/脚本片段被当作真实标签执行。
  *
  * 正文里的 `[资料N]` 在 markdown 解析前先转成可点击的 `<sup>`（data-ref 记录编号），
- * 点击后由 handleCitationClick 滚动+高亮到下方对应的引用卡片；DOMPurify 默认允许
- * class/data-* 属性通过，不需要额外放宽白名单。 */
+ * 点击后由 handleCitationClick 在右侧弹出该条引用；DOMPurify 默认允许 class/data-*
+ * 属性通过，不需要额外放宽白名单。 */
 function renderMarkdown(content: string): string {
   const withCitationRefs = content.replace(
     /\[资料(\d+)\]/g,
@@ -66,19 +70,19 @@ function renderMarkdown(content: string): string {
   return DOMPurify.sanitize(html)
 }
 
-/** 点击正文里的 `[资料N]`（渲染为 `.citation-ref`）时，滚动到同一条消息下方对应的
- * 引用卡片并短暂高亮，帮助核对出处；点击其他内容不做任何处理。 */
-function handleCitationClick(event: MouseEvent) {
+/** 点击正文里的 `[资料N]`（渲染为 `.citation-ref`）时，从这一条消息的 citations 里
+ * 取出对应的第 N 条，在右侧抽屉里展示来源文件/定位/原文片段；点击其他内容不处理。 */
+function handleCitationClick(event: MouseEvent, message: Message) {
   const target = (event.target as HTMLElement | null)?.closest('.citation-ref')
   if (!target) return
   const ref = target.getAttribute('data-ref')
   if (!ref) return
-  const messageArticle = target.closest('.message')
-  const card = messageArticle?.querySelector(`.citation-card[data-index="${ref}"]`)
-  if (!(card instanceof HTMLElement)) return
-  card.scrollIntoView({ behavior: 'smooth', block: 'center' })
-  card.classList.add('citation-card-highlighted')
-  window.setTimeout(() => card.classList.remove('citation-card-highlighted'), 1600)
+  const index = Number.parseInt(ref, 10)
+  const citation = message.citations?.[index - 1]
+  if (!citation) return
+  selectedCitation.value = citation
+  selectedCitationIndex.value = index
+  citationDrawerVisible.value = true
 }
 
 const canSend = computed(() => !!props.kbId && !!question.value.trim() && !sending.value && sessionReady.value)
@@ -352,23 +356,9 @@ watch(
               v-if="message.role === 'assistant' && message.content"
               class="message-content message-content-markdown"
               v-html="renderMarkdown(message.content)"
-              @click="handleCitationClick"
+              @click="(event: MouseEvent) => handleCitationClick(event, message)"
             />
             <p v-else class="message-content">{{ message.content || (sending ? '正在生成…' : '') }}</p>
-            <div v-if="message.citations?.length" class="citations">
-              <p class="citation-title">参考来源</p>
-              <article
-                v-for="(citation, index) in message.citations"
-                :key="`${citation.documentId}-${index}`"
-                :data-index="index + 1"
-                class="citation-card"
-              >
-                <strong>[{{ index + 1 }}] {{ citation.documentName || '文档不可访问' }}</strong>
-                <span v-if="citationLocation(citation)" class="citation-location">{{ citationLocation(citation) }}</span>
-                <p>{{ citation.snippet }}</p>
-                <small v-if="citation.score !== null">相关度 {{ citation.score.toFixed(3) }}</small>
-              </article>
-            </div>
             <p v-if="message.selfCheckWarning" class="self-check-warning">{{ message.selfCheckWarning }}</p>
           </article>
         </div>
@@ -387,6 +377,20 @@ watch(
         </form>
       </div>
     </div>
+    <el-drawer
+      v-model="citationDrawerVisible"
+      title="引用来源"
+      direction="rtl"
+      size="380px"
+      data-testid="citation-drawer"
+    >
+      <div v-if="selectedCitation" class="citation-detail">
+        <strong>[{{ selectedCitationIndex }}] {{ selectedCitation.documentName || '文档不可访问' }}</strong>
+        <span v-if="citationLocation(selectedCitation)" class="citation-location">{{ citationLocation(selectedCitation) }}</span>
+        <p class="citation-snippet">{{ selectedCitation.snippet }}</p>
+        <small v-if="selectedCitation.score !== null">相关度 {{ selectedCitation.score.toFixed(3) }}</small>
+      </div>
+    </el-drawer>
   </section>
 </template>
 
@@ -444,24 +448,17 @@ watch(
   padding: 0 1px;
 }
 .message-content-markdown :deep(.citation-ref:hover) { text-decoration: underline; }
-.citations { margin-top: 10px; border-top: 1px dashed var(--el-border-color); padding-top: 8px; }
-.citation-title { margin: 0 0 7px; color: var(--el-text-color-secondary); font-size: 12px; }
-.citation-card {
-  margin: 6px 0;
-  padding: 8px;
-  border-radius: 5px;
-  background: var(--brand-surface-soft);
-  border: 1px solid var(--brand-border-soft);
-  font-size: 13px;
-  transition: background-color 0.3s ease, border-color 0.3s ease;
+.citation-detail { display: flex; flex-direction: column; gap: 8px; font-size: 13px; }
+.citation-location, .citation-detail small { color: var(--el-text-color-secondary); }
+.citation-snippet {
+  margin: 0;
+  padding: 10px;
+  border-radius: 6px;
+  border-left: 3px solid var(--el-color-primary-light-5);
+  background: var(--el-color-primary-light-9);
+  white-space: pre-wrap;
+  line-height: 1.6;
 }
-.citation-card-highlighted {
-  background: var(--el-color-primary-light-8);
-  border-color: var(--el-color-primary-light-5);
-}
-.citation-card strong, .citation-card span, .citation-card small { display: block; }
-.citation-card p { margin: 5px 0; white-space: pre-wrap; }
-.citation-location, .citation-card small { color: var(--el-text-color-secondary); }
 .self-check-warning {
   margin: 10px 0 0;
   padding: 8px 10px;

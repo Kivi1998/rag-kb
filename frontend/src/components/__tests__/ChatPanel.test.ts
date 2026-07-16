@@ -63,35 +63,45 @@ describe('ChatPanel', () => {
       headers: { Authorization: 'Bearer token-1', 'X-Org-Id': 'org-1' }
     }))
     expect(wrapper.text()).toContain('请检查数据库连接。')
-    expect(wrapper.text()).toContain('部署说明.md')
-    expect(wrapper.text()).toContain('第 2 页')
+    // 引用来源不再默认展示在回答下方（改为点击 [资料N] 才在右侧抽屉展示），
+    // 所以这里不断言"部署说明.md"/"第 2 页"这些原来的卡片内容。
   })
 
-  it('点击正文里的 [资料N] 会滚动+高亮下方对应的引用卡片', async () => {
+  it('引用来源默认不展示在回答下方；点击正文里的 [资料N] 才在右侧抽屉展示对应那一条', async () => {
     vi.mocked(openStream).mockReturnValue(streamOf([
-      { eventType: 'source', data: { citation: { documentId: 'd1', documentName: '部署说明.md', headingPath: ['部署'], snippet: '检查数据库连接', pageNo: 2, lineStart: 4, lineEnd: 5, score: 0.91 } } },
+      { eventType: 'source', data: { citation: { documentId: 'd1', documentName: '部署说明.md', headingPath: ['部署'], snippet: '检查数据库连接的详细说明', pageNo: 2, lineStart: 4, lineEnd: 5, score: 0.91 } } },
       { eventType: 'chunk', data: { content: '请检查数据库连接 [资料1]。' } },
       { eventType: 'done', data: {} }
     ]) as never)
-    const wrapper = mount(ChatPanel, { props: { kbId: 'kb-1' }, global: { plugins: [ElementPlus] } })
+    const wrapper = mount(ChatPanel, {
+      props: { kbId: 'kb-1' },
+      global: { plugins: [ElementPlus] },
+      attachTo: document.body
+    })
     await flushPromises()
     await wrapper.find('textarea').setValue('如何排查启动失败？')
     await wrapper.find('form').trigger('submit')
     await flushPromises()
     await drainReveal()
 
+    // 默认不展示来源卡片/片段内容。
+    expect(wrapper.text()).not.toContain('部署说明.md')
+    expect(document.body.textContent).not.toContain('检查数据库连接的详细说明')
+
     const ref = wrapper.find('.citation-ref')
     expect(ref.exists()).toBe(true)
     expect(ref.attributes('data-ref')).toBe('1')
-    const card = wrapper.find('.citation-card[data-index="1"]')
-    expect(card.exists()).toBe(true)
-    expect(card.classes()).not.toContain('citation-card-highlighted')
-
-    card.element.scrollIntoView = vi.fn()
     await ref.trigger('click')
+    await flushPromises()
 
-    expect(card.element.scrollIntoView).toHaveBeenCalled()
-    expect(card.classes()).toContain('citation-card-highlighted')
+    // el-drawer 默认 teleport 到 document.body，不在 wrapper 的 DOM 子树内，需要直接查 body。
+    const drawer = document.querySelector('[data-testid="citation-drawer"]')
+    expect(drawer).not.toBeNull()
+    expect(drawer?.textContent).toContain('部署说明.md')
+    expect(drawer?.textContent).toContain('检查数据库连接的详细说明')
+    expect(drawer?.textContent).toContain('第 2 页')
+
+    wrapper.unmount()
   })
 
   it('self_check_warning 事件渲染为警示提醒块，不影响正文与来源展示', async () => {
