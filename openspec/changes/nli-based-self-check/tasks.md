@@ -15,10 +15,12 @@
 
 ## 3. 阈值校准（必须先完成，产出真实数字后才能进入第 4 组）
 
-- [ ] 3.1 扩大此前 6 条真实语料构造的测试样本到 20-30 条，覆盖准确复述/完全无关编造/部分相关编造/张冠李戴四类，继续从 `rag_chunks_eval_v3` 对应语料摘取资料原文
-- [ ] 3.2 新增 `eval/scripts/analyze_nli_threshold.py`（或 Java 版本，仿照 `analyze_refusal_threshold.py`），跑真实 `nli-gateway` 记录每条样本的 `entailment_prob`，扫描候选阈值选 F1 最优点
-- [ ] 3.3 产出校准报告 `eval/reports/nli-threshold-calibration-<日期>.md`（格式仿照 `refusal-threshold-calibration-20260714.md`），如实记录 F1/精确率/召回率与样本规模局限
-- [ ] 3.4 用此前的 6 条样本作回归对照，记录新阈值下这 6 条的命中情况变化（不预设一定变好）
+- [x] 3.1 扩大此前 6 条真实语料构造的测试样本到 26 条（`eval/datasets/nli-self-check-calibration-set.jsonl`），覆盖准确复述(8)/完全无关编造(6)/部分相关编造(7)/张冠李戴(5)四类，从 `rag_chunks_eval_v3` 对应语料摘取 8 段真实资料原文
+- [x] 3.2 新增 `eval/scripts/analyze_nli_threshold.py`（仿照 `analyze_refusal_threshold.py`），跑真实 `nli-gateway` 记录每条样本的 `entailment_prob`，扫描候选阈值选 F1 最优点
+- [x] 3.3 产出校准报告 `eval/reports/nli-threshold-calibration-20260716.md`——**负面结果**：形式上最优阈值 t=0.195（F1=0.837），但"应支撑"的 8 条样本 entailment_prob 全部很低（0.0006–0.2418，多数被判成 contradiction 而非 entailment），与"不该支撑"组高度重叠，F1 由 2 个孤立偏高点撑起，不是真实判别信号；排查确认不是截断问题（134 token，远低于上限），是 110M 模型对长篇技术中文的分布外问题
+- [x] 3.4 用此前 6 条样本回归对照：F1 从 0.837 掉到 0.667（比上次 Reranker 的 4/6 命中率更差），证实上面的负面结论不是偶然
+
+**⚠️ 暂停：第 3 组的真实校准结果不支持继续第 4 组。** 详见对话中给用户的报告，需要用户决策后再继续（换更大的 NLI 模型 / 放弃 NLI 路线保留 Reranker / 接受当前结果先上线再迭代 三选一，或用户另有指示）。
 
 ## 4. `AnswerSelfChecker` 重构（使用第 3 组产出的真实阈值）
 
