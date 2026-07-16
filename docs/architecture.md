@@ -23,7 +23,7 @@ Vue 前端
             ├─ 文档解析与技术切块
             ├─ Embedding / Rerank / LLM Client
             ├─ Elasticsearch：BM25 + kNN + RRF
-            ├─ Conversation Memory：滑动窗口 / 指代消解 / 用户画像（2026-07-15 新增）
+            ├─ Conversation Memory：滑动窗口 / 指代消解 / 用户画像 / 会话历史列表（2026-07-15 新增）
             ├─ 引用构造、拒答与 SSE 输出
             └─ 评测、重试与可观测性
 
@@ -72,6 +72,13 @@ MongoDB（会话消息长期存档 + 用户画像，只服务记忆子系统）/
 - 画像内容只影响生成阶段的 System 上下文，不影响 `HybridRetriever` 的检索排序/过滤参数；但指代消解后的 `resolvedQuestion` 向量本身，在画像检索阶段算好后会通过 `MemoryContext`/`RetrievalOptions` 带给检索阶段直接复用（纯粹是避免同一句话被调用两次 Embedding 的效率优化，不构成"画像影响检索"）；
 - 会话生命周期管理（`ChatSessionService`）不受 `rag.memory.enabled` 开关门控、常驻注册——因为 `sessionId` 在 `QueryRequest` 上始终必填，即使记忆子系统（Redis 滑动窗口/MongoDB 长期存档/ES 语义检索）关闭，会话归属校验也必须生效，不能变成摆设；
 - 同样不引入 LangChain/LlamaIndex 等编排框架，指代消解/摘要压缩/画像提炼均为自研 prompt + 现有模型客户端。
+
+### 决策 6：历史会话列表——标题写时算好存库，硬删除而非软删除
+
+- 前端此前每次刷新/重新进入知识库都无条件新建会话，未消费已有的会话生命周期与长期存档能力；新增 `GET .../sessions` 列表接口与前端历史侧边栏补齐这一消费侧，详见 [brainstorming 设计文档](superpowers/specs/2026-07-15-conversation-history-list-design.md)；
+- 会话标题（首条用户消息前 30 字）在写入时算好存 `chat_session.title`，而非列表查询时对每个会话现查 MongoDB——避免列表接口产生 N+1 跨存储查询；
+- 删除会话选择硬删除（级联清理 Elasticsearch→MongoDB/Redis→Postgres），而非软删除标记：用户对"删除"的直觉预期就是清除，且没有强需求要保留已删除会话用于审计/恢复；删除不影响 `memory_items` 用户画像（画像是 member 维度长期记忆，与会话生命周期无关）；
+- 前端用 `localStorage` 记录每个知识库最后活跃的会话 ID 实现"刷新回到刚才那个对话"，而非引入路由级 `sessionId` 参数——因为当前 `kbId` 本身就不是路由参数（由 `kbStore.selectedKbId` 驱动），引入 URL 级会话参数需要同时改造 kbId 的路由方式，改动面明显更大。
 
 ## 四、当前重构边界
 

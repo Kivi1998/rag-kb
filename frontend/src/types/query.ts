@@ -88,8 +88,14 @@ export interface Message {
 /** 提问请求（POST /api/v1/knowledge-bases/{kbId}/query） */
 export interface QueryRequest {
   question: string
-  /** 历史消息（用于多轮对话；不含当前问题） */
-  history?: ReadonlyArray<Pick<Message, 'role' | 'content'>>
-  /** 是否开启 Query 改写/HYDE（生产由服务端默认决定；前端可显式覆盖） */
-  rewrite?: boolean
+  /** 多轮对话会话标识，必填；由创建会话接口获取。 */
+  sessionId: string
+}
+
+/** 历史会话列表项（GET /api/v1/knowledge-bases/{kbId}/sessions），不含消息内容。 */
+export interface ChatSessionSummary {
+  sessionId: string
+  /** 首条用户消息前 30 字；会话尚无消息时为空，前端展示层负责兜底文案。 */
+  title: string | null
+  lastActiveAt: string
 }
