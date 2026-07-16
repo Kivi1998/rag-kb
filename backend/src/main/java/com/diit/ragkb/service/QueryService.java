@@ -6,6 +6,7 @@ import com.diit.ragkb.ragcore.conversation.ConversationMemoryOrchestrator;
 import com.diit.ragkb.ragcore.conversation.MemoryContext;
 import com.diit.ragkb.ragcore.generation.AnswerGenerator;
 import com.diit.ragkb.ragcore.generation.CitationBuilder;
+import com.diit.ragkb.ragcore.generation.FactVerificationGate;
 import com.diit.ragkb.ragcore.generation.GenerationMetrics;
 import com.diit.ragkb.ragcore.model.Citation;
 import com.diit.ragkb.ragcore.model.QueryEvent;
@@ -100,21 +101,26 @@ public class QueryService {
             eventConsumer.accept(QueryEvent.refusal(query.refusalReason()));
             return GenerationMetrics.none();
         }
-        query.citations().forEach(citation -> eventConsumer.accept(QueryEvent.source(citation)));
         StringBuilder answerBuilder = new StringBuilder();
-        GenerationMetrics metrics = answerGenerator.streamWithMetrics(query.resolvedQuestion(), query.contexts(),
-                query.profileContext(), event -> {
-                    if (event.content() != null) answerBuilder.append(event.content());
-                    eventConsumer.accept(event);
-                });
+        FactVerificationGate gate = new FactVerificationGate(query.citations(), event -> {
+            if (event.content() != null) answerBuilder.append(event.content());
+            eventConsumer.accept(event);
+        });
+        GenerationMetrics rawMetrics = answerGenerator.streamWithMetrics(query.resolvedQuestion(), query.contexts(),
+                query.profileContext(), gate.asConsumer());
+        gate.flush(); // 模型可能整段输出就是判断行本身，流结束时仍需收尾解析一次缓冲区。
+        GenerationMetrics metrics = gate.refusedByFactVerification()
+                ? rawMetrics.withFactVerificationRefusalReason("NO_RETRIEVAL")
+                : rawMetrics;
         ChatSessionService chatSessionService = chatSessionServiceProvider.getIfAvailable();
         if (chatSessionService != null) {
-            // 会话标题与 rag.memory.enabled 无关（纯 Postgres 关注点），独立于下面的记忆编排调用。
+            // 会话标题只依赖问题文本，与本轮是否被事实核验拒答无关（纯 Postgres 关注点）。
             chatSessionService.maybeSetTitle(query.organizationId(), query.knowledgeBaseId(), query.memberId(),
                     query.sessionId(), query.question());
         }
         ConversationMemoryOrchestrator orchestrator = memoryOrchestratorProvider.getIfAvailable();
-        if (orchestrator != null) {
+        if (orchestrator != null && !gate.refusedByFactVerification()) {
+            // 事实核验拒答没有产生真实回答，与检索阶段拒答一致，不计入会话记忆（避免记一条空答案）。
             orchestrator.recordTurn(query.organizationId(), query.knowledgeBaseId(), query.memberId(),
                     query.sessionId(), query.question(), answerBuilder.toString());
         }

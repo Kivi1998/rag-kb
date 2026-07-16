@@ -244,6 +244,43 @@ class QueryServiceTest {
         assertEquals(precomputedVector, optionsCaptor.getValue().precomputedQueryVector());
     }
 
+    @Test
+    void factVerificationRefusalDoesNotEmitSourceAndSkipsMemoryRecording() {
+        UUID orgId = UUID.randomUUID();
+        UUID kbId = UUID.randomUUID();
+        UUID documentId = UUID.randomUUID();
+        UUID sessionId = UUID.randomUUID();
+        TenantContext.set(orgId, UUID.randomUUID(), "MEMBER");
+        KnowledgeBaseService kbService = mock(KnowledgeBaseService.class);
+        when(kbService.getByIdAndCurrentOrg(kbId)).thenReturn(new KnowledgeBase());
+        KnowledgeDocument document = new KnowledgeDocument();
+        document.setId(documentId);
+        document.setName("部署手册.md");
+        KnowledgeDocumentRepository documents = mock(KnowledgeDocumentRepository.class);
+        when(documents.findByKnowledgeBaseIdAndOrgIdOrderByCreatedAtDesc(kbId, orgId)).thenReturn(List.of(document));
+        RetrievedChunk retrieved = retrieved(orgId, kbId, documentId);
+        Retriever retriever = retriever(new RetrievalResult(List.of(retrieved), null));
+        AnswerGenerator generator = (question, contexts, consumer) ->
+                consumer.accept(QueryEvent.chunk("{\"found\": false}"));
+
+        ConversationMemoryOrchestrator orchestrator = mock(ConversationMemoryOrchestrator.class);
+        when(orchestrator.prepareContext(eq(orgId), any(), eq(sessionId), eq("随机数种子设的多少？")))
+                .thenReturn(new com.diit.ragkb.ragcore.conversation.MemoryContext("随机数种子设的多少？", null, null));
+        ObjectProvider<ConversationMemoryOrchestrator> orchestratorProvider = mock(ObjectProvider.class);
+        when(orchestratorProvider.getIfAvailable()).thenReturn(orchestrator);
+        QueryService service = new QueryService(retriever, generator, kbService, documents, emptyProvider(),
+                orchestratorProvider);
+
+        QueryService.PreparedQuery prepared = service.prepare(kbId, sessionId, "随机数种子设的多少？");
+        List<QueryEvent> events = new ArrayList<>();
+        GenerationMetrics metrics = service.stream(prepared, events::add);
+
+        assertEquals(List.of("refusal"), events.stream().map(QueryEvent::sseEventName).toList());
+        assertEquals("未在当前知识库中检索到该问题的具体答案", events.get(0).message());
+        assertEquals("NO_RETRIEVAL", metrics.factVerificationRefusalReason());
+        verify(orchestrator, never()).recordTurn(any(), any(), any(), any(), any(), any());
+    }
+
     private Retriever retriever(RetrievalResult result) {
         return new Retriever() {
             @Override public List<RetrievedChunk> retrieve(UUID organizationId, UUID knowledgeBaseId, String query,

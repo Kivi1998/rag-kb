@@ -71,9 +71,8 @@ public class QueryController {
             send(emitter, QueryEvent.done());
             emitter.complete();
             long generationLatencyMs = elapsedMs(generationStartedAt);
-            queryAuditService.recordSafely(prepared.audit(), prepared.refusalReason() == null
-                    ? QueryAuditStatus.COMPLETED : QueryAuditStatus.REFUSED, metrics, generationLatencyMs,
-                    prepared.audit().retrievalLatencyMs() + generationLatencyMs, null);
+            queryAuditService.recordSafely(prepared.audit(), resolveStatus(prepared, metrics), metrics,
+                    generationLatencyMs, prepared.audit().retrievalLatencyMs() + generationLatencyMs, null);
         } catch (Exception ex) {
             QueryAuditStatus status = isClientDisconnected(ex) ? QueryAuditStatus.CANCELLED : QueryAuditStatus.FAILED;
             log.warn("知识库 SSE 问答失败 traceId={} status={} errorCode={}", prepared.audit().traceId(), status,
@@ -130,6 +129,16 @@ public class QueryController {
         } catch (IOException ex) {
             throw new IllegalStateException("SSE 客户端连接已断开", ex);
         }
+    }
+
+    /**
+     * 审计状态判断需要同时看检索阶段拒答（{@code prepared.refusalReason()}）与生成阶段事实核验拒答
+     * （{@code metrics.factVerificationRefusalReason()}）——后者发生在 {@code prepared} 固化之后，
+     * 只看前者会把事实核验拒答误记为 COMPLETED。
+     */
+    static QueryAuditStatus resolveStatus(QueryService.PreparedQuery prepared, GenerationMetrics metrics) {
+        boolean refused = prepared.refusalReason() != null || metrics.factVerificationRefusalReason() != null;
+        return refused ? QueryAuditStatus.REFUSED : QueryAuditStatus.COMPLETED;
     }
 
     static Map<String, Object> payload(QueryEvent event) {
