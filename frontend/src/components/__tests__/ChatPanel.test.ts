@@ -67,6 +67,33 @@ describe('ChatPanel', () => {
     expect(wrapper.text()).toContain('第 2 页')
   })
 
+  it('点击正文里的 [资料N] 会滚动+高亮下方对应的引用卡片', async () => {
+    vi.mocked(openStream).mockReturnValue(streamOf([
+      { eventType: 'source', data: { citation: { documentId: 'd1', documentName: '部署说明.md', headingPath: ['部署'], snippet: '检查数据库连接', pageNo: 2, lineStart: 4, lineEnd: 5, score: 0.91 } } },
+      { eventType: 'chunk', data: { content: '请检查数据库连接 [资料1]。' } },
+      { eventType: 'done', data: {} }
+    ]) as never)
+    const wrapper = mount(ChatPanel, { props: { kbId: 'kb-1' }, global: { plugins: [ElementPlus] } })
+    await flushPromises()
+    await wrapper.find('textarea').setValue('如何排查启动失败？')
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+    await drainReveal()
+
+    const ref = wrapper.find('.citation-ref')
+    expect(ref.exists()).toBe(true)
+    expect(ref.attributes('data-ref')).toBe('1')
+    const card = wrapper.find('.citation-card[data-index="1"]')
+    expect(card.exists()).toBe(true)
+    expect(card.classes()).not.toContain('citation-card-highlighted')
+
+    card.element.scrollIntoView = vi.fn()
+    await ref.trigger('click')
+
+    expect(card.element.scrollIntoView).toHaveBeenCalled()
+    expect(card.classes()).toContain('citation-card-highlighted')
+  })
+
   it('self_check_warning 事件渲染为警示提醒块，不影响正文与来源展示', async () => {
     vi.mocked(openStream).mockReturnValue(streamOf([
       { eventType: 'chunk', data: { content: '这是一句正文内容。' } },
