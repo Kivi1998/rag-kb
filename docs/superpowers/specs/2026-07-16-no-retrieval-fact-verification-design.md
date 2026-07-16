@@ -59,23 +59,33 @@ HybridRetriever.retrieveWithDecision()（rerank 阈值判断，不拒答）
 - 下游真实 consumer
 - 本轮的 `citations` 列表（用于延迟发送）
 - 内部缓冲区（`StringBuilder`）与已解析状态（未解析 / 直通正文 / 已拒答丢弃）
+- 判定结果（是否触发了事实核验拒答），供 `stream()` 结束后读取
 
-对外暴露 `Consumer<QueryEvent> asConsumer()`，`QueryService.stream()` 里原来直接传给 `answerGenerator.streamWithMetrics()` 的 consumer 改为先包一层这个 Gate。
+对外暴露 `Consumer<QueryEvent> asConsumer()` 与 `boolean refusedByFactVerification()`，`QueryService.stream()` 里原来直接传给 `answerGenerator.streamWithMetrics()` 的 consumer 改为先包一层这个 Gate。
+
+### 审计状态需要跟着改（检查现有代码发现的必改项）
+
+`QueryController.query()` 目前只按 `prepared.refusalReason() == null ? COMPLETED : REFUSED` 决定审计状态（`QueryController.java:74-76`），而 `prepared`（即 `PreparedQuery`）在 `QueryService.prepare()` 阶段就已经固化——早于生成阶段，`FactVerificationGate` 判定的 `found:false` 根本反映不到这个字段上。如果不改，事实核验触发的拒答会被审计系统错误记录成 `COMPLETED`（用户看到的是拒答，后台却记着"正常回答完成"），这对一个把拒答当作合规能力的系统是不可接受的静默数据失真。
+
+修法：`GenerationMetrics` 增加一个可空字段 `String factVerificationRefusalReason`（默认 `null`）；`QueryService.stream()` 在 `FactVerificationGate` 判定 `found:false` 后，把这个原因写进最终返回的 `GenerationMetrics`；`QueryController.query()` 的审计状态判断改为 `prepared.refusalReason() != null || metrics.factVerificationRefusalReason() != null ? REFUSED : COMPLETED`。
 
 ## 数据流：三种结局
 
-1. **正常回答**（`found:true`）：SOURCE 事件（延迟发出）→ CHUNK 事件（换行后正文，含首个 chunk 的剩余部分 + 后续直通）→ DONE
-2. **事实核验拒答**（`found:false`）：REFUSAL 事件（固定文案）→ DONE，不发 SOURCE、不发任何正文；`recordTurn`/审计记录该轮为拒答（复用现有 `refusalReason` 字段传递机制）
-3. **格式异常兜底**（fail-open）：模型未按格式输出 JSON 前缀 → 200 字符缓冲耗尽仍找不到合法首行 → 把已缓冲内容当正文，正常发 SOURCE + CHUNK，等同于机制关闭前的原有行为，不引入新的拒答误伤
+1. **正常回答**（`found:true`）：SOURCE 事件（延迟发出）→ CHUNK 事件（换行后正文，含首个 chunk 的剩余部分 + 后续直通）→ DONE；`GenerationMetrics.factVerificationRefusalReason()` 为 `null`，审计记 `COMPLETED`
+2. **事实核验拒答**（`found:false`）：REFUSAL 事件（固定文案）→ DONE，不发 SOURCE、不发任何正文；`GenerationMetrics.factVerificationRefusalReason()` 写入固定原因标识，`QueryController` 据此把审计状态记为 `REFUSED`（而非误记 `COMPLETED`，见上一节）
+3. **格式异常兜底**（fail-open）：模型未按格式输出 JSON 前缀 → 200 字符缓冲耗尽仍找不到合法首行 → 把已缓冲内容当正文，正常发 SOURCE + CHUNK，等同于机制关闭前的原有行为，不引入新的拒答误伤，审计记 `COMPLETED`
 
 ## 测试
 
 **单元测试**（`FactVerificationGateTest`）：
 - JSON 跨多个 chunk 事件被切开仍能正确拼出完整判断
-- `found:true` → 先 SOURCE 后正文，正文包含换行后的剩余内容
-- `found:false` → 只有一条 REFUSAL，不发 SOURCE、不发正文
+- `found:true` → 先 SOURCE 后正文，正文包含换行后的剩余内容，`refusedByFactVerification()` 为 `false`
+- `found:false` → 只有一条 REFUSAL，不发 SOURCE、不发正文，`refusedByFactVerification()` 为 `true`
 - 缓冲超过 200 字符无换行 → fail-open 全部当正文，不拒答
 - 模型输出不含合法 JSON（如直接开始正常作答）→ fail-open
+
+**`QueryServiceTest`/`QueryControllerTest` 补充用例**：
+- 事实核验拒答场景下，`QueryService.stream()` 返回的 `GenerationMetrics.factVerificationRefusalReason()` 非空，且 `QueryController` 最终记录的审计状态为 `REFUSED`（不是 `COMPLETED`）——这是本设计新增的审计正确性回归点，不能遗漏
 
 **真实回归验证**：新增 Java 小工具（复用 `HybridRetriever`/`AnswerGenerator` 生产代码，仿照 `EvalRetrievalRunner` 风格，不经 HTTP），对 8 道 NO_RETRIEVAL 标注题 + 抽样 20-30 道应答题跑真实检索+生成：
 - NO_RETRIEVAL 题命中拒答的比例（越高越好）
