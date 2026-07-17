@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from 'vue'
-import { CircleClose, Promotion } from '@element-plus/icons-vue'
+import { computed, nextTick, reactive, ref, watch } from 'vue'
+import { CircleClose, Loading, Promotion } from '@element-plus/icons-vue'
 import DOMPurify from 'dompurify'
 import { marked } from 'marked'
 import { useAuthStore } from '@/stores/authStore'
@@ -177,8 +177,14 @@ function headers() {
   return result
 }
 
+/** 用 reactive() 包一层再塞进 messages 数组：如果直接 push 一个普通对象、
+ * 后面再靠本地变量原样引用去改它的属性（assistantMessage.content += ...），
+ * 这些修改会绕过 Vue 的响应式 Proxy set 陷阱——虽然内存里的值确实变了，但
+ * Vue 从来没被通知"该重新渲染了"，逐字吐出的动画因此完全不生效，只有等
+ * sending 变量本身发生真正的响应式变化（生成结束那一刻）才会触发一次整体
+ * 重渲染，看起来就是"正在生成…"卡住不动、生成完毕后答案整段突然冒出来。 */
 function createAssistantMessage(): Message {
-  return { id: crypto.randomUUID(), role: 'assistant', content: '', citations: [], createdAt: new Date().toISOString() }
+  return reactive({ id: crypto.randomUUID(), role: 'assistant', content: '', citations: [], createdAt: new Date().toISOString() })
 }
 
 async function ask() {
@@ -387,7 +393,13 @@ watch(
               v-html="renderMarkdown(message.content)"
               @click="(event: MouseEvent) => handleCitationClick(event, message)"
             />
-            <p v-else class="message-content">{{ message.content || (sending ? '正在生成…' : '') }}</p>
+            <p
+              v-else-if="message.role === 'assistant' && sending && !message.content"
+              class="message-content message-loading"
+            >
+              <el-icon class="is-loading"><Loading /></el-icon>
+            </p>
+            <p v-else class="message-content">{{ message.content }}</p>
             <p v-if="message.selfCheckWarning" class="self-check-warning">{{ message.selfCheckWarning }}</p>
           </article>
         </div>
@@ -450,6 +462,7 @@ watch(
 .message-label { color: var(--el-text-color-secondary); font-size: 12px; }
 .message-content { margin: 5px 0 0; line-height: 1.6; }
 .message-content:not(.message-content-markdown) { white-space: pre-wrap; }
+.message-loading { display: flex; align-items: center; color: var(--el-text-color-secondary); font-size: 16px; }
 /* v-html 注入的内容不受 scoped 属性选择器约束，需要 :deep() 才能命中。
    marked 已经用 <p>/<ul>/<pre> 等块级元素处理换行，这里不需要再叠加 pre-wrap。 */
 .message-content-markdown :deep(p) { margin: 0 0 8px; }
