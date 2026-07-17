@@ -310,14 +310,17 @@ export async function getSessionMessages(
     throw new Error(`查询会话消息失败: HTTP ${response.status} ${response.statusText}`)
   }
   const payload = (await response.json()) as {
-    data?: Array<{ role: string; content: string; createdAt: string; citations?: Citation[] }>
+    // 后端 Jackson 对 null 字段不做 NON_NULL 过滤，旧消息/user 消息这里拿到的是显式的
+    // JSON null，不是字段缺失（undefined）——用 `| null` 如实标注，归一化到 undefined
+    // 时才不会有类型和真实响应形状对不上的问题。
+    data?: Array<{ role: string; content: string; createdAt: string; citations?: Citation[] | null }>
   }
   return (payload.data ?? []).map((message) => ({
     id: crypto.randomUUID(),
     role: message.role === 'assistant' ? 'assistant' : 'user',
     content: message.content,
     createdAt: message.createdAt,
-    citations: message.citations
+    citations: message.citations ?? undefined
   }))
 }
 

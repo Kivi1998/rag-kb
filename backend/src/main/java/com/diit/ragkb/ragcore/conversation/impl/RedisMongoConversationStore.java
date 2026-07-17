@@ -94,9 +94,15 @@ public class RedisMongoConversationStore implements ConversationStore {
         return "chat:session:" + sessionId + ":messages";
     }
 
+    /** Redis 短期滑动窗口只喂给指代消解/摘要压缩用（只取 role/content 拼文本），不需要
+     * citations——序列化前去掉，避免每条 assistant 消息白白把最多 8 条引用（含最长 500 字
+     * 的原文片段）写进 Redis 却从来不会被读取，一个会话的 50 条滑动窗口累计起来是明显的
+     * 无谓存储/网络开销。 */
     private String serialize(ChatMessage message) {
         try {
-            return objectMapper.writeValueAsString(message);
+            ChatMessage withoutCitations = new ChatMessage(message.role(), message.content(), message.keyFact(),
+                    message.createdAt(), null);
+            return objectMapper.writeValueAsString(withoutCitations);
         } catch (com.fasterxml.jackson.core.JsonProcessingException ex) {
             throw new IllegalStateException("序列化会话消息失败", ex);
         }
