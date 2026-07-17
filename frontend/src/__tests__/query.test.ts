@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
+  getSessionMessages,
   openStream,
   parseSseBlock,
   queryStreamUrl,
@@ -308,5 +309,34 @@ describe('openStream 接口契约', () => {
         // 不应进入
       }
     }).rejects.toThrow()
+  })
+})
+
+describe('getSessionMessages', () => {
+  it('assistant 消息带 citations 时正确解析；user 消息/旧消息没有 citations 时为 undefined', async () => {
+    const citation = {
+      documentId: 'd1', documentName: '部署说明.md', headingPath: ['部署'],
+      snippet: '检查数据库连接', pageNo: 2, lineStart: 4, lineEnd: 5, score: 0.91
+    }
+    const response = new Response(JSON.stringify({
+      data: [
+        { role: 'user', content: '如何排查启动失败？', createdAt: '2026-07-16T00:00:00Z' },
+        { role: 'assistant', content: '请检查数据库连接 [资料1]。', createdAt: '2026-07-16T00:00:01Z', citations: [citation] },
+        { role: 'assistant', content: '这是字段上线前的旧消息。', createdAt: '2026-07-15T00:00:00Z' }
+      ]
+    }), { status: 200 })
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(response)
+
+    const messages = await getSessionMessages('http://api.example.com', 'kb-1', 'session-1', {})
+
+    expect(messages[0].citations).toBeUndefined()
+    expect(messages[1].citations).toEqual([citation])
+    expect(messages[2].citations).toBeUndefined()
+  })
+
+  it('非 2xx 响应抛出可观测的错误', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(null, { status: 404, statusText: 'Not Found' }))
+
+    await expect(getSessionMessages('', 'kb-1', 'session-missing', {})).rejects.toThrow(/404/)
   })
 })

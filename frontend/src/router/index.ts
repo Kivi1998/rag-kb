@@ -20,6 +20,12 @@ const router = createRouter({
       meta: { requiresAuth: true }
     },
     {
+      path: '/kb/:kbId/documents',
+      name: 'kb-documents',
+      component: () => import('@/views/DocumentsView.vue'),
+      meta: { requiresAuth: true }
+    },
+    {
       path: '/change-password',
       name: 'change-password',
       component: () => import('@/views/ChangePasswordView.vue'),

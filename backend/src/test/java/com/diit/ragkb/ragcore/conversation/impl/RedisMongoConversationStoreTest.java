@@ -83,7 +83,7 @@ class RedisMongoConversationStoreTest {
         // 回归测试：查询本身必须携带 memberId，不能只依赖调用方（ChatSessionService）预先做归属校验，
         // 否则未来绕过 Service 层直接调用本方法的路径会造成同组织内跨成员越权读取。
         ChatMessageDocument document = new ChatMessageDocument(sessionId, orgId, kbId, memberId, "user", "你好",
-                false, Instant.now());
+                false, Instant.now(), null);
         when(repository.findBySessionIdAndOrganizationIdAndMemberIdOrderByCreatedAtAsc(sessionId, orgId, memberId))
                 .thenReturn(List.of(document));
 

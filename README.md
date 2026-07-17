@@ -13,7 +13,10 @@
 - 独立 Parser Gateway 提供 OCR、ASR、Office 图片提取和字幕时间戳；
 - 结构感知切块（V3）：多风格层级识别、递归多级级联、表格分组+表头重复、句子边界重叠、chunk 元数据（sectionPath/contentType/isKeyClause/prev-nextChunkId）；
 - Elasticsearch BM25 + kNN + RRF、可选 Rerank、服务端引用与 SSE 问答；
-- 多轮对话与记忆管理：滑动窗口+语义历史检索+摘要压缩、用户画像+读时衰减遗忘机制、指代消解（2026-07-15 新增，学习性质的能力储备，当前规模非刚需驱动）；历史会话列表：可折叠侧边栏切换/删除历史对话，刷新页面自动恢复上一次会话；
+- 多轮对话与记忆管理：滑动窗口+语义历史检索+摘要压缩、用户画像+读时衰减遗忘机制、指代消解（2026-07-15 新增，学习性质的能力储备，当前规模非刚需驱动）；历史会话列表：切换/删除历史对话，刷新页面自动恢复上一次会话；
+- 生成阶段防幻觉：NO_RETRIEVAL 事实核验（生成模型自判 `{"found":true/false}`）+ 生成后自检（复用 Reranker 逐句核查资料支撑，已知对"部分相关的编造"拦截力不足，见 TODOS）；
+- 引用溯源：点击正文里的 `[资料N]` 在右侧抽屉展示对应来源的文档名/定位/原文片段，历史会话恢复后同样可点击（2026-07-17 起持久化到消息记录，此前上线的旧消息不回填）；
+- 知识库管理：列表项右键菜单（重命名/删除/查看技术文档），技术文档改为独立页面（`/kb/:kbId/documents`），问答区占满工作区主区域；
 - 离线评测（Recall@k/MRR/拒答 F1 框架 + 150 题真实语料评估集 eval-set-v2）、查询审计、指标与生产同构验收栈。
 
 ## 技术架构
@@ -107,7 +110,7 @@ openspec/        需求规格与变更记录
 - 文档：[brainstorming 设计文档](docs/superpowers/specs/2026-07-15-conversation-history-list-design.md)、[OpenSpec change: conversation-history-list](openspec/changes/conversation-history-list/)
 - 背景：多轮对话记忆功能上线后，前端此前每次挂载/刷新都无条件新建会话、不消费已有的会话生命周期与长期存档能力，导致"刷新即清空对话"、也没有历史对话入口；本能力补齐前端消费侧
 - 代码（后端）：`ChatSessionService.listSessions/deleteSession`（新增 `GET`/`DELETE .../sessions` 接口；标题为首条用户消息前 30 字，写入时算好存 `chat_session.title`，避免列表查询 N+1 现取）、`MemoryIndex.deleteBySession`/`ChatMessageRepository.deleteBySessionIdAndOrganizationIdAndMemberId`/`ConversationStore.deleteSession`（硬删除级联清理 ES→Mongo/Redis→Postgres，不影响 `memory_items` 长期画像）
-- 代码（前端）：[`ChatHistorySidebar.vue`](frontend/src/components/ChatHistorySidebar.vue)（可折叠历史侧边栏：列表/切换/删除/新建对话）、`ChatPanel.vue` 用 `localStorage`（`rag-kb:last-session:{kbId}`）记录当前会话，刷新/重新进入时优先恢复历史而非总是新建，恢复失败（如已删除）时自动退回新建
+- 代码（前端）：[`ChatHistorySidebar.vue`](frontend/src/components/ChatHistorySidebar.vue)（历史会话列表：切换/删除/新建对话，展开/收起开关挪到"技术文档问答"标题栏顶部，2026-07-17 起不再单独占一条带边框的竖框）、`ChatPanel.vue` 用 `localStorage`（`rag-kb:last-session:{kbId}`）记录当前会话，刷新/重新进入时优先恢复历史而非总是新建，恢复失败（如已删除）时自动退回新建
 
 ### 9. 生成阶段防幻觉：事实核验与自检
 
@@ -115,6 +118,14 @@ openspec/        需求规格与变更记录
 - 背景：第 6 节的 rerank 拒答阈值只对"检索真找不到相关内容"有效，对"检索到的内容主题相关但没具体答案"（NO_RETRIEVAL）与"断言没有资料支撑"两类幻觉风险无能为力，需要生成阶段补两道防线
 - 代码：[`FactVerificationGate.java`](backend/src/main/java/com/diit/ragkb/ragcore/generation/FactVerificationGate.java)（生成模型先输出 `{"found": true|false}` 判断行，`found:false` 转固定话术拒答，`SOURCE` 事件延迟到 `found:true` 后发送）、[`AnswerSelfChecker.java`](backend/src/main/java/com/diit/ragkb/ragcore/generation/AnswerSelfChecker.java)（生成后复用 Reranker 逐句核查资料支撑，新增 `self_check_warning` SSE 事件）
 - **真实回归验证与已知局限（如实记录，不美化）**：[NO_RETRIEVAL 验证报告](eval/reports/no-retrieval-fact-verification-validation-20260716.md) 8/8 命中；[多段融合与自检验证报告](eval/reports/multi-passage-fusion-and-self-check-validation-20260716.md) 显示自检复用的 `MIN_RERANK_SCORE=0.06` 阈值只能拦住"完全文不对题"的编造，对"部分相关的编造"基本拦不住（6 个真实样本 4/6 命中），阈值需要专门校准、本次未做，详见 TODOS
+
+### 10. 引用展示与知识库管理界面（2026-07-16～17）
+
+- 文档：[总体架构](docs/architecture.md) 决策 10；[知识库右键菜单+独立技术文档页面设计文档](docs/superpowers/specs/2026-07-16-kb-context-menu-and-docs-page-design.md)、[历史引用持久化设计文档](docs/superpowers/specs/2026-07-16-persist-citations-in-history-design.md)
+- **引用抽屉**：正文里的 `[资料N]` 点击后在右侧 `el-drawer` 弹出该条来源的文档名/定位/原文片段/相关度，取代此前"始终在回答下方展示全部引用卡片"的方式；代码：[`ChatPanel.vue`](frontend/src/components/ChatPanel.vue)（`renderMarkdown()` 正则转换 + `handleCitationClick`）
+- **历史引用持久化**：`ChatMessageDocument`（MongoDB）/`ChatMessage` 新增 `citations` 字段随每轮问答一并写入，历史会话恢复后点击 `[N]` 也能弹出抽屉，与当次生成体验一致；明确不做旧消息回填（上线前产生的消息读出来视为无引用）；代码：[`ConversationMemoryOrchestrator.recordTurn()`](backend/src/main/java/com/diit/ragkb/ragcore/conversation/ConversationMemoryOrchestrator.java)、[`getSessionMessages()`](frontend/src/api/queryApi.ts)
+- **知识库右键菜单 + 独立技术文档页**：知识库列表项的重命名/删除操作从 hover 按钮改为右键菜单，新增"技术文档"菜单项跳转到独立路由 `/kb/:kbId/documents`（复用现有 `DocumentPanel` 组件）；工作区（`KbWorkspaceView.vue`）不再内嵌技术文档面板，问答区占满主区域；代码：[`KbSidebar.vue`](frontend/src/components/KbSidebar.vue)、[`DocumentsView.vue`](frontend/src/views/DocumentsView.vue)
+- **已知取舍**（用户已确认接受，非遗漏）：知识库列表操作完全依赖右键触发，触屏和纯键盘用户目前无法触达；历史消息不回填引用，同一会话里新旧消息的 `[N]` 可点击性可能不一致，无额外 UI 提示区分
 
 ### 评测框架（跨模块）
 

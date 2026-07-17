@@ -7,6 +7,7 @@ import { memberApi } from '@/api/memberApi'
 // Mock components
 vi.mock('@/views/LoginView.vue', () => ({ default: { template: '<div>Login</div>' } }))
 vi.mock('@/views/KbWorkspaceView.vue', () => ({ default: { template: '<div>Workspace</div>' } }))
+vi.mock('@/views/DocumentsView.vue', () => ({ default: { template: '<div>Documents</div>' } }))
 vi.mock('@/views/AdminMembersView.vue', () => ({ default: { template: '<div>Members</div>' } }))
 vi.mock('@/views/AdminTeamsView.vue', () => ({ default: { template: '<div>Teams</div>' } }))
 vi.mock('@/views/ChangePasswordView.vue', () => ({ default: { template: '<div>ChangePassword</div>' } }))
@@ -33,6 +34,12 @@ function createTestRouter() {
         path: '/kb',
         name: 'kb',
         component: () => import('@/views/KbWorkspaceView.vue'),
+        meta: { requiresAuth: true }
+      },
+      {
+        path: '/kb/:kbId/documents',
+        name: 'kb-documents',
+        component: () => import('@/views/DocumentsView.vue'),
         meta: { requiresAuth: true }
       },
       {
@@ -168,6 +175,21 @@ describe('router', () => {
   it('未登录访问 /admin/members 重定向 /login', async () => {
     await router.push('/admin/members')
     expect(router.currentRoute.value.name).toBe('login')
+  })
+
+  it('未登录访问 /kb/:kbId/documents 跳转 /login', async () => {
+    await router.push('/kb/kb-1/documents')
+    expect(router.currentRoute.value.name).toBe('login')
+  })
+
+  it('已登录访问 /kb/:kbId/documents 放行并带上 kbId 参数', async () => {
+    const authStore = useAuthStore()
+    authStore.token = 'test-token'
+    authStore.roleFetched = true
+
+    await router.push('/kb/kb-1/documents')
+    expect(router.currentRoute.value.name).toBe('kb-documents')
+    expect(router.currentRoute.value.params.kbId).toBe('kb-1')
   })
 
   it('/admin 重定向到 /admin/members', async () => {

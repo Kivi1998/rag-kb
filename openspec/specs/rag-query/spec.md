@@ -6,7 +6,7 @@
 
 ### Requirement: 成员可向知识库发起流式问答
 
-系统 SHALL 提供 `POST /api/v1/knowledge-bases/{kbId}/query` 接口，接受自然语言问题，以 SSE（`text/event-stream`）流式返回自研混合检索链路生成的答案及引用来源。接口需认证（JWT），跨租户访问 SHALL 返回 404。响应事件为 `chunk`（答案片段）、`source`（引用来源）、`refusal`（拒答，检索阶段低置信度或生成阶段事实核验触发均走此事件）、`self_check_warning`（生成后自检发现疑似未支撑断言时的提醒，可选，不影响其他事件）、`done`（流结束）、`error`（异常）六类之一的组合。生成模型 SHALL 在正文之前先输出一行 `{"found": true|false}` 判断参考资料是否包含问题的具体答案；系统 SHALL 缓冲该判断行，`source` 事件的发送时机 SHALL 推迟到判断为 `found:true` 之后。检索阶段 SHALL 对每个候选片段（不只是排名第一的片段）应用 rerank 相关性阈值过滤，低于阈值的片段不得进入生成 prompt 或 `source` 事件。
+系统 SHALL 提供 `POST /api/v1/knowledge-bases/{kbId}/query` 接口，接受自然语言问题与必填的 `sessionId`，以 SSE（`text/event-stream`）流式返回自研混合检索链路生成的答案及引用来源。接口需认证（JWT），跨租户访问 SHALL 返回 404。响应事件为 `chunk`（答案片段）、`source`（引用来源）、`refusal`（拒答，检索阶段低置信度或生成阶段事实核验触发均走此事件）、`self_check_warning`（生成后自检发现疑似未支撑断言时的提醒，可选，不影响其他事件）、`done`（流结束）、`error`（异常）六类之一的组合。生成模型 SHALL 在正文之前先输出一行 `{"found": true|false}` 判断参考资料是否包含问题的具体答案；系统 SHALL 缓冲该判断行，`source` 事件的发送时机 SHALL 推迟到判断为 `found:true` 之后。检索阶段 SHALL 对每个候选片段（不只是排名第一的片段）应用 rerank 相关性阈值过滤，低于阈值的片段不得进入生成 prompt 或 `source` 事件。
 
 #### Scenario: 正常流式问答
 
@@ -17,6 +17,11 @@
 
 - **WHEN** 请求体 `question` 为空字符串或缺失
 - **THEN** 系统同步返回 HTTP 400，不创建 SseEmitter
+
+#### Scenario: sessionId 缺失
+
+- **WHEN** 请求体缺少 `sessionId` 或 `sessionId` 不属于当前认证成员
+- **THEN** 系统同步返回 HTTP 400/404，不创建 SseEmitter
 
 #### Scenario: 跨租户访问被拒
 

@@ -166,7 +166,11 @@ watch(documents, () => {
   if (currentPage.value > maxPage) currentPage.value = maxPage
 })
 
-watch(() => props.kbId, () => { currentPage.value = 1; void loadDocuments() })
+/** 切换知识库时清空上传队列——这个面板现在会在同一个组件实例里跨知识库复用
+ * （知识库右键菜单可以直接跳到另一个知识库的技术文档页），不清空的话，上一个
+ * 知识库的失败/待上传项会残留在界面上，点"重试"时 runUpload 读到的是切换后的
+ * props.kbId，会把本该属于上一个知识库的文件传进新的知识库。 */
+watch(() => props.kbId, () => { currentPage.value = 1; uploadQueue.value = []; void loadDocuments() })
 onMounted(() => void loadDocuments())
 onBeforeUnmount(() => { if (pollTimer) clearInterval(pollTimer) })
 </script>

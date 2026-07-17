@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from 'vue'
-import { CircleClose, Promotion } from '@element-plus/icons-vue'
+import { computed, nextTick, reactive, ref, watch } from 'vue'
+import { CircleClose, Loading, Promotion } from '@element-plus/icons-vue'
 import DOMPurify from 'dompurify'
 import { marked } from 'marked'
 import { useAuthStore } from '@/stores/authStore'
 import { createSession, getSessionMessages, openStream, queryStreamUrl } from '@/api/queryApi'
 import ChatHistorySidebar from '@/components/ChatHistorySidebar.vue'
+import SidebarToggleIcon from '@/components/icons/SidebarToggleIcon.vue'
 import type { Citation } from '@/types/citation'
 import type { Message, QueryEvent } from '@/types/query'
 
@@ -27,6 +28,13 @@ const transcript = ref<HTMLElement | null>(null)
 const sessionId = ref<string | null>(null)
 const sessionReady = ref(false)
 const historySidebar = ref<InstanceType<typeof ChatHistorySidebar> | null>(null)
+/** 历史对话面板的展开/收起状态提到 ChatPanel 里统一管理——开关按钮挪到标题栏，
+ * 跟"技术文档问答"标题同一行，收起时不再单独占一条带边框/背景的竖条。 */
+const historyExpanded = ref(false)
+/** 引用来源不再默认全部展示在回答下方，点击正文里的 [资料N] 才在右侧弹出对应这一条。 */
+const citationDrawerVisible = ref(false)
+const selectedCitation = ref<Citation | null>(null)
+const selectedCitationIndex = ref<number | null>(null)
 
 /** localStorage 记录每个知识库最后活跃的会话，供刷新/重新进入时恢复历史，而不是总是新建。 */
 function lastSessionStorageKey(kbId: string): string {
@@ -55,8 +63,8 @@ function writeLastSessionId(kbId: string, id: string) {
  * 用 v-html 注入，防止检索到的文档内容里混入的 HTML/脚本片段被当作真实标签执行。
  *
  * 正文里的 `[资料N]` 在 markdown 解析前先转成可点击的 `<sup>`（data-ref 记录编号），
- * 点击后由 handleCitationClick 滚动+高亮到下方对应的引用卡片；DOMPurify 默认允许
- * class/data-* 属性通过，不需要额外放宽白名单。 */
+ * 点击后由 handleCitationClick 在右侧弹出该条引用；DOMPurify 默认允许 class/data-*
+ * 属性通过，不需要额外放宽白名单。 */
 function renderMarkdown(content: string): string {
   const withCitationRefs = content.replace(
     /\[资料(\d+)\]/g,
@@ -66,26 +74,35 @@ function renderMarkdown(content: string): string {
   return DOMPurify.sanitize(html)
 }
 
-/** 点击正文里的 `[资料N]`（渲染为 `.citation-ref`）时，滚动到同一条消息下方对应的
- * 引用卡片并短暂高亮，帮助核对出处；点击其他内容不做任何处理。 */
-function handleCitationClick(event: MouseEvent) {
+/** 点击正文里的 `[资料N]`（渲染为 `.citation-ref`）时，从这一条消息的 citations 里
+ * 取出对应的第 N 条，在右侧抽屉里展示来源文件/定位/原文片段；点击其他内容不处理。 */
+function handleCitationClick(event: MouseEvent, message: Message) {
   const target = (event.target as HTMLElement | null)?.closest('.citation-ref')
   if (!target) return
   const ref = target.getAttribute('data-ref')
   if (!ref) return
-  const messageArticle = target.closest('.message')
-  const card = messageArticle?.querySelector(`.citation-card[data-index="${ref}"]`)
-  if (!(card instanceof HTMLElement)) return
-  card.scrollIntoView({ behavior: 'smooth', block: 'center' })
-  card.classList.add('citation-card-highlighted')
-  window.setTimeout(() => card.classList.remove('citation-card-highlighted'), 1600)
+  const index = Number.parseInt(ref, 10)
+  const citation = message.citations?.[index - 1]
+  if (!citation) return
+  selectedCitation.value = citation
+  selectedCitationIndex.value = index
+  citationDrawerVisible.value = true
 }
 
 const canSend = computed(() => !!props.kbId && !!question.value.trim() && !sending.value && sessionReady.value)
 
+/** 引用抽屉展示的是某一条历史消息的引用，切换/重置会话后 messages 已经不是那一条了，
+ * 抽屉若还开着会显示跟当前可见对话对不上的内容，因此每次切换会话前先关掉。 */
+function closeCitationDrawer() {
+  citationDrawerVisible.value = false
+  selectedCitation.value = null
+  selectedCitationIndex.value = null
+}
+
 /** 切换到某个已存在的会话：拉取其历史消息并 hydrate；供"刷新恢复"与"点击历史列表项"共用。 */
 async function switchToSession(id: string) {
   const history = await getSessionMessages('', props.kbId, id, headers())
+  closeCitationDrawer()
   sessionId.value = id
   messages.value = history
   sessionReady.value = true
@@ -98,6 +115,7 @@ async function switchToSession(id: string) {
  * 都不会在 Postgres 里留下从未真正使用过的空会话，历史列表也就不会被这些空占位淤积。
  */
 function resetToNewConversation() {
+  closeCitationDrawer()
   sessionId.value = null
   messages.value = []
   sessionReady.value = true
@@ -159,8 +177,14 @@ function headers() {
   return result
 }
 
+/** 用 reactive() 包一层再塞进 messages 数组：如果直接 push 一个普通对象、
+ * 后面再靠本地变量原样引用去改它的属性（assistantMessage.content += ...），
+ * 这些修改会绕过 Vue 的响应式 Proxy set 陷阱——虽然内存里的值确实变了，但
+ * Vue 从来没被通知"该重新渲染了"，逐字吐出的动画因此完全不生效，只有等
+ * sending 变量本身发生真正的响应式变化（生成结束那一刻）才会触发一次整体
+ * 重渲染，看起来就是"正在生成…"卡住不动、生成完毕后答案整段突然冒出来。 */
 function createAssistantMessage(): Message {
-  return { id: crypto.randomUUID(), role: 'assistant', content: '', citations: [], createdAt: new Date().toISOString() }
+  return reactive({ id: crypto.randomUUID(), role: 'assistant', content: '', citations: [], createdAt: new Date().toISOString() })
 }
 
 async function ask() {
@@ -310,6 +334,10 @@ async function scrollToBottom() {
   if (transcript.value) transcript.value.scrollTop = transcript.value.scrollHeight
 }
 
+function toggleHistory() {
+  historyExpanded.value = !historyExpanded.value
+}
+
 function citationLocation(citation: Citation) {
   const parts = [citation.headingPath.join(' / ')]
   if (citation.pageNo !== null) parts.push(`第 ${citation.pageNo} 页`)
@@ -335,13 +363,24 @@ watch(
         ref="historySidebar"
         :kb-id="props.kbId"
         :active-session-id="sessionId"
+        :expanded="historyExpanded"
         @select="handleSelectSession"
         @create="handleCreateFromSidebar"
         @deleted="handleSessionDeleted"
       />
       <div class="chat-main">
         <header class="panel-header">
-          <div><h2>技术文档问答</h2><p>回答仅基于已完成索引的当前知识库文档。</p></div>
+          <div class="panel-heading">
+            <button
+              class="history-toggle-btn"
+              type="button"
+              :aria-label="historyExpanded ? '收起历史对话' : '展开历史对话'"
+              @click="toggleHistory"
+            >
+              <el-icon><SidebarToggleIcon /></el-icon>
+            </button>
+            <div class="panel-title"><h2>技术文档问答</h2><p>回答仅基于已完成索引的当前知识库文档。</p></div>
+          </div>
           <el-button v-if="sending" type="danger" plain :icon="CircleClose" @click="cancel">取消生成</el-button>
         </header>
         <div ref="transcript" class="transcript" aria-live="polite">
@@ -352,23 +391,15 @@ watch(
               v-if="message.role === 'assistant' && message.content"
               class="message-content message-content-markdown"
               v-html="renderMarkdown(message.content)"
-              @click="handleCitationClick"
+              @click="(event: MouseEvent) => handleCitationClick(event, message)"
             />
-            <p v-else class="message-content">{{ message.content || (sending ? '正在生成…' : '') }}</p>
-            <div v-if="message.citations?.length" class="citations">
-              <p class="citation-title">参考来源</p>
-              <article
-                v-for="(citation, index) in message.citations"
-                :key="`${citation.documentId}-${index}`"
-                :data-index="index + 1"
-                class="citation-card"
-              >
-                <strong>[{{ index + 1 }}] {{ citation.documentName || '文档不可访问' }}</strong>
-                <span v-if="citationLocation(citation)" class="citation-location">{{ citationLocation(citation) }}</span>
-                <p>{{ citation.snippet }}</p>
-                <small v-if="citation.score !== null">相关度 {{ citation.score.toFixed(3) }}</small>
-              </article>
-            </div>
+            <p
+              v-else-if="message.role === 'assistant' && sending && !message.content"
+              class="message-content message-loading"
+            >
+              <el-icon class="is-loading"><Loading /></el-icon>
+            </p>
+            <p v-else class="message-content">{{ message.content }}</p>
             <p v-if="message.selfCheckWarning" class="self-check-warning">{{ message.selfCheckWarning }}</p>
           </article>
         </div>
@@ -387,6 +418,20 @@ watch(
         </form>
       </div>
     </div>
+    <el-drawer
+      v-model="citationDrawerVisible"
+      title="引用来源"
+      direction="rtl"
+      size="380px"
+      data-testid="citation-drawer"
+    >
+      <div v-if="selectedCitation" class="citation-detail">
+        <strong>[{{ selectedCitationIndex }}] {{ selectedCitation.documentName || '文档不可访问' }}</strong>
+        <span v-if="citationLocation(selectedCitation)" class="citation-location">{{ citationLocation(selectedCitation) }}</span>
+        <p class="citation-snippet">{{ selectedCitation.snippet }}</p>
+        <small v-if="selectedCitation.score !== null">相关度 {{ selectedCitation.score.toFixed(3) }}</small>
+      </div>
+    </el-drawer>
   </section>
 </template>
 
@@ -395,8 +440,20 @@ watch(
 .chat-body { display: flex; min-height: 0; flex: 1; }
 .chat-main { display: flex; min-height: 0; flex: 1; flex-direction: column; gap: 14px; padding-left: 14px; }
 .panel-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.panel-heading { display: flex; align-items: flex-start; gap: 10px; }
 .panel-header h2 { margin: 0; font-size: 18px; }
 .panel-header p { margin: 5px 0 0; color: var(--el-text-color-secondary); font-size: 13px; }
+.history-toggle-btn {
+  flex-shrink: 0;
+  border: none;
+  background: none;
+  padding: 2px;
+  cursor: pointer;
+  color: var(--el-text-color-secondary);
+  display: flex;
+  align-items: center;
+}
+.history-toggle-btn:hover { color: var(--el-color-primary); }
 .transcript { min-height: 280px; flex: 1; overflow: auto; border: 1px solid var(--brand-border); border-radius: 8px; padding: 14px; background: var(--brand-surface-soft); }
 .message { max-width: 92%; margin: 0 0 14px; border-radius: 8px; padding: 10px 12px; background: var(--brand-surface); border: 1px solid var(--brand-border-soft); }
 .message-user { margin-left: auto; background: var(--el-color-primary-light-9); }
@@ -405,6 +462,7 @@ watch(
 .message-label { color: var(--el-text-color-secondary); font-size: 12px; }
 .message-content { margin: 5px 0 0; line-height: 1.6; }
 .message-content:not(.message-content-markdown) { white-space: pre-wrap; }
+.message-loading { display: flex; align-items: center; color: var(--el-text-color-secondary); font-size: 16px; }
 /* v-html 注入的内容不受 scoped 属性选择器约束，需要 :deep() 才能命中。
    marked 已经用 <p>/<ul>/<pre> 等块级元素处理换行，这里不需要再叠加 pre-wrap。 */
 .message-content-markdown :deep(p) { margin: 0 0 8px; }
@@ -444,24 +502,17 @@ watch(
   padding: 0 1px;
 }
 .message-content-markdown :deep(.citation-ref:hover) { text-decoration: underline; }
-.citations { margin-top: 10px; border-top: 1px dashed var(--el-border-color); padding-top: 8px; }
-.citation-title { margin: 0 0 7px; color: var(--el-text-color-secondary); font-size: 12px; }
-.citation-card {
-  margin: 6px 0;
-  padding: 8px;
-  border-radius: 5px;
-  background: var(--brand-surface-soft);
-  border: 1px solid var(--brand-border-soft);
-  font-size: 13px;
-  transition: background-color 0.3s ease, border-color 0.3s ease;
+.citation-detail { display: flex; flex-direction: column; gap: 8px; font-size: 13px; }
+.citation-location, .citation-detail small { color: var(--el-text-color-secondary); }
+.citation-snippet {
+  margin: 0;
+  padding: 10px;
+  border-radius: 6px;
+  border-left: 3px solid var(--el-color-primary-light-5);
+  background: var(--el-color-primary-light-9);
+  white-space: pre-wrap;
+  line-height: 1.6;
 }
-.citation-card-highlighted {
-  background: var(--el-color-primary-light-8);
-  border-color: var(--el-color-primary-light-5);
-}
-.citation-card strong, .citation-card span, .citation-card small { display: block; }
-.citation-card p { margin: 5px 0; white-space: pre-wrap; }
-.citation-location, .citation-card small { color: var(--el-text-color-secondary); }
 .self-check-warning {
   margin: 10px 0 0;
   padding: 8px 10px;

@@ -39,7 +39,7 @@ public class RedisMongoConversationStore implements ConversationStore {
     public void appendMessage(UUID organizationId, UUID kbId, UUID memberId, UUID sessionId, ChatMessage message) {
         // 写直达：MongoDB 先写(持久化系统记录)，Redis 后写(热路径，允许失败不影响持久性)。
         chatMessageRepository.save(new ChatMessageDocument(sessionId, organizationId, kbId, memberId,
-                message.role(), message.content(), message.keyFact(), message.createdAt()));
+                message.role(), message.content(), message.keyFact(), message.createdAt(), message.citations()));
         try {
             String key = redisKey(sessionId);
             memoryRedisTemplate.opsForList().rightPush(key, serialize(message));
@@ -73,7 +73,8 @@ public class RedisMongoConversationStore implements ConversationStore {
         return chatMessageRepository
                 .findBySessionIdAndOrganizationIdAndMemberIdOrderByCreatedAtAsc(sessionId, organizationId, memberId)
                 .stream()
-                .map(doc -> new ChatMessage(doc.getRole(), doc.getContent(), doc.isKeyFact(), doc.getCreatedAt()))
+                .map(doc -> new ChatMessage(doc.getRole(), doc.getContent(), doc.isKeyFact(), doc.getCreatedAt(),
+                        doc.getCitations()))
                 .toList();
     }
 
@@ -93,19 +94,27 @@ public class RedisMongoConversationStore implements ConversationStore {
         return "chat:session:" + sessionId + ":messages";
     }
 
+    /** Redis 短期滑动窗口只喂给指代消解/摘要压缩用（只取 role/content 拼文本），不需要
+     * citations——序列化前去掉，避免每条 assistant 消息白白把最多 8 条引用（含最长 500 字
+     * 的原文片段）写进 Redis 却从来不会被读取，一个会话的 50 条滑动窗口累计起来是明显的
+     * 无谓存储/网络开销。 */
     private String serialize(ChatMessage message) {
         try {
-            return objectMapper.writeValueAsString(message);
+            ChatMessage withoutCitations = new ChatMessage(message.role(), message.content(), message.keyFact(),
+                    message.createdAt(), null);
+            return objectMapper.writeValueAsString(withoutCitations);
         } catch (com.fasterxml.jackson.core.JsonProcessingException ex) {
             throw new IllegalStateException("序列化会话消息失败", ex);
         }
     }
 
+    /** Redis 短期滑动窗口只喂给指代消解/摘要压缩用（只取 role/content 拼文本），不需要
+     * citations，这里不做序列化/反序列化，读出来恒为 null。 */
     private ChatMessage deserialize(String json) {
         try {
             var node = objectMapper.readTree(json);
             return new ChatMessage(node.path("role").asText(), node.path("content").asText(),
-                    node.path("keyFact").asBoolean(false), Instant.parse(node.path("createdAt").asText()));
+                    node.path("keyFact").asBoolean(false), Instant.parse(node.path("createdAt").asText()), null);
         } catch (Exception ex) {
             throw new IllegalStateException("反序列化会话消息失败", ex);
         }
