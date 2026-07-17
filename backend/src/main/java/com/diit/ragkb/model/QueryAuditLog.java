@@ -68,6 +68,10 @@ public class QueryAuditLog {
     @Column(name = "refusal_reason", length = 300)
     private String refusalReason;
 
+    /** precise-lookup/semantic/comparative/out-of-scope 之一；分类失败或未启用时为 null。不存问题原文。 */
+    @Column(name = "predicted_intent", length = 32)
+    private String predictedIntent;
+
     @Column(name = "generation_model", length = 300)
     private String generationModel;
 

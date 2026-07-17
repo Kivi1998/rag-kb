@@ -10,6 +10,8 @@ import com.diit.ragkb.ragcore.generation.CitationBuilder;
 import com.diit.ragkb.ragcore.generation.FactVerificationGate;
 import com.diit.ragkb.ragcore.generation.GenerationMetrics;
 import com.diit.ragkb.ragcore.generation.SelfCheckResult;
+import com.diit.ragkb.ragcore.intent.QueryIntent;
+import com.diit.ragkb.ragcore.intent.QueryIntentClassifier;
 import com.diit.ragkb.ragcore.model.Citation;
 import com.diit.ragkb.ragcore.model.QueryEvent;
 import com.diit.ragkb.ragcore.model.RetrievedChunk;
@@ -34,6 +36,20 @@ import java.util.function.Consumer;
  */
 public class QueryService {
 
+    /**
+     * 精确检索型/语义理解型的 RRF 权重倾斜。1.3x/0.7x 是温和倾斜的保守起点，分类器本身
+     * 和这组权重都还没有经过真实评估集验证（校准方法参照 {@code MIN_RERANK_SCORE} 的思路：
+     * 用 {@code eval/} 对比开关前后 Recall/MRR/拒答F1 确认无回归后再调整）。
+     *
+     * <p>写成命名常量而非 application.yml 配置项，是为了和本类里其它同样"待验证的检索
+     * 调优常量"保持一致的处理方式；调整时需要走代码评审，而不是运维随手改配置——在
+     * 这组数字还没有真实数据支撑之前，这是更安全的默认。</p>
+     */
+    private static final double PRECISE_LOOKUP_BM25_WEIGHT = 1.3;
+    private static final double PRECISE_LOOKUP_VECTOR_WEIGHT = 0.7;
+    private static final double SEMANTIC_BM25_WEIGHT = 0.7;
+    private static final double SEMANTIC_VECTOR_WEIGHT = 1.3;
+
     private final Retriever retriever;
     private final AnswerGenerator answerGenerator;
     private final KnowledgeBaseService knowledgeBaseService;
@@ -41,12 +57,14 @@ public class QueryService {
     private final ObjectProvider<ChatSessionService> chatSessionServiceProvider;
     private final ObjectProvider<ConversationMemoryOrchestrator> memoryOrchestratorProvider;
     private final ObjectProvider<RerankerClient> rerankerProvider;
+    private final ObjectProvider<QueryIntentClassifier> intentClassifierProvider;
 
     public QueryService(Retriever retriever, AnswerGenerator answerGenerator, KnowledgeBaseService knowledgeBaseService,
                         KnowledgeDocumentRepository documentRepository,
                         ObjectProvider<ChatSessionService> chatSessionServiceProvider,
                         ObjectProvider<ConversationMemoryOrchestrator> memoryOrchestratorProvider,
-                        ObjectProvider<RerankerClient> rerankerProvider) {
+                        ObjectProvider<RerankerClient> rerankerProvider,
+                        ObjectProvider<QueryIntentClassifier> intentClassifierProvider) {
         this.retriever = retriever;
         this.answerGenerator = answerGenerator;
         this.knowledgeBaseService = knowledgeBaseService;
@@ -54,6 +72,7 @@ public class QueryService {
         this.chatSessionServiceProvider = chatSessionServiceProvider;
         this.memoryOrchestratorProvider = memoryOrchestratorProvider;
         this.rerankerProvider = rerankerProvider;
+        this.intentClassifierProvider = intentClassifierProvider;
     }
 
     public PreparedQuery prepare(UUID knowledgeBaseId, UUID sessionId, String question) {
@@ -85,12 +104,17 @@ public class QueryService {
             }
         }
 
+        QueryIntentClassifier intentClassifier = intentClassifierProvider.getIfAvailable();
+        QueryIntent intent = intentClassifier != null ? intentClassifier.classify(resolvedQuestion) : QueryIntent.UNKNOWN;
+        retrievalOptions = applyIntentWeights(retrievalOptions, intent);
+
         long retrievalStartedAt = System.nanoTime();
         RetrievalResult result = retriever.retrieveWithDecision(organizationId, knowledgeBaseId, resolvedQuestion,
                 retrievalOptions);
         long retrievalLatencyMs = elapsedMs(retrievalStartedAt);
         QueryAuditSnapshot audit = QueryAuditSnapshot.from(traceId, organizationId, knowledgeBaseId, memberId,
-                retrievalLatencyMs, result.chunks(), result.diagnostics(), result.refused(), result.refusalReason());
+                retrievalLatencyMs, result.chunks(), result.diagnostics(), result.refused(), result.refusalReason(),
+                toAuditLabel(intent));
         if (result.refused()) {
             return PreparedQuery.refused(question, result.refusalReason(), audit);
         }
@@ -161,6 +185,30 @@ public class QueryService {
         UUID memberId = TenantContext.getMemberId();
         if (memberId == null) throw new IllegalStateException("缺少成员上下文");
         return memberId;
+    }
+
+    /**
+     * comparative/out-of-scope 分类结果本阶段只记录标签、不调整检索行为（见设计文档）：
+     * comparative 的最佳检索策略尚未确定；out-of-scope 若直接短路会绕开已验证过的
+     * {@code MIN_RERANK_SCORE} 拒答阈值，改为仅记录，让现有拒答机制照常生效。
+     */
+    private RetrievalOptions applyIntentWeights(RetrievalOptions options, QueryIntent intent) {
+        return switch (intent) {
+            case PRECISE_LOOKUP -> options.withWeights(PRECISE_LOOKUP_BM25_WEIGHT, PRECISE_LOOKUP_VECTOR_WEIGHT);
+            case SEMANTIC -> options.withWeights(SEMANTIC_BM25_WEIGHT, SEMANTIC_VECTOR_WEIGHT);
+            case COMPARATIVE, OUT_OF_SCOPE, UNKNOWN -> options;
+        };
+    }
+
+    /** UNKNOWN（分类失败/未启用）不写入审计表，其余映射为 prompt 里定义的字面量。 */
+    private String toAuditLabel(QueryIntent intent) {
+        return switch (intent) {
+            case PRECISE_LOOKUP -> "precise-lookup";
+            case SEMANTIC -> "semantic";
+            case COMPARATIVE -> "comparative";
+            case OUT_OF_SCOPE -> "out-of-scope";
+            case UNKNOWN -> null;
+        };
     }
 
     private long elapsedMs(long startedAtNanos) {

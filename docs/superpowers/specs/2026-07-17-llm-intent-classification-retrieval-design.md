@@ -214,6 +214,42 @@ rag:
 **默认关闭**（跟 `rag.nli.enabled` 一致的保守默认）：先合并代码、通过评估集回归验证，确认没有明显
 副作用后再决定是否默认打开，这是可以随时关闭的安全阀。
 
+## 代码评审发现与实现调整（2026-07-17）
+
+`/review` 跑完后发现一个真实缺陷、两处设计与实现的偏差，处理方式记录如下：
+
+1. **【已修复】加权 RRF 会误收紧 `MIN_RRF_SCORE` 早退拒答阈值**：`HybridRetriever.MIN_RRF_SCORE
+   =0.01` 是按等权重（1.0/1.0）校准的早退检查——两个独立评审 angle 各自算出了同一个缺陷：
+   查询意图分类调低某一路权重（如语义型问题 `bm25Weight=0.7`）后，单路命中的候选分数按加权
+   分数判断会被提前拒答（精确算出临界点：未加权时 rank≤40 都能通过，加权 0.7 后临界点收紧到
+   rank≤10，rank 11 起原本能通过阈值的候选会被误判为"未检索到足够依据"）。修复：早退检查
+   固定用未加权分数判断（`unweightedTopScore()`，始终按 1.0/1.0 计算），加权分数只用于候选
+   排序/选择，两者解耦。已加回归测试
+   `HybridRetrieverTest.intentWeightingDoesNotTightenTheMinRrfScoreRefusalGate`。
+2. **【实现方式调整】1.3/0.7 权重值改为命名常量，不做成 application.yml 配置项**：本文档早先
+   写"具体数值放配置项"，但读了 `HybridRetriever.MIN_RERANK_SCORE`/`MIN_RRF_SCORE`
+   （同类"待验证的检索调优常量"）才发现项目里这类值的既有约定是**命名 Java 常量 + 校准方法
+   注释**，不是 yaml 配置项——调整这类数字本身就该走代码评审，不是运维随手改配置。为与既有
+   约定一致，改为 `QueryService.PRECISE_LOOKUP_BM25_WEIGHT` 等命名常量（保留详细注释说明未
+   验证、如何校准），不新增 `rag.intent-classification.*.weight` 配置项。
+3. **【实现方式调整】bean 装配放进 `RagModelConfiguration` 而非本文档原先设想的独立
+   `RagIntentClassificationConfiguration`**：`RagModelConfiguration` 本身就是"模型客户端装配"
+   的既有归宿，已经承载 embedding/rerank/generation/nli 四个独立开关的 bean，intent
+   classification 的两个 bean（`intentClassificationChatCompletionClient`/
+   `queryIntentClassifier`）放进去更符合这个文件的既有职责，没有必要为两个 bean 新开一个文件。
+4. **【核实为既有模式，不修复】`intentClassificationChatCompletionClient` 只受
+   `rag.intent-classification.enabled` 门控，未同时要求 `rag.model.generation.enabled`**：
+   若只开意图分类、不配置生成模型端点，启动时会抛 `IllegalArgumentException` 导致应用起不来。
+   核实后确认 `RagMemoryConfiguration.chatCompletionClient`（服务会话记忆）早就是同样写法，
+   是项目里"配置不全就 fail-fast"的既定模式（`application.yml` 里 `rag.retrieval`/`rag.query`
+   的注释也这么写），不是本次改动引入的新问题，不单独修复。
+5. **【记入 TODOS.md，不在本次范围】意图分类是同步阻塞 LLM 调用，叠加在指代消解之后**：
+   `QueryService.prepare()` 里指代消解（`orchestrator.prepareContext`）和意图分类
+   都是同步阻塞的 LLM 调用，且意图分类依赖指代消解后的 `resolvedQuestion`，两者存在真实的
+   先后依赖（无法简单并行）。若要优化，需要重构 `ConversationMemoryOrchestrator` 把
+   "拿到 resolvedQuestion" 和"算 embedding/画像"两步拆开，让意图分类与 embedding 计算
+   重叠——这是比本次功能大得多的改动，记入 TODOS.md，不在本次范围内处理。
+
 ## 验证方案
 
 1. 单元测试覆盖分类解析（4个合法标签、非法输出、异常均正确 fail-open）、加权 RRF（默认权重与现状

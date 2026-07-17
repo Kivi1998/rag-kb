@@ -19,7 +19,8 @@ public record QueryAuditSnapshot(
         List<Double> finalScores,
         RetrievalDiagnostics diagnostics,
         boolean refused,
-        String refusalReason
+        String refusalReason,
+        String predictedIntent
 ) {
     public QueryAuditSnapshot {
         if (traceId == null || traceId.isBlank() || organizationId == null || knowledgeBaseId == null || memberId == null) {
@@ -34,18 +35,19 @@ public record QueryAuditSnapshot(
 
     public static QueryAuditSnapshot from(String traceId, UUID organizationId, UUID knowledgeBaseId, UUID memberId,
                                           long retrievalLatencyMs, List<RetrievedChunk> chunks,
-                                          RetrievalDiagnostics diagnostics, boolean refused, String refusalReason) {
+                                          RetrievalDiagnostics diagnostics, boolean refused, String refusalReason,
+                                          String predictedIntent) {
         List<RetrievedChunk> safeChunks = chunks == null ? List.of() : chunks;
         return new QueryAuditSnapshot(traceId, organizationId, knowledgeBaseId, memberId, retrievalLatencyMs,
                 safeChunks.stream().map(item -> item.chunk().id()).toList(),
                 List.copyOf(new LinkedHashSet<>(safeChunks.stream().map(item -> item.chunk().documentId()).toList())),
                 safeChunks.stream().map(RetrievedChunk::finalScore).filter(java.util.Objects::nonNull).toList(),
-                diagnostics, refused, refusalReason);
+                diagnostics, refused, refusalReason, predictedIntent);
     }
 
     public static QueryAuditSnapshot beforeRetrieval(String traceId, UUID organizationId, UUID knowledgeBaseId,
                                                      UUID memberId) {
         return from(traceId, organizationId, knowledgeBaseId, memberId, 0, List.of(), RetrievalDiagnostics.empty(),
-                false, null);
+                false, null, null);
     }
 }

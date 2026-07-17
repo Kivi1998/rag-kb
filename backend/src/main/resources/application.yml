@@ -135,6 +135,11 @@ rag:
     enabled: ${RAG_NLI_ENABLED:false}
     endpoint: ${RAG_NLI_ENDPOINT:}
     timeout-ms: ${RAG_NLI_TIMEOUT_MS:15000}
+  intent-classification:
+    # LLM Prompt 查询意图分类（冷启动路径，未来计划换成 BERT），复用 rag.model.generation 端点。
+    # 分类结果实时调整 RRF 融合的 BM25/向量权重；分类失败/超时/关闭时均等价于现状（等权重）。
+    # 默认关闭：先用 eval 集对比开关前后的 Recall/MRR/拒答 F1，确认无回归后再决定是否默认打开。
+    enabled: ${RAG_INTENT_CLASSIFICATION_ENABLED:false}
   elasticsearch:
     # 只有 T107 管道与 ES 均完成部署后开启；向量维度必须与 Embedding 模型完全一致。
     enabled: ${RAG_ES_ENABLED:false}

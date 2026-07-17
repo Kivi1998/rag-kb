@@ -237,6 +237,30 @@ class HybridRetrieverTest {
     }
 
     @Test
+    void intentWeightingDoesNotTightenTheMinRrfScoreRefusalGate() {
+        // 回归测试：查询意图分类调低某一路权重时，MIN_RRF_SCORE 早退检查必须仍按等权重判断，
+        // 不能让加权后的分数比未加权时更容易触发拒答（rank=11 的单路命中在未加权下能通过，
+        // 加权 0.7 后原本会跌破 0.01 阈值，此处验证修复后仍不拒答）。
+        Chunk chunk = chunk("vector-only-rank-11");
+        HybridCandidateSource source = new HybridCandidateSource() {
+            @Override public List<RetrievedChunk> searchBm25(SearchRequest request) { return List.of(); }
+            @Override public List<RetrievedChunk> searchKnn(VectorSearchRequest request) {
+                return List.of(new RetrievedChunk(chunk, null, 11, null, null, null));
+            }
+        };
+        EmbeddingClient embedding = texts -> new EmbeddingResult("test", List.of(List.of(0.1f, 0.2f)));
+        @SuppressWarnings("unchecked") ObjectProvider<RerankerClient> reranker = mock(ObjectProvider.class);
+        when(reranker.getIfAvailable()).thenReturn(null);
+
+        RetrievalResult result = new HybridRetriever(source, embedding, reranker)
+                .retrieveWithDecision(UUID.randomUUID(), UUID.randomUUID(), "q",
+                        new RetrievalOptions(30, 1, false).withWeights(1.3, 0.7));
+
+        assertTrue(!result.refused(), "未加权时 rank=11 的单路命中本应通过 MIN_RRF_SCORE，加权不应收紧这道早退检查");
+        assertEquals("vector-only-rank-11", result.chunks().get(0).chunk().id());
+    }
+
+    @Test
     void emptyQuestionIsRefusedWithoutCallingModels() {
         HybridCandidateSource source = mock(HybridCandidateSource.class);
         EmbeddingClient embedding = mock(EmbeddingClient.class);

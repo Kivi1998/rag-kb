@@ -73,10 +73,15 @@ public class HybridRetriever implements Retriever {
             vector = List.of();
             embeddingFallback = true;
         }
-        List<RetrievedChunk> fused = RrfFusion.fuse(bm25, vector);
+        List<RetrievedChunk> fused = RrfFusion.fuse(bm25, vector, options.bm25Weight(), options.vectorWeight());
         RetrievalDiagnostics diagnostics = new RetrievalDiagnostics(bm25.size(), vector.size(), fused.size(),
                 embeddingFallback, false);
-        if (fused.isEmpty() || fused.get(0).rrfScore() < MIN_RRF_SCORE) {
+        // MIN_RRF_SCORE 校准时假定两路等权重（1.0/1.0）；查询意图分类会调低某一路的权重
+        // （如语义型问题 bm25Weight=0.7），若直接对加权后的 fused.get(0) 判断，会把加权前
+        // 本该通过阈值的单路命中（如排名 11 的 BM25-only 候选）误判为拒答。用未加权分数
+        // 做这道早退检查，加权分数只用于候选排序/选择，两者互不影响。
+        double unweightedTopScore = unweightedTopScore(bm25, vector);
+        if (fused.isEmpty() || unweightedTopScore < MIN_RRF_SCORE) {
             return RetrievalResult.refuse("未在当前知识库中检索到足够依据", diagnostics);
         }
 
@@ -110,5 +115,11 @@ public class HybridRetriever implements Retriever {
             }
         }
         return new RetrievalResult(selected, null, finalDiagnostics);
+    }
+
+    /** {@code MIN_RRF_SCORE} 的早退检查专用：始终按等权重（1.0/1.0）计算，不受查询意图分类影响。 */
+    private double unweightedTopScore(List<RetrievedChunk> bm25, List<RetrievedChunk> vector) {
+        List<RetrievedChunk> unweighted = RrfFusion.fuse(bm25, vector);
+        return unweighted.isEmpty() ? 0 : unweighted.get(0).rrfScore();
     }
 }
