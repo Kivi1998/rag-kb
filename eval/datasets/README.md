@@ -83,4 +83,4 @@ python3 -m eval.runner \
   --output-md eval/reports/eval-v2-hybrid-$(date +%Y%m%d).md
 ```
 
-完整链路说明见 [`docs/解析-切块-评估指南.md`](../../docs/解析-切块-评估指南.md)。
+完整链路说明见 [`docs/评估指南.md`](../../docs/评估指南.md)。
