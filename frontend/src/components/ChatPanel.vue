@@ -6,6 +6,7 @@ import { marked } from 'marked'
 import { useAuthStore } from '@/stores/authStore'
 import { createSession, getSessionMessages, openStream, queryStreamUrl } from '@/api/queryApi'
 import ChatHistorySidebar from '@/components/ChatHistorySidebar.vue'
+import SidebarToggleIcon from '@/components/icons/SidebarToggleIcon.vue'
 import type { Citation } from '@/types/citation'
 import type { Message, QueryEvent } from '@/types/query'
 
@@ -27,6 +28,9 @@ const transcript = ref<HTMLElement | null>(null)
 const sessionId = ref<string | null>(null)
 const sessionReady = ref(false)
 const historySidebar = ref<InstanceType<typeof ChatHistorySidebar> | null>(null)
+/** 历史对话面板的展开/收起状态提到 ChatPanel 里统一管理——开关按钮挪到标题栏，
+ * 跟"技术文档问答"标题同一行，收起时不再单独占一条带边框/背景的竖条。 */
+const historyExpanded = ref(false)
 /** 引用来源不再默认全部展示在回答下方，点击正文里的 [资料N] 才在右侧弹出对应这一条。 */
 const citationDrawerVisible = ref(false)
 const selectedCitation = ref<Citation | null>(null)
@@ -324,6 +328,10 @@ async function scrollToBottom() {
   if (transcript.value) transcript.value.scrollTop = transcript.value.scrollHeight
 }
 
+function toggleHistory() {
+  historyExpanded.value = !historyExpanded.value
+}
+
 function citationLocation(citation: Citation) {
   const parts = [citation.headingPath.join(' / ')]
   if (citation.pageNo !== null) parts.push(`第 ${citation.pageNo} 页`)
@@ -349,13 +357,24 @@ watch(
         ref="historySidebar"
         :kb-id="props.kbId"
         :active-session-id="sessionId"
+        :expanded="historyExpanded"
         @select="handleSelectSession"
         @create="handleCreateFromSidebar"
         @deleted="handleSessionDeleted"
       />
       <div class="chat-main">
         <header class="panel-header">
-          <div><h2>技术文档问答</h2><p>回答仅基于已完成索引的当前知识库文档。</p></div>
+          <div class="panel-heading">
+            <button
+              class="history-toggle-btn"
+              type="button"
+              :aria-label="historyExpanded ? '收起历史对话' : '展开历史对话'"
+              @click="toggleHistory"
+            >
+              <el-icon><SidebarToggleIcon /></el-icon>
+            </button>
+            <div class="panel-title"><h2>技术文档问答</h2><p>回答仅基于已完成索引的当前知识库文档。</p></div>
+          </div>
           <el-button v-if="sending" type="danger" plain :icon="CircleClose" @click="cancel">取消生成</el-button>
         </header>
         <div ref="transcript" class="transcript" aria-live="polite">
@@ -409,8 +428,20 @@ watch(
 .chat-body { display: flex; min-height: 0; flex: 1; }
 .chat-main { display: flex; min-height: 0; flex: 1; flex-direction: column; gap: 14px; padding-left: 14px; }
 .panel-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.panel-heading { display: flex; align-items: flex-start; gap: 10px; }
 .panel-header h2 { margin: 0; font-size: 18px; }
 .panel-header p { margin: 5px 0 0; color: var(--el-text-color-secondary); font-size: 13px; }
+.history-toggle-btn {
+  flex-shrink: 0;
+  border: none;
+  background: none;
+  padding: 2px;
+  cursor: pointer;
+  color: var(--el-text-color-secondary);
+  display: flex;
+  align-items: center;
+}
+.history-toggle-btn:hover { color: var(--el-color-primary); }
 .transcript { min-height: 280px; flex: 1; overflow: auto; border: 1px solid var(--brand-border); border-radius: 8px; padding: 14px; background: var(--brand-surface-soft); }
 .message { max-width: 92%; margin: 0 0 14px; border-radius: 8px; padding: 10px 12px; background: var(--brand-surface); border: 1px solid var(--brand-border-soft); }
 .message-user { margin-left: auto; background: var(--el-color-primary-light-9); }

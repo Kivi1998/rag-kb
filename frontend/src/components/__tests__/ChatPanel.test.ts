@@ -264,7 +264,7 @@ describe('ChatPanel', () => {
 
     expect(createSession).not.toHaveBeenCalled()
     expect(localStorage.getItem('rag-kb:last-session:kb-1')).toBeNull()
-    expect(wrapper.find('[data-testid="chat-history-sidebar"]').exists()).toBe(true)
+    expect(wrapper.findComponent({ name: 'ChatHistorySidebar' }).exists()).toBe(true)
 
     vi.mocked(openStream).mockReturnValue(streamOf([{ eventType: 'done', data: {} }]) as never)
     await wrapper.find('textarea').setValue('第一条真实消息')

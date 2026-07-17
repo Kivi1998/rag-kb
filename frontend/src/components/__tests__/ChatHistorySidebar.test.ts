@@ -32,18 +32,22 @@ describe('ChatHistorySidebar', () => {
     auth.orgId = 'org-1'
   })
 
-  it('默认折叠，不拉取列表', () => {
-    mount(ChatHistorySidebar, { props: { kbId: 'kb-1', activeSessionId: null }, global: { plugins: [ElementPlus] } })
+  it('expanded=false 时不拉取列表，也不渲染面板', () => {
+    const wrapper = mount(ChatHistorySidebar, {
+      props: { kbId: 'kb-1', activeSessionId: null, expanded: false },
+      global: { plugins: [ElementPlus] }
+    })
     expect(listSessions).not.toHaveBeenCalled()
+    expect(wrapper.find('[data-testid="chat-history-sidebar"]').exists()).toBe(false)
   })
 
-  it('展开时拉取并渲染历史会话列表，空标题显示兜底文案', async () => {
+  it('expanded 从 false 变为 true 时拉取并渲染历史会话列表，空标题显示兜底文案', async () => {
     const wrapper = mount(ChatHistorySidebar, {
-      props: { kbId: 'kb-1', activeSessionId: null },
+      props: { kbId: 'kb-1', activeSessionId: null, expanded: false },
       global: { plugins: [ElementPlus] }
     })
 
-    await wrapper.find('.toggle-btn').trigger('click')
+    await wrapper.setProps({ expanded: true })
     await flushPromises()
 
     expect(listSessions).toHaveBeenCalledWith('', 'kb-1', expect.anything())
@@ -53,10 +57,9 @@ describe('ChatHistorySidebar', () => {
 
   it('点击历史项触发 select 事件', async () => {
     const wrapper = mount(ChatHistorySidebar, {
-      props: { kbId: 'kb-1', activeSessionId: null },
+      props: { kbId: 'kb-1', activeSessionId: null, expanded: true },
       global: { plugins: [ElementPlus] }
     })
-    await wrapper.find('.toggle-btn').trigger('click')
     await flushPromises()
 
     await wrapper.findAll('.session-item')[0].trigger('click')
@@ -66,10 +69,9 @@ describe('ChatHistorySidebar', () => {
 
   it('点击新建对话触发 create 事件并刷新列表', async () => {
     const wrapper = mount(ChatHistorySidebar, {
-      props: { kbId: 'kb-1', activeSessionId: null },
+      props: { kbId: 'kb-1', activeSessionId: null, expanded: true },
       global: { plugins: [ElementPlus] }
     })
-    await wrapper.find('.toggle-btn').trigger('click')
     await flushPromises()
     vi.mocked(listSessions).mockClear()
 
@@ -84,10 +86,9 @@ describe('ChatHistorySidebar', () => {
     vi.mocked(ElMessageBox.confirm).mockResolvedValue('confirm' as never)
     vi.mocked(deleteSession).mockResolvedValue()
     const wrapper = mount(ChatHistorySidebar, {
-      props: { kbId: 'kb-1', activeSessionId: null },
+      props: { kbId: 'kb-1', activeSessionId: null, expanded: true },
       global: { plugins: [ElementPlus] }
     })
-    await wrapper.find('.toggle-btn').trigger('click')
     await flushPromises()
 
     await wrapper.find('.session-item .delete-icon').trigger('click')
@@ -101,10 +102,9 @@ describe('ChatHistorySidebar', () => {
   it('取消确认弹窗时不调用删除接口', async () => {
     vi.mocked(ElMessageBox.confirm).mockRejectedValue('cancel' as never)
     const wrapper = mount(ChatHistorySidebar, {
-      props: { kbId: 'kb-1', activeSessionId: null },
+      props: { kbId: 'kb-1', activeSessionId: null, expanded: true },
       global: { plugins: [ElementPlus] }
     })
-    await wrapper.find('.toggle-btn').trigger('click')
     await flushPromises()
 
     await wrapper.find('.session-item .delete-icon').trigger('click')

@@ -1,13 +1,14 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
 import { Delete, Plus } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useAuthStore } from '@/stores/authStore'
 import { deleteSession, listSessions } from '@/api/queryApi'
-import SidebarToggleIcon from '@/components/icons/SidebarToggleIcon.vue'
 import type { ChatSessionSummary } from '@/types/query'
 
-const props = defineProps<{ kbId: string; activeSessionId: string | null }>()
+/** 展开/收起的开关按钮挪到了 ChatPanel 的标题栏里（跟"技术文档问答"标题同一行，
+ * 收起时不再是自己单独一条带边框/背景的竖条），这里只接收展开状态、不再自己管理。 */
+const props = defineProps<{ kbId: string; activeSessionId: string | null; expanded: boolean }>()
 const emit = defineEmits<{
   select: [sessionId: string]
   create: []
@@ -15,7 +16,6 @@ const emit = defineEmits<{
 }>()
 
 const authStore = useAuthStore()
-const expanded = ref(false)
 const loading = ref(false)
 const sessions = ref<ChatSessionSummary[]>([])
 
@@ -38,10 +38,11 @@ async function refresh() {
   }
 }
 
-async function toggle() {
-  expanded.value = !expanded.value
-  if (expanded.value) await refresh()
-}
+watch(
+  () => props.expanded,
+  (value) => { if (value) void refresh() },
+  { immediate: true }
+)
 
 function select(sessionId: string) {
   emit('select', sessionId)
@@ -73,53 +74,31 @@ defineExpose({ refresh })
 </script>
 
 <template>
-  <div class="history-sidebar" :class="{ expanded }" data-testid="chat-history-sidebar">
-    <button
-      class="toggle-btn"
-      type="button"
-      :aria-label="expanded ? '收起历史对话' : '展开历史对话'"
-      @click="toggle"
-    >
-      <el-icon><SidebarToggleIcon /></el-icon>
-    </button>
-    <div v-if="expanded" class="panel">
-      <div class="panel-header">
-        <span>历史对话</span>
-        <el-button size="small" :icon="Plus" @click="create">新建对话</el-button>
-      </div>
-      <el-empty v-if="!loading && sessions.length === 0" description="暂无历史对话" :image-size="60" />
-      <ul class="session-list">
-        <li
-          v-for="item in sessions"
-          :key="item.sessionId"
-          class="session-item"
-          :class="{ active: item.sessionId === activeSessionId }"
-          @click="select(item.sessionId)"
-        >
-          <span class="session-title">{{ item.title || '新对话' }}</span>
-          <el-icon class="delete-icon" @click="(event: Event) => remove(item, event)"><Delete /></el-icon>
-        </li>
-      </ul>
+  <div v-if="expanded" class="panel" data-testid="chat-history-sidebar">
+    <div class="panel-header">
+      <span>历史对话</span>
+      <el-button size="small" :icon="Plus" @click="create">新建对话</el-button>
     </div>
+    <el-empty v-if="!loading && sessions.length === 0" description="暂无历史对话" :image-size="60" />
+    <ul class="session-list">
+      <li
+        v-for="item in sessions"
+        :key="item.sessionId"
+        class="session-item"
+        :class="{ active: item.sessionId === activeSessionId }"
+        @click="select(item.sessionId)"
+      >
+        <span class="session-title">{{ item.title || '新对话' }}</span>
+        <el-icon class="delete-icon" @click="(event: Event) => remove(item, event)"><Delete /></el-icon>
+      </li>
+    </ul>
   </div>
 </template>
 
 <style scoped>
-.history-sidebar { display: flex; flex-shrink: 0; }
-.toggle-btn {
-  width: 22px;
-  border: none;
-  border-right: 1px solid var(--brand-border);
-  background: var(--brand-surface-soft);
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--el-text-color-secondary);
-}
-.toggle-btn:hover { color: var(--el-color-primary); }
 .panel {
   width: 220px;
+  flex-shrink: 0;
   border-right: 1px solid var(--brand-border);
   padding: 10px;
   display: flex;
