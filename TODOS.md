@@ -2,6 +2,36 @@
 
 延后但已记录的工作项。每项注明动机、现状与起点,避免日后丢失上下文。
 
+## P95/P99/QPS 监控与压测缺口(2026-07-17 讨论记录)
+
+- **What:** `rag_query_audit` 表（`QueryAuditLog`）已经在记录每次查询的 `retrieval_latency_ms`/`generation_latency_ms`/`total_latency_ms`/`status`/`created_at`，但目前是"只写不读"——没有任何代码/接口把这些数据算成 P95/P99 延迟或 QPS 展示出来；Prometheus/Actuator 只暴露了 Spring 默认的 `http.server.requests`（笼统的 HTTP 层耗时，不区分检索/生成阶段）和摄取相关指标（`IngestionMetrics`），没有查询侧的自定义指标。
+- **Why:** `docs/自研RAG核心重构架构设计.md` §2.3 定了试点验收线（检索阶段 P95 ≤ 2 秒、端到端 P95 ≤ 10 秒），但从未系统验证过是否达标。
+- **已做的临时测量（不是压测，仅一次性观测）**：直接对 `rag_query_audit` 表跑 SQL（Postgres 原生 `percentile_cont`）算出来的：
+  ```sql
+  SELECT count(*) AS sample_count,
+         percentile_cont(0.50) WITHIN GROUP (ORDER BY total_latency_ms) AS p50_ms,
+         percentile_cont(0.95) WITHIN GROUP (ORDER BY total_latency_ms) AS p95_ms,
+         percentile_cont(0.99) WITHIN GROUP (ORDER BY total_latency_ms) AS p99_ms
+  FROM rag_query_audit WHERE status = 'COMPLETED';
+  -- 按分钟统计请求数，粗略估算观测到的峰值 QPS（不是压测出的容量上限）
+  SELECT date_trunc('minute', created_at) AS minute_bucket, count(*)
+  FROM rag_query_audit GROUP BY minute_bucket ORDER BY minute_bucket DESC;
+  ```
+  2026-07-17 跑出的结果（46 条 `COMPLETED` 样本，2026-07-13～07-17 本机手动测试流量）：
+  端到端 P50=7354ms/**P95=10809ms**（略超 10 秒目标）/P99=11723ms；检索阶段
+  P95=6211ms（明显超 2 秒目标）；观测峰值 2 请求/分钟。**样本量小、流量非真实生产
+  分布，不能当作"检索阶段不达标"的结论**，只是记录了可复现的测量方法，详见
+  `docs/自研RAG核心重构架构设计.md` §2.3 后的观测记录。
+  - **踩坑记录**：本机 `psql` 命令行工具在当前环境里对这个数据库会直接挂起（无论
+    `-h localhost`、`127.0.0.1` 还是走 Unix socket 默认连接都一样，`pg_hba.conf`
+    确认是 `trust` 认证、不需要密码，`nc` 测试 TCP 连接本身正常），原因未查明；
+    绕过方法是用 `~/.m2/repository/org/postgresql/postgresql/<version>/postgresql-<version>.jar`
+    直接写一个几行的 JDBC 小程序连接查询，不依赖 psql 命令行。
+- **Pros:** 补齐后能持续监控是否达标，而不是只在需要时手动查一次库。
+- **Cons:** 真正的产品级方案（自定义 Micrometer 指标 + Prometheus + Grafana 仪表盘）需要新写一个类似 `IngestionMetrics.java` 的 `QueryMetrics` 类，有设计和实现成本；且"系统最大承载 QPS"这个数字必须靠专门压测（不断加压直到延迟劣化/报错率上升）才能测出来，现在项目里没有任何压测配置（无 JMeter/k6/gatling/wrk），真实生产流量到来前也没有意义。
+- **Context:** 用户问"怎么拿到 P95/P99/QPS"，探索确认现状后跑的这次一次性观测。
+- **Depends on / blocked by:** 无硬阻塞。分两步走都可以：①先在 `QueryAuditLogRepository` 加几个原生 SQL 统计方法 + 一个只读的管理端点，把上面这段 SQL 变成随时可查的接口（成本低）；②如果需要真正的容量规划，再补 Micrometer 指标 + 压测（成本高，且必须等真实流量或专门排期压测）。
+
 ## 知识库右键菜单的可访问性缺口(deferred from /review，2026-07-17)
 
 - **What:** 知识库列表的重命名/删除/查看技术文档操作目前完全依赖右键单击（`el-dropdown trigger="contextmenu"`），没有任何持久可见的按钮/图标提示这些操作存在。
