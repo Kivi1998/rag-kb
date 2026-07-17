@@ -56,7 +56,7 @@ class SlidingWindowAssemblerTest {
         SlidingWindowAssembler assembler = new SlidingWindowAssembler(summarizer);
         String longText = "重".repeat(300);
         ChatMessage keyFact = new ChatMessage("user", "关键事实：本人已投保重疾险", true,
-                Instant.parse("2026-07-15T00:00:00Z"));
+                Instant.parse("2026-07-15T00:00:00Z"), null);
         List<ChatMessage> messages = List.of(
                 keyFact,
                 ChatMessage.assistant(longText, Instant.parse("2026-07-15T00:01:00Z")),

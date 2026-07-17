@@ -13,6 +13,7 @@
  *   状态在测试时产生耦合（store 在测试里未挂载）
  */
 
+import type { Citation } from '@/types/citation'
 import type {
   ChatSessionSummary,
   ChunkEventPayload,
@@ -294,8 +295,9 @@ export async function listSessions(
 }
 
 /**
- * 拉取某会话的历史消息，转换为前端 `Message[]`。后端长期存档不保留引用来源，
- * 因此恢复的历史消息不带 `citations`——这是持久化范围的既有限制，不是 bug。
+ * 拉取某会话的历史消息，转换为前端 `Message[]`。citations 只有 assistant 消息、且这个
+ * 字段上线后新产生的消息才会有值；上线前的旧消息该字段为空，恢复出来跟没有引用一样，
+ * 不做历史回填（已与用户确认接受）。
  */
 export async function getSessionMessages(
   baseUrl: string,
@@ -308,13 +310,14 @@ export async function getSessionMessages(
     throw new Error(`查询会话消息失败: HTTP ${response.status} ${response.statusText}`)
   }
   const payload = (await response.json()) as {
-    data?: Array<{ role: string; content: string; createdAt: string }>
+    data?: Array<{ role: string; content: string; createdAt: string; citations?: Citation[] }>
   }
   return (payload.data ?? []).map((message) => ({
     id: crypto.randomUUID(),
     role: message.role === 'assistant' ? 'assistant' : 'user',
     content: message.content,
-    createdAt: message.createdAt
+    createdAt: message.createdAt,
+    citations: message.citations
   }))
 }
 

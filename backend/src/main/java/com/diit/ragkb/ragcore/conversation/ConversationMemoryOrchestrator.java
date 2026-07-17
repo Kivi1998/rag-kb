@@ -1,6 +1,7 @@
 package com.diit.ragkb.ragcore.conversation;
 
 import com.diit.ragkb.ragcore.embedding.EmbeddingClient;
+import com.diit.ragkb.ragcore.model.Citation;
 import com.diit.ragkb.ragcore.model.EmbeddingResult;
 import lombok.extern.slf4j.Slf4j;
 
@@ -62,15 +63,18 @@ public class ConversationMemoryOrchestrator {
         return new MemoryContext(resolvedQuestion, profileContext, resolvedQuestionVector);
     }
 
-    /** 写直达持久化本轮问答 + 异步触发画像提炼；不抛异常，失败只记日志。 */
+    /** 写直达持久化本轮问答 + 异步触发画像提炼；不抛异常，失败只记日志。
+     * citations 是本轮检索到、参与生成的引用来源（{@code prepare()} 阶段已经算好），只挂在
+     * assistant 消息上——历史会话恢复时前端才能继续点 [资料N] 弹出对应来源，跟当次生成时
+     * 的体验一致。 */
     public void recordTurn(UUID organizationId, UUID kbId, UUID memberId, UUID sessionId, String question,
-                           String answer) {
+                           String answer, List<Citation> citations) {
         try {
             Instant now = Instant.now();
             conversationStore.appendMessage(organizationId, kbId, memberId, sessionId,
                     ChatMessage.user(question, now));
             conversationStore.appendMessage(organizationId, kbId, memberId, sessionId,
-                    ChatMessage.assistant(answer, now));
+                    ChatMessage.assistant(answer, now, citations));
         } catch (RuntimeException ex) {
             log.warn("会话消息持久化失败，不影响已返回给用户的回答: sessionId={}", sessionId, ex);
         }

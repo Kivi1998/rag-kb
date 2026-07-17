@@ -207,7 +207,7 @@ class QueryServiceTest {
                 .retrieveWithDecision(eq(orgId), eq(kbId), eq("重疾险犹豫期过了还能退保吗"), any());
         assertEquals(List.of("用户偏好：常问保险条款"), capturedSystemContext);
         verify(orchestrator, org.mockito.Mockito.times(1)).recordTurn(eq(orgId), eq(kbId), any(), eq(sessionId),
-                eq("那它呢"), eq("答案"));
+                eq("那它呢"), eq("答案"), any());
     }
 
     @Test
@@ -279,7 +279,7 @@ class QueryServiceTest {
         assertEquals(List.of("refusal"), events.stream().map(QueryEvent::sseEventName).toList());
         assertEquals("未在当前知识库中检索到该问题的具体答案", events.get(0).message());
         assertEquals("NO_RETRIEVAL", metrics.factVerificationRefusalReason());
-        verify(orchestrator, never()).recordTurn(any(), any(), any(), any(), any(), any());
+        verify(orchestrator, never()).recordTurn(any(), any(), any(), any(), any(), any(), any());
     }
 
     @Test

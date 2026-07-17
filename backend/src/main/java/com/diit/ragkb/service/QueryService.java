@@ -131,7 +131,7 @@ public class QueryService {
         if (orchestrator != null && !gate.refusedByFactVerification()) {
             // 事实核验拒答没有产生真实回答，与检索阶段拒答一致，不计入会话记忆（避免记一条空答案）。
             orchestrator.recordTurn(query.organizationId(), query.knowledgeBaseId(), query.memberId(),
-                    query.sessionId(), query.question(), answerBuilder.toString());
+                    query.sessionId(), query.question(), answerBuilder.toString(), query.citations());
         }
         return metrics;
     }

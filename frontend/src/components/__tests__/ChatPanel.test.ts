@@ -236,6 +236,35 @@ describe('ChatPanel', () => {
     expect(wrapper.text()).toContain('之前的回答')
   })
 
+  it('恢复历史会话后，带 citations 的消息点击正文里的 [资料N] 也能弹出抽屉', async () => {
+    localStorage.setItem('rag-kb:last-session:kb-1', 'session-remembered')
+    vi.mocked(getSessionMessages).mockResolvedValue([
+      { id: 'm1', role: 'user', content: '如何排查启动失败？', createdAt: '2026-07-15T00:00:00Z' },
+      {
+        id: 'm2', role: 'assistant', content: '请检查数据库连接 [资料1]。', createdAt: '2026-07-15T00:00:01Z',
+        citations: [{ documentId: 'd1', documentName: '部署说明.md', headingPath: ['部署'], snippet: '检查数据库连接的详细说明', pageNo: 2, lineStart: 4, lineEnd: 5, score: 0.91 }]
+      }
+    ])
+
+    const wrapper = mount(ChatPanel, {
+      props: { kbId: 'kb-1' },
+      global: { plugins: [ElementPlus] },
+      attachTo: document.body
+    })
+    await flushPromises()
+
+    const ref = wrapper.find('.citation-ref')
+    expect(ref.exists()).toBe(true)
+    await ref.trigger('click')
+    await flushPromises()
+
+    const drawer = document.querySelector('[data-testid="citation-drawer"]')
+    expect(drawer).not.toBeNull()
+    expect(drawer?.textContent).toContain('部署说明.md')
+
+    wrapper.unmount()
+  })
+
   it('localStorage 记录的会话已失效（404）时退回空白新对话，且不提前创建会话', async () => {
     localStorage.setItem('rag-kb:last-session:kb-1', 'session-deleted')
     vi.mocked(getSessionMessages).mockRejectedValue(new Error('HTTP 404 Not Found'))
