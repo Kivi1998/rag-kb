@@ -2,6 +2,33 @@
 
 延后但已记录的工作项。每项注明动机、现状与起点,避免日后丢失上下文。
 
+## 知识库右键菜单的可访问性缺口(deferred from /review，2026-07-17)
+
+- **What:** 知识库列表的重命名/删除/查看技术文档操作目前完全依赖右键单击（`el-dropdown trigger="contextmenu"`），没有任何持久可见的按钮/图标提示这些操作存在。
+- **Why:** 触屏设备（平板/触屏笔记本）通常没有可靠的 `contextmenu` 事件触发方式（多数移动浏览器只在长按后触发、行为不一致，还可能被系统级文本选择菜单抢先）；纯键盘用户也没有 Tab 聚焦 + 键盘触发菜单的路径。这是用户明确要求的设计（"重命名删除等操作集成到右键单击中"），当时权衡后接受，但代价值得记录。
+- **Pros:** 修复后触屏/键盘用户也能使用这些操作，覆盖面更完整。
+- **Cons:** 需要额外的可见入口（如常驻的"⋯"按钮，左键点击也能打开同一个下拉菜单）和/或键盘事件处理，与当前"完全靠右键"的简洁设计有取舍。
+- **Context:** `code-review` 在 2026-07-17 对 `KbSidebar.vue` 的评审里独立从多个角度（removed-behavior、altitude）反复命中同一个发现，判定为真实、非误报。
+- **Depends on / blocked by:** 无，随时可做；建议给 `.kb-item` 加一个 hover 时才显示的"⋯"图标按钮，左键点击复用同一个 `el-dropdown` 的 `#dropdown` 插槽（不新增右键以外的第二套菜单逻辑）。
+
+## MongoDB 引用持久化缺自动化回归测试(deferred from /review，2026-07-17)
+
+- **What:** `ChatMessageDocument` 新增的 `citations: List<Citation>` 字段（`Citation` 是带 `UUID`/`List<String>`/`Integer`/`Double` 字段的 Java record）是这个代码库第一次让 Spring Data MongoDB 把 record 作为嵌套文档字段持久化，目前没有任何自动化测试验证 write→read 往返是否正确。
+- **Why:** 已用真实浏览器 + 真实运行中的后端 + 真实 MongoDB 手工验证过（新会话生成带引用的回答→刷新页面恢复历史→`citCount` 与生成时一致→点击 `[N]` 正确弹出抽屉），当前确认可用；但没有 CI 会跑到的自动化测试守护这条路径，如果未来升级 Spring Data MongoDB 版本或改动 `Citation` record 结构，可能悄悄破坏且不会被发现。
+- **Pros:** 补一个针对 `ChatMessageDocument` 的持久化回归测试，能在 CI 里长期守护这条路径。
+- **Cons:** 这个代码库目前没有任何 MongoDB 集成测试基础设施（现有 `RedisMongoConversationStoreTest` 全部走 Mockito mock，不连真实 MongoDB），补齐需要引入 Testcontainers 或类似方案，工作量不小。
+- **Context:** `code-review` 在 2026-07-17 对历史引用持久化改动的评审中命中，判定为 CONFIRMED（真实存在的测试缺口，不是误报）。
+- **Depends on / blocked by:** 无硬阻塞；可以先补一个不需要真实 MongoDB 的轻量单测（直接用 Spring 的 `MappingMongoConverter` 在内存里转换 `ChatMessageDocument` 到 `org.bson.Document` 再转回来，断言 `citations` 往返一致），作为比 Testcontainers 更低成本的中间方案。
+
+## 引用文档被删除后历史记录不会提示(deferred from /review，2026-07-17)
+
+- **What:** `Citation.documentName` 是生成时的一次性快照，持久化进 `ChatMessageDocument` 后永远不会重新校验。如果某个被引用的文档后续从知识库里删除，历史会话恢复后引用抽屉仍然显示这个文档名，就像它还存在一样，没有"该文档已被删除"的提示。
+- **Why:** `CitationBuilder` 目前只在生成当时处理"文档已不存在"的情况（用兜底字符串替换），这个安全网不会追溯应用到已经持久化的历史 citation 上。
+- **Pros:** 修复后用户能清楚知道某条历史引用指向的文档是否还能访问，避免误以为陈旧/已撤回的信息仍然有效。
+- **Cons:** 需要在渲染历史引用抽屉时按 `documentId` 实时查一次知识库当前文档列表（额外查询成本），或者在文档删除时反向扫描/标记所有引用过它的历史消息（写放大）。
+- **Context:** `code-review` 在 2026-07-17 对历史引用持久化改动的评审中命中（altitude 角度），判定为真实的产品边界问题，非误报。
+- **Depends on / blocked by:** 无硬阻塞；优先级不高，仅在合规/审计场景（需要明确知道"这条引用来源现在还在不在"）下才比较关键。
+
 ## RRF 融合动态权重(deferred，2026-07-15 讨论记录)
 
 - **What:** `RrfFusion.merge()` 目前 BM25 与向量两路固定等权（各自 `1/(60+rank)` 直接相加）。可以引入查询意图分类，对"精确型"查询（命中编号、术语、错误码等）调高 BM25 权重，对"语义型"查询调高向量权重。
