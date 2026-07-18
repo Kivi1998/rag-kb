@@ -6,6 +6,7 @@ import { marked } from 'marked'
 import { useAuthStore } from '@/stores/authStore'
 import { createSession, getSessionMessages, openStream, queryStreamUrl } from '@/api/queryApi'
 import ChatHistorySidebar from '@/components/ChatHistorySidebar.vue'
+import QuickDocumentPanel from '@/components/QuickDocumentPanel.vue'
 import SidebarToggleIcon from '@/components/icons/SidebarToggleIcon.vue'
 import type { Citation } from '@/types/citation'
 import type { Message, QueryEvent } from '@/types/query'
@@ -187,22 +188,29 @@ function createAssistantMessage(): Message {
   return reactive({ id: crypto.randomUUID(), role: 'assistant', content: '', citations: [], createdAt: new Date().toISOString() })
 }
 
+/**
+ * 懒创建会话：只有真正需要时（发第一条消息、或提前挂一个临时文档）才建会话，
+ * 避免历史列表里出现从未使用过的空会话。{@link QuickDocumentPanel} 也复用这个
+ * 函数——用户可能在发第一条消息之前就想先上传一份临时文档。
+ */
+async function ensureSession(): Promise<string | null> {
+  if (sessionId.value) return sessionId.value
+  try {
+    const newId = await createSession('', props.kbId, headers())
+    sessionId.value = newId
+    writeLastSessionId(props.kbId, newId)
+    return newId
+  } catch (error) {
+    console.error('创建会话失败', error)
+    return null
+  }
+}
+
 async function ask() {
   const text = question.value.trim()
   if (!text || sending.value) return
-  // 懒创建：只有真正发送第一条消息时才建会话，避免历史列表里出现从未使用过的空会话。
-  if (!sessionId.value) {
-    try {
-      const newId = await createSession('', props.kbId, headers())
-      sessionId.value = newId
-      writeLastSessionId(props.kbId, newId)
-    } catch (error) {
-      console.error('创建会话失败', error)
-      return
-    }
-  }
-  const currentSessionId = sessionId.value
-  if (!currentSessionId) return // 理论上不会发生，仅用于类型收窄
+  const currentSessionId = await ensureSession()
+  if (!currentSessionId) return
   const userMessage: Message = { id: crypto.randomUUID(), role: 'user', content: text, createdAt: new Date().toISOString() }
   const assistantMessage = createAssistantMessage()
   messages.value.push(userMessage, assistantMessage)
@@ -403,6 +411,7 @@ watch(
             <p v-if="message.selfCheckWarning" class="self-check-warning">{{ message.selfCheckWarning }}</p>
           </article>
         </div>
+        <QuickDocumentPanel :kb-id="props.kbId" :session-id="sessionId" :ensure-session="ensureSession" />
         <form class="composer" @submit.prevent="ask">
           <el-input
             v-model="question"

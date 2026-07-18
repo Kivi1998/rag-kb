@@ -70,6 +70,16 @@ public class ChatSessionService {
         return chatSessionRepository.save(session);
     }
 
+    /**
+     * 只校验归属（越权/不存在 → 404），不落库、不续期状态——供纯读取/清理类端点（如查看/删除
+     * 会话内临时文档）做归属校验，避免像 {@link #touchSession} 那样把只读请求悄悄变成一次写操作
+     * （把本该保持 IDLE/ARCHIVED 的历史会话强制续期回 ACTIVE）。
+     */
+    @Transactional(readOnly = true)
+    public void requireOwnedSession(UUID kbId, UUID sessionId) {
+        getOwnedSession(kbId, sessionId);
+    }
+
     @Transactional(readOnly = true)
     public List<ChatMessage> getMessages(UUID kbId, UUID sessionId) {
         ChatSession session = getOwnedSession(kbId, sessionId);

@@ -12,9 +12,12 @@ import com.diit.ragkb.ragcore.generation.GenerationMetrics;
 import com.diit.ragkb.ragcore.generation.SelfCheckResult;
 import com.diit.ragkb.ragcore.intent.QueryIntent;
 import com.diit.ragkb.ragcore.intent.QueryIntentClassifier;
+import com.diit.ragkb.ragcore.model.Chunk;
 import com.diit.ragkb.ragcore.model.Citation;
 import com.diit.ragkb.ragcore.model.QueryEvent;
 import com.diit.ragkb.ragcore.model.RetrievedChunk;
+import com.diit.ragkb.ragcore.quickdocument.QuickDocument;
+import com.diit.ragkb.ragcore.quickdocument.QuickDocumentStore;
 import com.diit.ragkb.ragcore.rerank.RerankerClient;
 import com.diit.ragkb.ragcore.retrieval.RetrievalOptions;
 import com.diit.ragkb.ragcore.retrieval.RetrievalResult;
@@ -23,6 +26,8 @@ import com.diit.ragkb.repository.KnowledgeDocumentRepository;
 import com.diit.ragkb.security.TenantContext;
 import org.springframework.beans.factory.ObjectProvider;
 
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -58,13 +63,15 @@ public class QueryService {
     private final ObjectProvider<ConversationMemoryOrchestrator> memoryOrchestratorProvider;
     private final ObjectProvider<RerankerClient> rerankerProvider;
     private final ObjectProvider<QueryIntentClassifier> intentClassifierProvider;
+    private final ObjectProvider<QuickDocumentStore> quickDocumentStoreProvider;
 
     public QueryService(Retriever retriever, AnswerGenerator answerGenerator, KnowledgeBaseService knowledgeBaseService,
                         KnowledgeDocumentRepository documentRepository,
                         ObjectProvider<ChatSessionService> chatSessionServiceProvider,
                         ObjectProvider<ConversationMemoryOrchestrator> memoryOrchestratorProvider,
                         ObjectProvider<RerankerClient> rerankerProvider,
-                        ObjectProvider<QueryIntentClassifier> intentClassifierProvider) {
+                        ObjectProvider<QueryIntentClassifier> intentClassifierProvider,
+                        ObjectProvider<QuickDocumentStore> quickDocumentStoreProvider) {
         this.retriever = retriever;
         this.answerGenerator = answerGenerator;
         this.knowledgeBaseService = knowledgeBaseService;
@@ -73,6 +80,7 @@ public class QueryService {
         this.memoryOrchestratorProvider = memoryOrchestratorProvider;
         this.rerankerProvider = rerankerProvider;
         this.intentClassifierProvider = intentClassifierProvider;
+        this.quickDocumentStoreProvider = quickDocumentStoreProvider;
     }
 
     public PreparedQuery prepare(UUID knowledgeBaseId, UUID sessionId, String question) {
@@ -108,24 +116,69 @@ public class QueryService {
         QueryIntent intent = intentClassifier != null ? intentClassifier.classify(resolvedQuestion) : QueryIntent.UNKNOWN;
         retrievalOptions = applyIntentWeights(retrievalOptions, intent);
 
+        QuickDocumentStore quickDocumentStore = quickDocumentStoreProvider.getIfAvailable();
+        Map<UUID, String> quickDocumentNames = new HashMap<>();
+        List<RetrievedChunk> quickDocumentChunks = quickDocumentStore == null ? List.of()
+                : buildQuickDocumentChunks(quickDocumentStore, sessionId, organizationId, knowledgeBaseId,
+                        quickDocumentNames);
+
         long retrievalStartedAt = System.nanoTime();
         RetrievalResult result = retriever.retrieveWithDecision(organizationId, knowledgeBaseId, resolvedQuestion,
                 retrievalOptions);
         long retrievalLatencyMs = elapsedMs(retrievalStartedAt);
+
+        // 会话挂着临时文档时，知识库检索本身触发的拒答阈值不再让整轮问答拒答——只有"检索拒答且
+        // 没有临时文档兜底"才真正短路。审计快照必须按这个最终决策记录，不能只看检索的原始结果：
+        // 否则临时文档救回的这轮问答会在 rag_query_audit 里被误记成 refused，跟实际生成的真实
+        // 回答自相矛盾，误导审计/合规排查。
+        boolean actuallyRefused = result.refused() && quickDocumentChunks.isEmpty();
+        List<RetrievedChunk> contexts = new ArrayList<>(quickDocumentChunks);
+        Map<UUID, String> documentNames = new HashMap<>(quickDocumentNames);
+        if (!result.refused()) {
+            assertBoundary(result.chunks(), organizationId, knowledgeBaseId);
+            contexts.addAll(result.chunks());
+            documentNames.putAll(documentRepository
+                    .findByKnowledgeBaseIdAndOrgIdOrderByCreatedAtDesc(knowledgeBaseId, organizationId).stream()
+                    .collect(java.util.stream.Collectors.toMap(KnowledgeDocument::getId, KnowledgeDocument::getName)));
+        }
         QueryAuditSnapshot audit = QueryAuditSnapshot.from(traceId, organizationId, knowledgeBaseId, memberId,
-                retrievalLatencyMs, result.chunks(), result.diagnostics(), result.refused(), result.refusalReason(),
-                toAuditLabel(intent));
-        if (result.refused()) {
+                retrievalLatencyMs, contexts, result.diagnostics(), actuallyRefused,
+                actuallyRefused ? result.refusalReason() : null, toAuditLabel(intent));
+        if (actuallyRefused) {
             // resolvedQuestion（而非原始 question）才是意图分类实际处理过的文本——训练样本落库
             // 时读的是 resolvedQuestion，两者不一致会让 predicted_intent 标签和存下的文本对不上。
             return PreparedQuery.refused(question, resolvedQuestion, result.refusalReason(), audit);
         }
-        assertBoundary(result.chunks(), organizationId, knowledgeBaseId);
-        Map<UUID, String> documentNames = documentRepository
-                .findByKnowledgeBaseIdAndOrgIdOrderByCreatedAtDesc(knowledgeBaseId, organizationId).stream()
-                .collect(java.util.stream.Collectors.toMap(KnowledgeDocument::getId, KnowledgeDocument::getName));
+        if (!quickDocumentChunks.isEmpty()) {
+            // 只续期本轮实际用到（即当前仍挂在会话上）的临时文档，未命中的按原 TTL 自然过期。
+            quickDocumentStore.touch(sessionId,
+                    quickDocumentChunks.stream().map(chunk -> chunk.chunk().documentId()).toList());
+        }
         return new PreparedQuery(question, resolvedQuestion, profileContext, organizationId, knowledgeBaseId, memberId,
-                sessionId, result.chunks(), CitationBuilder.build(result.chunks(), documentNames), null, audit);
+                sessionId, contexts, CitationBuilder.build(contexts, documentNames), null, audit);
+    }
+
+    /**
+     * 会话内临时文档（长上下文直接塞入模式）包装成合成 {@link RetrievedChunk}：不经过 BM25/向量
+     * 排序，{@code finalScore} 固定设高值让它们排在知识库检索结果前面。{@code nameMapOut} 由
+     * 调用方传入并在此填充 docId→文件名，供 {@link CitationBuilder} 复用同一份 Map 查名字。
+     */
+    private List<RetrievedChunk> buildQuickDocumentChunks(QuickDocumentStore store, UUID sessionId,
+                                                           UUID organizationId, UUID knowledgeBaseId,
+                                                           Map<UUID, String> nameMapOut) {
+        List<QuickDocument> documents = store.findAllBySession(sessionId);
+        if (documents.isEmpty()) {
+            return List.of();
+        }
+        List<RetrievedChunk> chunks = new ArrayList<>(documents.size());
+        for (QuickDocument document : documents) {
+            Chunk chunk = new Chunk("quickdoc:" + document.docId(), organizationId, knowledgeBaseId,
+                    document.docId(), 0, document.content(), List.of(), null, null, null, null, "text", null,
+                    Map.of("quickDocument", "true"));
+            chunks.add(new RetrievedChunk(chunk, null, null, null, null, 1.0));
+            nameMapOut.put(document.docId(), document.filename());
+        }
+        return chunks;
     }
 
     public GenerationMetrics stream(PreparedQuery query, Consumer<QueryEvent> eventConsumer) {
