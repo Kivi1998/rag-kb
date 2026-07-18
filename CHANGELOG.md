@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.7.0] - 2026-07-18
+
+### 新增功能
+
+- **知识库向量检索迁移至 Milvus（ES/Milvus/影子三模式切流）** —— 检索层按端口拆分为
+  `LexicalCandidateSource`（ES BM25）/`VectorCandidateSource`（ES kNN 或 Milvus ANN）/
+  `ChunkHydrator`（Milvus 命中回查 ES 补齐正文并二次校验租户边界），`HybridRetriever` 只编
+  排两路结果、不再直接依赖数据库 SDK。摄取双写遵循"ES 暂存→Milvus 暂存→Milvus 激活→ES 最
+  终激活"可见性闸门协议，只有最后一步 ES 激活成功文档才进入 `READY`；删除走"ES 关闭可见
+  性→Milvus 删除→ES 删除→对象/元数据清理"补偿顺序。新增 `rag.vector.provider` 三种模式：
+  `elasticsearch`（默认，现有 ES kNN 原样保留）、`shadow`（线上仍用 ES 结果，同时采样查询
+  Milvus 记录 TopK 差异与延迟，不影响用户可见结果）、`milvus`（Milvus 为主，超时/故障自动
+  回退 ES kNN，再失败则退化为纯 BM25）。多租户隔离在 Milvus 查询/写/删三处均使用服务端构
+  造的参数化过滤（非字符串拼接），命中后再经 ES 回查二次校验组织与知识库边界，详见
+  `docs/architecture.md` 决策 12。**已知限制（如实记录，观察期内不阻塞合并）**：历史 ES
+  向量批量回填 Milvus、真实 ES+Milvus 环境集成验收、150 题对比评测、目标并发压测均未做，
+  当前默认配置仍是保守的纯 ES 模式，详见 TODOS.md。
+
 ## [0.6.0] - 2026-07-18
 
 ### 新增功能

@@ -22,14 +22,15 @@ Vue 前端
        └─ ragcore（自研）
             ├─ 文档解析与技术切块
             ├─ Embedding / Rerank / LLM Client
-            ├─ Elasticsearch：BM25 + kNN + RRF
+            ├─ Elasticsearch：BM25 + kNN + RRF（向量默认，可切流 Milvus，见决策 12）
             ├─ Conversation Memory：滑动窗口 / 指代消解 / 用户画像 / 会话历史列表（2026-07-15 新增）
             ├─ 引用构造、拒答与 SSE 输出
             └─ 评测、重试与可观测性
 
 基础设施：PostgreSQL（业务、任务与会话元数据）/ MinIO（原文件）/
-Elasticsearch（chunk、全文、向量；统一记忆索引）/
-Redis（JWT 黑名单 + 会话记忆滑动窗口，逻辑 DB 隔离）/
+Elasticsearch（chunk、全文、向量默认投影；统一记忆索引）/
+Milvus（可选向量投影，`rag.vector.provider` 切流，默认关闭，见决策 12）/
+Redis（JWT 黑名单 + 会话记忆滑动窗口 + 临时文档，逻辑 DB 隔离）/
 MongoDB（会话消息长期存档 + 用户画像，只服务记忆子系统）/
 硅基流动（Embedding/Rerank）+ DeepSeek（生成模型）
 ```
@@ -120,6 +121,17 @@ MongoDB（会话消息长期存档 + 用户画像，只服务记忆子系统）/
 - **为什么上传接口同步阻塞**：临时文档不进异步摄取任务表（`ingestion_job`），没有 `QUEUED→PARSING→READY` 状态机的必要，前端转圈等待即可，避免为一次性小文档解析引入不必要的异步复杂度；
 - **为什么用独立 Redis 逻辑 DB（DB 2）**：现有 Redis 里 DB 0 是 JWT 黑名单、DB 1 是会话记忆子系统（受 `rag.memory.enabled` 开关门控），临时文档存取必须独立于 `rag.memory.enabled`（`ChatSession` 本身不依赖记忆子系统开关），所以另开一个不受该开关影响的逻辑 DB；
 - **已知取舍**：详见 [第 8 章文档](../README.md)"已知取舍"条目——引用来源暂不区分临时文档/知识库文档的视觉标签、额度校验存在窄幅并发竞态（评估过 Redis 原子计数器修复方案，因 TTL 过期不触发计数器递减、会导致更严重的永久额度漂移而放弃）。
+
+### 决策 12：向量检索迁移 Milvus——ES/Milvus/影子三模式切流，ES 仍是正文权威源（2026-07-18）
+
+- **为什么不整体替换 ES、只迁移向量**：ES 同时承担 BM25、技术字段加权和正文/引用回查，把这些也搬去 Milvus 会扩大双写一致性面且丢失已验证的 ES 词法基线；Milvus 只保存向量与最小过滤字段（`chunk_id`/`embedding`/`org_id`/`kb_id`/`document_id`/`retrieval_ready` 等），命中后必须回 ES 补齐正文——ES 依旧是唯一的正文与引用定位权威源；
+- **为什么按端口拆分而不是直接改 `ElasticsearchHybridCandidateSource`**：新增 `LexicalCandidateSource`/`VectorCandidateSource`/`ChunkHydrator` 三个端口，`HybridRetriever` 只编排两路结果、不直接依赖任何数据库 SDK，ES 和 Milvus 各自实现对应端口；迁移期原 `HybridCandidateSource`/`ChunkIndex` 由适配器兼容保留（供评测脚本/存量测试使用），保证每个提交都可构建、可回滚；
+- **为什么摄取要"双端暂存、ES 最后激活"**：分布式写入没有跨库事务，用确定性 Chunk ID + `retrieval_ready` 可见性闸门代替——顺序是 ES 暂存（`retrieval_ready=false`）→ Milvus 暂存 → Milvus 激活 → ES 最后激活，只有第 4 步成功文档才进 `READY`；所有查询路径都强制过滤 `retrieval_ready=true`，因此任一步失败时暂存数据都不可能被检索到，Worker 复用现有幂等重试收敛，不需要新增消息队列；
+- **为什么删除是"先关 ES 可见性、再物理清理"**：ES 是最后一道正文回查边界，删除请求先把 ES 对应 Chunk 的 `retrieval_ready` 置 false，再依次删 Milvus 向量、ES Chunk、对象与元数据；中途失败保留 `DELETING` 由既有补偿任务重试，确保"已删除"文档不会因为清理顺序问题继续出现在检索结果里；
+- **为什么要三种 Provider 模式而不是直接切换**：`elasticsearch`（默认回滚模式）、`shadow`（线上仍用 ES 结果，同时采样查询 Milvus 记录 TopK 差异与延迟，不影响用户）、`milvus`（Milvus 主查询，超时/故障自动退回 ES kNN，再失败退化纯 BM25）——切流必须经过影子验证质量、达标后再灰度，不能靠"上线就直接换"；模式由服务端配置决定，外部 API 不暴露也不接受请求覆盖；
+- **为什么租户过滤要做三次**：Milvus 查询表达式由服务端按类型化的 `orgId+kbId+documentIds` 构造（参数化模板，禁止透传任意表达式/字符串拼接）→ 命中后 ES 批量回查再次带相同边界 → 转换为 `RetrievedChunk` 前再比对返回记录的组织与知识库，任何不一致直接丢弃并计入安全指标；Collection 用共享 Collection + 标量过滤而非每租户一个 Collection，当前百人级团队规模下运维更简单，未来超大租户需要物理隔离再独立演进；
+- **评审中发现并修复的问题**：`code-review` 8 角度里 4 个独立角度交叉确认了同一个 HIGH 级缺陷——`MilvusVectorIndex.setVisibility()` 用单次 `QueryReq(limit=16384)` 拉取文档全部 chunk_id 再翻转可见性，超过该上限的文档会静默漏掉尾部 chunk（删除场景下超限内容在文档"删除"后仍可被检索到），已修复为按 offset 翻页查询直到取完，并补了跨页回归测试；
+- **已知限制（观察期内不阻塞合并，见 TODOS）**：历史 ES 向量批量回填 Milvus、真实 ES+Milvus 环境集成验收、150 题 ES/Milvus 对比评测、目标并发压测均未做（design.md 里 `tasks.md` 第 7-8 节），当前默认配置仍是纯 ES 模式，Milvus 未默认启用；完整决策记录见 [Milvus 向量检索迁移设计](Milvus向量检索迁移设计.md)（D1-D7）与归档的 `openspec/changes/archive/2026-07-18-migrate-vector-retrieval-to-milvus/design.md`。
 
 ## 四、当前重构边界
 

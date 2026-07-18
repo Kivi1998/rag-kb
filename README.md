@@ -12,7 +12,7 @@
 - Markdown、代码、JSON/YAML/XML、DOCX、PPTX、文本 PDF、扫描 PDF、图片、字幕、音频和视频解析；
 - 独立 Parser Gateway 提供 OCR、ASR、Office 图片提取和字幕时间戳；
 - 结构感知切块（V3）：多风格层级识别、递归多级级联、表格分组+表头重复、句子边界重叠、chunk 元数据（sectionPath/contentType/isKeyClause/prev-nextChunkId）；
-- Elasticsearch BM25 + kNN + RRF、可选 Rerank、服务端引用与 SSE 问答；
+- Elasticsearch BM25 + kNN + RRF、可选 Rerank、服务端引用与 SSE 问答；向量检索可切流至 Milvus（ES/Milvus/影子三模式，默认仍为 ES kNN，2026-07-18 新增，观察期内未默认启用）；
 - 多轮对话与记忆管理：滑动窗口+语义历史检索+摘要压缩、用户画像+读时衰减遗忘机制、指代消解（2026-07-15 新增，学习性质的能力储备，当前规模非刚需驱动）；历史会话列表：切换/删除历史对话，刷新页面自动恢复上一次会话；
 - 生成阶段防幻觉：NO_RETRIEVAL 事实核验（生成模型自判 `{"found":true/false}`）+ 生成后自检（复用 Reranker 逐句核查资料支撑，已知对"部分相关的编造"拦截力不足，见 TODOS）；
 - 引用溯源：点击正文里的 `[资料N]` 在右侧抽屉展示对应来源的文档名/定位/原文片段，历史会话恢复后同样可点击（2026-07-17 起持久化到消息记录，此前上线的旧消息不回填）；
@@ -36,7 +36,8 @@ Vue 前端
 
 PostgreSQL：业务数据、任务与会话元数据（chat_session）
 MinIO/S3：原文件与解析产物
-Elasticsearch：Chunk、全文与向量；统一记忆索引（rag_memory_v1）
+Elasticsearch：Chunk、全文与向量（默认）；统一记忆索引（rag_memory_v1）
+Milvus：可选向量投影（rag_chunks_vector_v1，`rag.vector.provider` 切流，默认关闭）
 Redis：JWT 黑名单（DB 0）+ 会话记忆滑动窗口（DB 1，rag-kb 专属实例）
 MongoDB：会话消息长期存档 + 用户画像条目（只服务记忆子系统）
 Parser Gateway：OCR / ASR / 多模态解析
@@ -72,7 +73,7 @@ openspec/        需求规格与变更记录
 
 ### 第 1 章 RAG 整体架构
 
-- 文档：[总体架构](docs/architecture.md)（决策 1~10：单体模块化、不用高层 RAG 框架、技术文档优先、多租户隔离、记忆子系统、拒答阈值、事实核验、引用展示等）、[自研 RAG 核心重构设计](docs/自研RAG核心重构架构设计.md)（分阶段实施设计、试点验收线与 P95/QPS 观测记录）、[RAG 重构可复用资产清单](docs/RAG重构可复用资产清单.md)（第三方/内部代码复用与许可边界）
+- 文档：[总体架构](docs/architecture.md)（决策 1~12：单体模块化、不用高层 RAG 框架、技术文档优先、多租户隔离、记忆子系统、拒答阈值、事实核验、引用展示、单文档问答、Milvus 向量检索迁移等）、[自研 RAG 核心重构设计](docs/自研RAG核心重构架构设计.md)（分阶段实施设计、试点验收线与 P95/QPS 观测记录）、[RAG 重构可复用资产清单](docs/RAG重构可复用资产清单.md)（第三方/内部代码复用与许可边界）
 
 ### 第 2 章 文档预处理与切分
 
@@ -89,8 +90,9 @@ openspec/        需求规格与变更记录
 
 ### 第 4 章 检索召回·混合检索
 
-- 文档：[混合检索指南](docs/混合检索指南.md)（BM25+kNN+RRF 实现结构、关键参数与实验数字来源、降级行为）
-- 代码：[`HybridRetriever.java`](backend/src/main/java/com/diit/ragkb/ragcore/retrieval/HybridRetriever.java)（编排：BM25+kNN 召回→RRF 融合→可选 Rerank→拒答判定）、[`ElasticsearchHybridCandidateSource.java`](backend/src/main/java/com/diit/ragkb/ragcore/retrieval/ElasticsearchHybridCandidateSource.java)（ES 原生 BM25/kNN 双路 DSL）、[`RrfFusion.java`](backend/src/main/java/com/diit/ragkb/ragcore/retrieval/RrfFusion.java)（倒数排名融合）、[`ElasticsearchChunkIndex.java`](backend/src/main/java/com/diit/ragkb/ragcore/index/ElasticsearchChunkIndex.java)（`rag_chunks_v1` mapping 与 Bulk Upsert）、[`RetrievalOptions.java`](backend/src/main/java/com/diit/ragkb/ragcore/retrieval/RetrievalOptions.java)（候选池大小/topK/documentIds 过滤等可调参数）
+- 文档：[混合检索指南](docs/混合检索指南.md)（BM25+kNN+RRF 实现结构、关键参数与实验数字来源、降级行为、Milvus 向量检索切流）、[Milvus 向量检索迁移设计](docs/Milvus向量检索迁移设计.md)（D1-D7 关键决策：ES/Milvus 分工、双端可见性闸门、三种 Provider 模式、三次租户过滤）；OpenSpec 归档：`openspec/changes/archive/2026-07-18-migrate-vector-retrieval-to-milvus/`；主规格：`openspec/specs/milvus-vector-index/`、`openspec/specs/rag-query/`
+- 代码：[`HybridRetriever.java`](backend/src/main/java/com/diit/ragkb/ragcore/retrieval/HybridRetriever.java)（编排：词法+向量召回→RRF 融合→可选 Rerank→拒答判定）、[`LexicalCandidateSource`/`VectorCandidateSource`/`ChunkHydrator`](backend/src/main/java/com/diit/ragkb/ragcore/retrieval/)（拆分端口，ES 与 Milvus 各自实现，`HybridRetriever` 不直接依赖数据库 SDK）、[`ProviderVectorCandidateSource.java`](backend/src/main/java/com/diit/ragkb/ragcore/retrieval/ProviderVectorCandidateSource.java)（ES/Milvus/影子三模式路由与故障回退）、[`MilvusVectorIndex.java`](backend/src/main/java/com/diit/ragkb/ragcore/index/MilvusVectorIndex.java)（Milvus 暂存/激活/关闭可见性/删除）、[`ElasticsearchChunkHydrator.java`](backend/src/main/java/com/diit/ragkb/ragcore/retrieval/ElasticsearchChunkHydrator.java)（Milvus 命中回查 ES 补齐正文+二次租户校验）、[`RrfFusion.java`](backend/src/main/java/com/diit/ragkb/ragcore/retrieval/RrfFusion.java)（倒数排名融合）、[`RetrievalOptions.java`](backend/src/main/java/com/diit/ragkb/ragcore/retrieval/RetrievalOptions.java)（候选池大小/topK/documentIds 过滤等可调参数）
+- **已知限制（记录于 TODOS）**：历史 ES 向量批量回填 Milvus、真实环境集成验收、150 题 ES/Milvus 对比评测、目标并发压测均未做，默认配置仍是纯 ES 模式
 
 ### 第 5 章 重排（Rerank）与检索优化
 
