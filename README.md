@@ -17,6 +17,7 @@
 - 生成阶段防幻觉：NO_RETRIEVAL 事实核验（生成模型自判 `{"found":true/false}`）+ 生成后自检（复用 Reranker 逐句核查资料支撑，已知对"部分相关的编造"拦截力不足，见 TODOS）；
 - 引用溯源：点击正文里的 `[资料N]` 在右侧抽屉展示对应来源的文档名/定位/原文片段，历史会话恢复后同样可点击（2026-07-17 起持久化到消息记录，此前上线的旧消息不回填）；
 - 知识库管理：列表项右键菜单（重命名/删除/查看技术文档），技术文档改为独立页面（`/kb/:kbId/documents`），问答区占满工作区主区域；
+- 单文档直接问答（临时文档，长上下文直接塞入，2026-07-18 新增）：会话内上传的临时文档不写入知识库、不切块不索引，会话级共享 15000 字符总额度池，超额拒绝新上传；知识库检索触发拒答阈值但当前会话存在临时文档时不拒答，改用临时文档内容回答；
 - 离线评测（Recall@k/MRR/拒答 F1 框架 + 150 题真实语料评估集 eval-set-v2）、查询审计、指标与生产同构验收栈。
 
 ## 技术架构
@@ -114,6 +115,8 @@ openspec/        需求规格与变更记录
 - **真实回归验证与已知局限（如实记录）**：[NO_RETRIEVAL 验证报告](eval/reports/no-retrieval-fact-verification-validation-20260716.md) 8/8 命中；[自检验证报告](eval/reports/multi-passage-fusion-and-self-check-validation-20260716.md) 显示复用的 0.06 阈值对"部分相关的编造"基本拦不住（4/6 命中），NLI 替代尝试也未成功（`eval/reports/nli-threshold-calibration-20260716.md`），详见 TODOS
 - **引用溯源**：[知识库右键菜单+独立文档页设计文档](docs/superpowers/specs/2026-07-16-kb-context-menu-and-docs-page-design.md)、[历史引用持久化设计文档](docs/superpowers/specs/2026-07-16-persist-citations-in-history-design.md)；正文 `[资料N]` 点击弹右侧抽屉展示来源（文档名/定位/原文片段/相关度），历史会话恢复后同样可点（citations 随消息持久化到 MongoDB，旧消息不回填）；代码：[`ChatPanel.vue`](frontend/src/components/ChatPanel.vue)、[`CitationBuilder`+`recordTurn()`](backend/src/main/java/com/diit/ragkb/ragcore/conversation/ConversationMemoryOrchestrator.java)
 - **已知取舍**：知识库列表操作完全依赖右键（触屏/纯键盘用户无法触达）；模型未内联引用的资料无 UI 入口；引用文档被删除后历史记录不提示——均记录于 TODOS
+- **单文档直接问答（长上下文直接塞入，绕过切块检索，2026-07-18 新增）**：OpenSpec 归档：`openspec/changes/archive/2026-07-18-quick-document-qa/`（proposal/design/specs/tasks）；会话内上传的临时文档不写入知识库、不切块不索引，复用现有 `DocumentParserFactory` 解析（含 OCR/ASR 网关兜底），全文包装成合成 `RetrievedChunk`（`finalScore` 固定给高分排最前），与知识库检索结果一起送入生成/引用/自检链路；会话级共享 15000 字符总额度池，超额拒绝新上传（不做静默截断挤占）；知识库检索触发拒答阈值但当前会话存在未过期临时文档时不拒答，改用临时文档内容照常回答，审计快照按最终决策结果重建（不会误记为"已拒答"）；上传接口同步阻塞（前端转圈等待），独立 Redis 逻辑 DB（DB 2，TTL 2 小时随会话活跃续期，不耦合 `rag.memory.enabled` 开关）。代码：[`QuickDocumentService.java`](backend/src/main/java/com/diit/ragkb/ragcore/quickdocument/QuickDocumentService.java)（上传解析+额度校验）、[`RedisQuickDocumentStore.java`](backend/src/main/java/com/diit/ragkb/ragcore/quickdocument/RedisQuickDocumentStore.java)（Redis 存取，自愈式索引清理）、[`QuickDocumentController.java`](backend/src/main/java/com/diit/ragkb/controller/QuickDocumentController.java)、`QueryService.java` 的 `buildQuickDocumentChunks()`（拒答豁免与合成 chunk 拼装）、[`QuickDocumentPanel.vue`](frontend/src/components/QuickDocumentPanel.vue)
+- **已知取舍（记录于 TODOS）**：引用来源暂不区分"临时文档"与"知识库文档"的视觉标签（改动面涉及 `Citation` 记录跨多处，判断不值当，未做）；额度校验在并发上传下有窄幅竞态（评估过 Redis 原子计数器方案，因 TTL 自然过期不会触发计数器递减、会导致额度永久漂移，比现有问题更严重而放弃）；只有自动化测试，未做真实浏览器/真实 OCR 网关的端到端验证
 
 ### 第 9 章 系统评估与上线优化
 
