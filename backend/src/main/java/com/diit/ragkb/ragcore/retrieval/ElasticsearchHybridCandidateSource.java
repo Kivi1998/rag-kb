@@ -90,7 +90,8 @@ public class ElasticsearchHybridCandidateSource implements HybridCandidateSource
     private List<Map<String, Object>> tenantFilters(UUID organizationId, UUID knowledgeBaseId, List<UUID> documentIds) {
         List<Map<String, Object>> filters = new ArrayList<>(List.of(
                 Map.of("term", Map.of("org_id", organizationId.toString())),
-                Map.of("term", Map.of("kb_id", knowledgeBaseId.toString()))));
+                Map.of("term", Map.of("kb_id", knowledgeBaseId.toString())),
+                Map.of("term", Map.of("retrieval_ready", true))));
         if (documentIds != null && !documentIds.isEmpty()) {
             filters.add(Map.of("terms", Map.of("document_id",
                     documentIds.stream().map(UUID::toString).toList())));

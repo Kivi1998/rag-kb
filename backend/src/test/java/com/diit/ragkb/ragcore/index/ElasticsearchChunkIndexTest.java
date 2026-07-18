@@ -21,6 +21,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /** ES ChunkIndex 的 mapping、Bulk 元数据与三重租户删除过滤回归。 */
 class ElasticsearchChunkIndexTest {
@@ -31,6 +33,8 @@ class ElasticsearchChunkIndexTest {
     private final AtomicReference<String> mapping = new AtomicReference<>();
     private final AtomicReference<String> bulk = new AtomicReference<>();
     private final AtomicReference<String> deleteQuery = new AtomicReference<>();
+    private final AtomicReference<String> visibilityQuery = new AtomicReference<>();
+    private final AtomicBoolean failVisibility = new AtomicBoolean();
 
     @BeforeEach
     void setUp() throws IOException {
@@ -53,6 +57,7 @@ class ElasticsearchChunkIndexTest {
         index.upsert(List.of(chunk), List.of(List.of(0.1f, 0.2f)), "embedding-v1");
 
         assertTrue(mapping.get().contains("\"content_vector\""));
+        assertTrue(mapping.get().contains("\"retrieval_ready\""));
         assertTrue(mapping.get().contains("\"dims\":2"));
         assertTrue(mapping.get().contains("\"symbol_names\""));
         assertTrue(mapping.get().contains("\"config_keys\""));
@@ -62,6 +67,49 @@ class ElasticsearchChunkIndexTest {
         assertTrue(bulk.get().contains("\"document_id\":\"" + chunk.documentId() + "\""));
         assertTrue(bulk.get().contains("\"model_version\":\"embedding-v1\""));
         assertTrue(bulk.get().contains("\"symbol_names\""));
+        assertTrue(bulk.get().contains("\"retrieval_ready\":false"));
+        assertTrue(visibilityQuery.get().contains("\"ready\":true"));
+        assertTrue(visibilityQuery.get().contains("\"document_id\":\"" + chunk.documentId() + "\""));
+    }
+
+    @Test
+    void stageKeepsChunksInvisibleUntilExplicitActivation() {
+        ElasticsearchChunkIndex index = new ElasticsearchChunkIndex(restClient, properties(), new ObjectMapper());
+        Chunk chunk = chunk();
+        index.stage(List.of(chunk), List.of(List.of(0.1f, 0.2f)), "embedding-v1");
+
+        assertTrue(bulk.get().contains("\"retrieval_ready\":false"));
+        assertTrue(visibilityQuery.get() == null);
+
+        index.activateDocument(chunk.organizationId(), chunk.knowledgeBaseId(), chunk.documentId());
+        assertTrue(visibilityQuery.get().contains("\"ready\":true"));
+    }
+
+    @Test
+    void deactivateCarriesAllBoundariesAndSetsVisibilityFalse() {
+        ElasticsearchChunkIndex index = new ElasticsearchChunkIndex(restClient, properties(), new ObjectMapper());
+        UUID orgId = UUID.randomUUID();
+        UUID kbId = UUID.randomUUID();
+        UUID documentId = UUID.randomUUID();
+        index.deactivateDocument(orgId, kbId, documentId);
+
+        assertTrue(visibilityQuery.get().contains("\"ready\":false"));
+        assertTrue(visibilityQuery.get().contains("\"org_id\":\"" + orgId + "\""));
+        assertTrue(visibilityQuery.get().contains("\"kb_id\":\"" + kbId + "\""));
+        assertTrue(visibilityQuery.get().contains("\"document_id\":\"" + documentId + "\""));
+        assertFalse(visibilityQuery.get().contains("match_all"));
+    }
+
+    @Test
+    void activationFailureIsSurfacedAndNeverLooksSuccessful() {
+        ElasticsearchChunkIndex index = new ElasticsearchChunkIndex(restClient, properties(), new ObjectMapper());
+        Chunk chunk = chunk();
+        index.stage(List.of(chunk), List.of(List.of(0.1f, 0.2f)), "embedding-v1");
+        failVisibility.set(true);
+
+        assertThrows(ElasticsearchIndexException.class,
+                () -> index.activateDocument(chunk.organizationId(), chunk.knowledgeBaseId(), chunk.documentId()));
+        assertTrue(bulk.get().contains("\"retrieval_ready\":false"));
     }
 
     @Test
@@ -112,6 +160,16 @@ class ElasticsearchChunkIndexTest {
         if ("POST".equals(method) && "/rag_chunks_v1/_delete_by_query".equals(path)) {
             deleteQuery.set(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
             write(exchange, 200, "{\"deleted\":1}");
+            return;
+        }
+        if ("POST".equals(method) && "/rag_chunks_v1/_update_by_query".equals(path)) {
+            visibilityQuery.set(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
+            write(exchange, failVisibility.get() ? 503 : 200,
+                    failVisibility.get() ? "{\"error\":\"injected\"}" : "{\"updated\":1,\"failures\":[]}");
+            return;
+        }
+        if ("PUT".equals(method) && "/rag_chunks_v1/_mapping".equals(path)) {
+            write(exchange, 200, "{\"acknowledged\":true}");
             return;
         }
         write(exchange, 404, "{}");

@@ -20,6 +20,8 @@
     <properties>
         <java.version>17</java.version>
         <jjwt.version>0.12.6</jjwt.version>
+        <!-- Milvus Server 2.6.x 官方兼容版本；不引入独立 BulkWriter 包。 -->
+        <milvus.version>2.6.20</milvus.version>
     </properties>
 
     <dependencies>
@@ -168,6 +170,13 @@
             <groupId>org.elasticsearch.client</groupId>
             <artifactId>elasticsearch-rest-client</artifactId>
             <version>8.17.7</version>
+        </dependency>
+
+        <!-- Milvus 知识库向量投影；BM25 和引用正文仍由 Elasticsearch 承载。 -->
+        <dependency>
+            <groupId>io.milvus</groupId>
+            <artifactId>milvus-sdk-java</artifactId>
+            <version>${milvus.version}</version>
         </dependency>
 
         <!-- 测试 -->

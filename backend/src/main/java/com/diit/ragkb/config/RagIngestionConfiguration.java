@@ -3,7 +3,9 @@ package com.diit.ragkb.config;
 import com.diit.ragkb.ragcore.chunk.Chunker;
 import com.diit.ragkb.ragcore.chunk.impl.TechnicalChunker;
 import com.diit.ragkb.ragcore.embedding.EmbeddingClient;
-import com.diit.ragkb.ragcore.index.ChunkIndex;
+import com.diit.ragkb.ragcore.index.LexicalChunkIndex;
+import com.diit.ragkb.ragcore.index.VectorChunkIndex;
+import com.diit.ragkb.ragcore.ingestion.ChunkProjectionOrchestrator;
 import com.diit.ragkb.ragcore.ingestion.DefaultDocumentIngestionPipeline;
 import com.diit.ragkb.ragcore.ingestion.DocumentIngestionPipeline;
 import com.diit.ragkb.ragcore.ingestion.IngestionJobLifecycleService;
@@ -13,9 +15,12 @@ import com.diit.ragkb.ragcore.parser.impl.DocumentParserFactory;
 import com.diit.ragkb.ragcore.parser.MultimodalDocumentParser;
 import com.diit.ragkb.ragcore.parser.impl.HttpMultimodalDocumentParser;
 import com.diit.ragkb.ragcore.storage.ObjectStorage;
-import com.diit.ragkb.ragcore.retrieval.HybridCandidateSource;
+import com.diit.ragkb.ragcore.retrieval.ChunkHydrator;
 import com.diit.ragkb.ragcore.retrieval.HybridRetriever;
+import com.diit.ragkb.ragcore.retrieval.LexicalCandidateSource;
 import com.diit.ragkb.ragcore.retrieval.Retriever;
+import com.diit.ragkb.ragcore.retrieval.VectorCandidateSource;
+import com.diit.ragkb.ragcore.retrieval.VectorRetrievalMetrics;
 import com.diit.ragkb.ragcore.rerank.RerankerClient;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -84,20 +89,33 @@ public class RagIngestionConfiguration {
 
     @Bean
     @ConditionalOnProperty(prefix = "rag.ingestion.worker", name = "enabled", havingValue = "true")
+    public ChunkProjectionOrchestrator chunkProjectionOrchestrator(LexicalChunkIndex lexicalChunkIndex,
+                                                                    ObjectProvider<VectorChunkIndex> vectorProvider) {
+        return new ChunkProjectionOrchestrator(lexicalChunkIndex, vectorProvider.getIfAvailable());
+    }
+
+    @Bean
+    @ConditionalOnProperty(prefix = "rag.ingestion.worker", name = "enabled", havingValue = "true")
     public DocumentIngestionPipeline documentIngestionPipeline(DocumentParserFactory parserFactory, Chunker chunker,
-                                                               EmbeddingClient embeddingClient, ChunkIndex chunkIndex,
+                                                               EmbeddingClient embeddingClient,
+                                                               ChunkProjectionOrchestrator projectionOrchestrator,
                                                                ObjectStorage objectStorage,
                                                                IngestionJobLifecycleService lifecycleService,
                                                                ParsedArtifactStore artifactStore,
                                                                IngestionMetrics metrics) {
-        return new DefaultDocumentIngestionPipeline(parserFactory, chunker, embeddingClient, chunkIndex,
+        return new DefaultDocumentIngestionPipeline(parserFactory, chunker, embeddingClient, projectionOrchestrator,
                 objectStorage, lifecycleService, artifactStore, metrics);
     }
 
     @Bean
     @ConditionalOnProperty(prefix = "rag.retrieval", name = "enabled", havingValue = "true")
-    public Retriever retriever(HybridCandidateSource candidateSource, EmbeddingClient embeddingClient,
+    public Retriever retriever(LexicalCandidateSource lexicalCandidateSource,
+                               VectorCandidateSource vectorCandidateSource,
+                               ChunkHydrator chunkHydrator,
+                               EmbeddingClient embeddingClient,
+                               VectorRetrievalMetrics vectorMetrics,
                                ObjectProvider<RerankerClient> rerankerProvider) {
-        return new HybridRetriever(candidateSource, embeddingClient, rerankerProvider);
+        return new HybridRetriever(lexicalCandidateSource, vectorCandidateSource, chunkHydrator,
+                embeddingClient, rerankerProvider, vectorMetrics);
     }
 }

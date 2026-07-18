@@ -4,7 +4,6 @@ import com.diit.ragkb.ragcore.chunk.Chunker;
 import com.diit.ragkb.ragcore.chunk.ChunkingContext;
 import com.diit.ragkb.ragcore.chunk.ChunkingOptions;
 import com.diit.ragkb.ragcore.embedding.EmbeddingClient;
-import com.diit.ragkb.ragcore.index.ChunkIndex;
 import com.diit.ragkb.ragcore.model.DocumentInput;
 import com.diit.ragkb.ragcore.model.EmbeddingResult;
 import com.diit.ragkb.ragcore.model.IngestionStatus;
@@ -17,14 +16,14 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.util.List;
 
-/** Parser → Chunker → Embedding → ES 的生产摄取编排。 */
+/** Parser → Chunker → Embedding → 双投影提交的生产摄取编排。 */
 @RequiredArgsConstructor
 public class DefaultDocumentIngestionPipeline implements DocumentIngestionPipeline {
 
     private final DocumentParserFactory parserFactory;
     private final Chunker chunker;
     private final EmbeddingClient embeddingClient;
-    private final ChunkIndex chunkIndex;
+    private final ChunkProjectionOrchestrator projectionOrchestrator;
     private final ObjectStorage objectStorage;
     private final IngestionJobLifecycleService lifecycleService;
     private final ParsedArtifactStore artifactStore;
@@ -52,7 +51,7 @@ public class DefaultDocumentIngestionPipeline implements DocumentIngestionPipeli
         lifecycleService.advance(task, IngestionStatus.INDEXING);
 
         timed("index", () -> {
-            chunkIndex.upsert(chunks, vectors, embedding.modelVersion());
+            projectionOrchestrator.project(chunks, vectors, embedding.modelVersion());
             return null;
         });
         lifecycleService.advance(task, IngestionStatus.READY);
