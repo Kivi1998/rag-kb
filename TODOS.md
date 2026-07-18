@@ -2,6 +2,15 @@
 
 延后但已记录的工作项。每项注明动机、现状与起点,避免日后丢失上下文。
 
+## Milvus 向量检索迁移——观察期验收项未做(2026-07-18)
+
+- **What:** `openspec/changes/archive/2026-07-18-migrate-vector-retrieval-to-milvus/tasks.md` 第 7、8 节未完成：①历史回填检查点表/Flyway 迁移、ES 向量分页读取与模型/维度/切块版本兼容性判断、Milvus 批量回填断点续跑、总数/租户分布/孤儿 ID/抽样向量一致性校验报告；②真实 ES+Milvus 环境全链路集成测试、跨组织/跨知识库/伪造 ID/删除残留安全验收、150 题 ES/Milvus 对比评测（确认 Recall@1/5、MRR、拒答指标不低于已签字基线）、目标并发压测（P50/P95/P99、吞吐、内存、磁盘、单位查询成本）。
+- **Why:** 这两节都依赖真实部署的 Milvus/ES 实例和真实负载，本机开发环境跑不出有意义的数字；`design.md` 的 Migration Plan 本身就是分阶段推进（先双写校验、再影子比较、达标后才灰度切流），第 7-8 节是"影子验证通过后"才需要做的观察期工作，不是合并 PR #29 的前置条件。
+- **现状:** 当前默认配置 `rag.vector.provider=elasticsearch`（纯 ES 模式），Milvus 双写基础设施已合并但未在生产启用；`mvn test` 288/288（含新修复的可见性翻页回归测试）通过，属单测/集成假数据覆盖，不含真实 Milvus 实例。
+- **Pros:** 分阶段推进降低了单次变更的风险面，先把端口拆分、双写协议、租户过滤这些结构性工作合入主干，验收项可以独立排期不阻塞其他开发。
+- **Cons:** 在真正跑通第 7-8 节之前，`shadow`/`milvus` 模式的实际召回质量和性能表现都是未知数，不能凭这次合并就认为"Milvus 已经可以在生产用"。
+- **Depends on / blocked by:** 需要目标环境的 Milvus 部署（Standalone 还是集群待压测后定）和真实负载/125 题评测集跑通，之后再开独立 change 推进。
+
 ## P95/P99/QPS 监控与压测缺口(2026-07-17 讨论记录)
 
 - **What:** `rag_query_audit` 表（`QueryAuditLog`）已经在记录每次查询的 `retrieval_latency_ms`/`generation_latency_ms`/`total_latency_ms`/`status`/`created_at`，但目前是"只写不读"——没有任何代码/接口把这些数据算成 P95/P99 延迟或 QPS 展示出来；Prometheus/Actuator 只暴露了 Spring 默认的 `http.server.requests`（笼统的 HTTP 层耗时，不区分检索/生成阶段）和摄取相关指标（`IngestionMetrics`），没有查询侧的自定义指标。
