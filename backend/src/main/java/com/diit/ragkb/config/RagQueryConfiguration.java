@@ -3,6 +3,7 @@ package com.diit.ragkb.config;
 import com.diit.ragkb.ragcore.conversation.ConversationMemoryOrchestrator;
 import com.diit.ragkb.ragcore.generation.AnswerGenerator;
 import com.diit.ragkb.ragcore.intent.QueryIntentClassifier;
+import com.diit.ragkb.ragcore.quickdocument.QuickDocumentStore;
 import com.diit.ragkb.ragcore.rerank.RerankerClient;
 import com.diit.ragkb.ragcore.retrieval.Retriever;
 import com.diit.ragkb.repository.IntentTrainingSampleRepository;
@@ -35,9 +36,11 @@ public class RagQueryConfiguration {
                                      ObjectProvider<ChatSessionService> chatSessionServiceProvider,
                                      ObjectProvider<ConversationMemoryOrchestrator> memoryOrchestratorProvider,
                                      ObjectProvider<RerankerClient> rerankerProvider,
-                                     ObjectProvider<QueryIntentClassifier> intentClassifierProvider) {
+                                     ObjectProvider<QueryIntentClassifier> intentClassifierProvider,
+                                     ObjectProvider<QuickDocumentStore> quickDocumentStoreProvider) {
         return new QueryService(retriever, answerGenerator, knowledgeBaseService, documentRepository,
-                chatSessionServiceProvider, memoryOrchestratorProvider, rerankerProvider, intentClassifierProvider);
+                chatSessionServiceProvider, memoryOrchestratorProvider, rerankerProvider, intentClassifierProvider,
+                quickDocumentStoreProvider);
     }
 
     @Bean

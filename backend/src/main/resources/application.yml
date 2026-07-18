@@ -175,6 +175,16 @@ rag:
     profile-top-k: ${RAG_MEMORY_PROFILE_TOP_K:5}
     session-active-minutes: ${RAG_MEMORY_SESSION_ACTIVE_MINUTES:30}
     session-idle-hours: ${RAG_MEMORY_SESSION_IDLE_HOURS:2}
+  quick-document:
+    # 会话内临时文档（长上下文直接塞入模式）：不切块不索引，全文直接拼进 prompt。
+    # 默认开启，不耦合 rag.memory.enabled——核心问答链路本来就不依赖可选的记忆子系统。
+    # 用独立 Redis 逻辑 DB（默认 2），不与 JWT 黑名单（DB 0）/会话记忆（DB 1）混用。
+    enabled: ${RAG_QUICK_DOCUMENT_ENABLED:true}
+    redis-database: ${RAG_QUICK_DOCUMENT_REDIS_DATABASE:2}
+    ttl-hours: ${RAG_QUICK_DOCUMENT_TTL_HOURS:2}
+    # 15000 字符是重新校准 rag系统2 的 4000 字符设定得出的估算值（对齐 deepseek-chat 128K
+    # 上下文窗口，扣掉输出/历史/知识库检索片段预留后仍有充足空间），不是评估集校准出的数字。
+    max-total-characters: ${RAG_QUICK_DOCUMENT_MAX_TOTAL_CHARACTERS:15000}
 
 # Actuator
 management:
