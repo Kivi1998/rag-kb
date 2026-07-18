@@ -52,4 +52,4 @@
 - [x] 6.2 更新 `CHANGELOG.md`：显著标注"新增 `intent_training_sample` 表，默认开启，会存储
       问题原文"这一行为变化
 - [x] 6.3 `/review` 代码评审，修复所有 CRITICAL/HIGH 发现
-- [ ] 6.4 提交 PR，合并后用 `openspec-archive-change` 归档本 change 并同步 delta spec
+- [x] 6.4 提交 PR，合并后用 `openspec-archive-change` 归档本 change 并同步 delta spec
