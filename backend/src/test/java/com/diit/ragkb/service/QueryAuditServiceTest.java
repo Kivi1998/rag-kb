@@ -35,7 +35,7 @@ class QueryAuditServiceTest {
                 "org/private/path", null, null, null, "markdown", "hash", java.util.Map.of());
         QueryAuditSnapshot snapshot = QueryAuditSnapshot.from("trace-001", orgId, kbId, memberId, 12,
                 List.of(new RetrievedChunk(chunk, 1, 1, 0.03, null, 0.92)),
-                new RetrievalDiagnostics(3, 4, 5, true, false), false, null);
+                new RetrievalDiagnostics(3, 4, 5, true, false), false, null, "precise-lookup");
 
         service.record(snapshot, QueryAuditStatus.COMPLETED, new GenerationMetrics("chat-model", 123, 45, 80),
                 34, 46, null);
@@ -48,6 +48,7 @@ class QueryAuditServiceTest {
         assertEquals("[\"chunk-private-id\"]", saved.getChunkIdsJson());
         assertEquals("[\"" + documentId + "\"]", saved.getDocumentIdsJson());
         assertEquals("[0.92]", saved.getFinalScoresJson());
+        assertEquals("precise-lookup", saved.getPredictedIntent());
         assertEquals(123, saved.getPromptTokens());
         assertEquals(45, saved.getCompletionTokens());
         String persisted = saved.toString();

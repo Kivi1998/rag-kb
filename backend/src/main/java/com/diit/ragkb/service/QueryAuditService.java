@@ -52,6 +52,7 @@ public class QueryAuditService {
         entity.setEmbeddingFallback(snapshot.diagnostics().embeddingFallback());
         entity.setRerankFallback(snapshot.diagnostics().rerankFallback());
         entity.setRefusalReason(snapshot.refusalReason());
+        entity.setPredictedIntent(snapshot.predictedIntent());
         entity.setGenerationModel(safeMetrics.model());
         entity.setPromptTokens(safeMetrics.promptTokens());
         entity.setCompletionTokens(safeMetrics.completionTokens());

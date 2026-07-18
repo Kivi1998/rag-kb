@@ -17,22 +17,32 @@ public final class RrfFusion {
     }
 
     public static List<RetrievedChunk> fuse(List<RetrievedChunk> bm25, List<RetrievedChunk> vector) {
+        return fuse(bm25, vector, 1.0, 1.0);
+    }
+
+    /**
+     * 按权重加权的 RRF 融合。{@code bm25Weight}/{@code vectorWeight} 均为 {@code 1.0} 时与
+     * 未加权版本数学上完全等价（现状行为不变）。
+     */
+    public static List<RetrievedChunk> fuse(List<RetrievedChunk> bm25, List<RetrievedChunk> vector,
+                                            double bm25Weight, double vectorWeight) {
         Map<String, RetrievedChunk> candidates = new LinkedHashMap<>();
-        merge(candidates, bm25, true);
-        merge(candidates, vector, false);
+        merge(candidates, bm25, true, bm25Weight, vectorWeight);
+        merge(candidates, vector, false, bm25Weight, vectorWeight);
         List<RetrievedChunk> result = new ArrayList<>(candidates.values());
         result.sort(Comparator.comparing(RetrievedChunk::rrfScore, Comparator.nullsLast(Comparator.reverseOrder())));
         return result;
     }
 
-    private static void merge(Map<String, RetrievedChunk> destination, List<RetrievedChunk> source, boolean bm25) {
+    private static void merge(Map<String, RetrievedChunk> destination, List<RetrievedChunk> source, boolean bm25,
+                              double bm25Weight, double vectorWeight) {
         if (source == null) return;
         for (RetrievedChunk item : source) {
             String id = item.chunk().id();
             RetrievedChunk previous = destination.get(id);
             Integer bm25Rank = bm25 ? item.bm25Rank() : previous == null ? null : previous.bm25Rank();
             Integer vectorRank = bm25 ? previous == null ? null : previous.vectorRank() : item.vectorRank();
-            double score = rankScore(bm25Rank) + rankScore(vectorRank);
+            double score = bm25Weight * rankScore(bm25Rank) + vectorWeight * rankScore(vectorRank);
             destination.put(id, new RetrievedChunk(item.chunk(), bm25Rank, vectorRank, score, null, score));
         }
     }
