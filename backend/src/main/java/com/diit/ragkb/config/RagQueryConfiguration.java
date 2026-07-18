@@ -5,8 +5,10 @@ import com.diit.ragkb.ragcore.generation.AnswerGenerator;
 import com.diit.ragkb.ragcore.intent.QueryIntentClassifier;
 import com.diit.ragkb.ragcore.rerank.RerankerClient;
 import com.diit.ragkb.ragcore.retrieval.Retriever;
+import com.diit.ragkb.repository.IntentTrainingSampleRepository;
 import com.diit.ragkb.repository.KnowledgeDocumentRepository;
 import com.diit.ragkb.service.ChatSessionService;
+import com.diit.ragkb.service.IntentTrainingSampleService;
 import com.diit.ragkb.service.KnowledgeBaseService;
 import com.diit.ragkb.service.QueryService;
 import org.springframework.beans.factory.ObjectProvider;
@@ -22,7 +24,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 /** 问答开关开启时，显式装配检索、生成和隔离的 SSE 执行器。 */
 @Configuration
-@EnableConfigurationProperties(RagQueryProperties.class)
+@EnableConfigurationProperties({RagQueryProperties.class, RagIntentTrainingDataProperties.class})
 public class RagQueryConfiguration {
 
     @Bean
@@ -36,6 +38,12 @@ public class RagQueryConfiguration {
                                      ObjectProvider<QueryIntentClassifier> intentClassifierProvider) {
         return new QueryService(retriever, answerGenerator, knowledgeBaseService, documentRepository,
                 chatSessionServiceProvider, memoryOrchestratorProvider, rerankerProvider, intentClassifierProvider);
+    }
+
+    @Bean
+    @ConditionalOnProperty(prefix = "rag.intent-training-data", name = "enabled", havingValue = "true")
+    public IntentTrainingSampleService intentTrainingSampleService(IntentTrainingSampleRepository repository) {
+        return new IntentTrainingSampleService(repository);
     }
 
     @Bean(destroyMethod = "shutdown", name = "ragQueryExecutor")

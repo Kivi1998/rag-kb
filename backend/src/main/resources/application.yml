@@ -140,6 +140,13 @@ rag:
     # 分类结果实时调整 RRF 融合的 BM25/向量权重；分类失败/超时/关闭时均等价于现状（等权重）。
     # 默认关闭：先用 eval 集对比开关前后的 Recall/MRR/拒答 F1，确认无回归后再决定是否默认打开。
     enabled: ${RAG_INTENT_CLASSIFICATION_ENABLED:false}
+  intent-training-data:
+    # 意图分类训练数据留存：把「问题原文 + 预测意图标签」写入 intent_training_sample 表，
+    # 供未来训练 BERT 分类器替换现在的 LLM Prompt 粗分类。
+    # ⚠️ 默认开启（与本文件其它功能开关默认关闭的惯例不同，是 2026-07-17 用户明确决定）——
+    # 会把问题原文明文写库，不脱敏、不自动清理，只在 rag.intent-classification.enabled=true
+    # 且分类成功（非 UNKNOWN）时才写入。升级前请确认这一行为符合部署环境的数据合规要求。
+    enabled: ${RAG_INTENT_TRAINING_DATA_ENABLED:true}
   elasticsearch:
     # 只有 T107 管道与 ES 均完成部署后开启；向量维度必须与 Embedding 模型完全一致。
     enabled: ${RAG_ES_ENABLED:false}
