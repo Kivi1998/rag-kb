@@ -23,6 +23,9 @@ public class MilvusVectorIndex implements VectorChunkIndex {
             + MilvusCollectionManager.KB_ID + " == {kb_id} and "
             + MilvusCollectionManager.DOCUMENT_ID + " == {document_id}";
 
+    /** 单页查询上限；超过一页时必须翻页拉取，不能只处理第一页就视为完成。 */
+    private static final int VISIBILITY_QUERY_PAGE_SIZE = 16_384;
+
     private final MilvusClientV2 client;
     private final RagMilvusProperties properties;
     private final Gson gson = new Gson();
@@ -96,19 +99,9 @@ public class MilvusVectorIndex implements VectorChunkIndex {
     private void setVisibility(UUID organizationId, UUID knowledgeBaseId, UUID documentId, boolean ready) {
         Map<String, Object> values = documentBoundary(organizationId, knowledgeBaseId, documentId);
         try {
-            var response = client.query(QueryReq.builder()
-                    .databaseName(properties.getDatabaseName())
-                    .collectionName(properties.getCollectionName())
-                    .filter(DOCUMENT_FILTER)
-                    .filterTemplateValues(values)
-                    .outputFields(List.of(MilvusCollectionManager.CHUNK_ID))
-                    .limit(16_384)
-                    .consistencyLevel(ConsistencyLevel.SESSION)
-                    .build());
-            List<JsonObject> updates = response.getQueryResults().stream()
-                    .map(result -> result.getEntity().get(MilvusCollectionManager.CHUNK_ID))
-                    .filter(id -> id != null)
-                    .map(id -> visibilityRow(id.toString(), ready))
+            List<String> chunkIds = queryAllChunkIds(values);
+            List<JsonObject> updates = chunkIds.stream()
+                    .map(id -> visibilityRow(id, ready))
                     .toList();
             if (!updates.isEmpty()) {
                 client.upsert(UpsertReq.builder()
@@ -121,6 +114,41 @@ public class MilvusVectorIndex implements VectorChunkIndex {
         } catch (RuntimeException exception) {
             throw new MilvusVectorException(ready ? "Milvus 文档向量激活失败" : "Milvus 文档向量关闭可见性失败",
                     exception);
+        }
+    }
+
+    /**
+     * 翻页拉取文档下全部 chunk_id，不能只取第一页。
+     *
+     * <p>单文档 chunk 数可能超过单页上限（大文档/细粒度切块），若只查一页就直接更新可见性，
+     * 超出部分会永久停留在旧的 {@code retrieval_ready} 状态且没有任何报错：激活时表现为部分
+     * chunk 永远不可检索；关闭可见性（删除前置步骤）时表现为已删除文档的部分内容仍可被检索到，
+     * 属于静默的数据可见性/治理缺陷。</p>
+     */
+    private List<String> queryAllChunkIds(Map<String, Object> boundaryValues) {
+        List<String> chunkIds = new ArrayList<>();
+        long offset = 0;
+        while (true) {
+            var response = client.query(QueryReq.builder()
+                    .databaseName(properties.getDatabaseName())
+                    .collectionName(properties.getCollectionName())
+                    .filter(DOCUMENT_FILTER)
+                    .filterTemplateValues(boundaryValues)
+                    .outputFields(List.of(MilvusCollectionManager.CHUNK_ID))
+                    .offset(offset)
+                    .limit(VISIBILITY_QUERY_PAGE_SIZE)
+                    .consistencyLevel(ConsistencyLevel.SESSION)
+                    .build());
+            List<String> page = response.getQueryResults().stream()
+                    .map(result -> result.getEntity().get(MilvusCollectionManager.CHUNK_ID))
+                    .filter(id -> id != null)
+                    .map(Object::toString)
+                    .toList();
+            chunkIds.addAll(page);
+            if (page.size() < VISIBILITY_QUERY_PAGE_SIZE) {
+                return chunkIds;
+            }
+            offset += VISIBILITY_QUERY_PAGE_SIZE;
         }
     }
 

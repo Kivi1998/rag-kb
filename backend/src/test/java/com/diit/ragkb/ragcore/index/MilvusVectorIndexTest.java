@@ -10,9 +10,11 @@ import io.milvus.v2.service.vector.response.QueryResp;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.stream.IntStream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -65,6 +67,42 @@ class MilvusVectorIndexTest {
         verify(client).upsert(update.capture());
         assertTrue(update.getValue().isPartialUpdate());
         assertTrue(update.getValue().getData().get(0).get(MilvusCollectionManager.RETRIEVAL_READY).getAsBoolean());
+    }
+
+    @Test
+    void activateFollowsPaginationWhenDocumentExceedsSinglePage() {
+        MilvusClientV2 client = mock(MilvusClientV2.class);
+        int pageSize = 16_384;
+        List<QueryResp.QueryResult> firstPage = fullPageOf(pageSize, "page1-");
+        List<QueryResp.QueryResult> secondPage = List.of(
+                QueryResp.QueryResult.builder().entity(Map.of(MilvusCollectionManager.CHUNK_ID, "page2-0")).build());
+        when(client.query(any()))
+                .thenReturn(QueryResp.builder().queryResults(firstPage).build())
+                .thenReturn(QueryResp.builder().queryResults(secondPage).build());
+        var index = new MilvusVectorIndex(client, properties());
+        UUID orgId = UUID.randomUUID();
+        UUID kbId = UUID.randomUUID();
+        UUID documentId = UUID.randomUUID();
+
+        index.activateDocument(orgId, kbId, documentId);
+
+        ArgumentCaptor<QueryReq> query = ArgumentCaptor.forClass(QueryReq.class);
+        verify(client, org.mockito.Mockito.times(2)).query(query.capture());
+        List<QueryReq> queries = query.getAllValues();
+        assertEquals(0L, queries.get(0).getOffset());
+        assertEquals((long) pageSize, queries.get(1).getOffset());
+
+        ArgumentCaptor<UpsertReq> update = ArgumentCaptor.forClass(UpsertReq.class);
+        verify(client).upsert(update.capture());
+        // 超过单页上限时，必须把两页的 chunk 全部纳入可见性更新，不能只处理第一页。
+        assertEquals(pageSize + 1, update.getValue().getData().size());
+    }
+
+    private List<QueryResp.QueryResult> fullPageOf(int size, String prefix) {
+        List<QueryResp.QueryResult> results = new ArrayList<>(size);
+        IntStream.range(0, size).forEach(i -> results.add(
+                QueryResp.QueryResult.builder().entity(Map.of(MilvusCollectionManager.CHUNK_ID, prefix + i)).build()));
+        return results;
     }
 
     @Test
