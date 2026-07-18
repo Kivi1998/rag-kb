@@ -96,13 +96,15 @@
   意图树。核心思想相同：别让模型一次面对几百个选项，先用检索/分层把候选缩到个位数。当前只有
   4 类，远未到需要这套方案的规模。
 
-### 意图分类训练数据留存（2026-07-17，brainstorming 阶段明确不做）
+### 意图分类训练数据留存（2026-07-17 已实现，见 `openspec/changes/intent-classification-training-data-retention/`）
 
-- **What:** `rag_query_audit` 按安全约定不能存问题原文，本次只加了 `predicted_intent` 标签字段
-  （见 `V014__add_query_predicted_intent.sql`），拿不到"问题原文+标签"的可训练数据。
-- **Why:** 用户原始诉求是"线上攒够真实 query 和标注，再训一个 BERT 分类器"——这需要专门的新表/
-  保留期/脱敏策略，是独立的合规决策，brainstorming 阶段用户已确认本次不做（"只加标签，不留原文
-  （推荐，本阶段）"）。
+~~原"本次不做"待办~~：用户随后明确要求把这个决策落地，已新增独立表 `intent_training_sample`
+（`V015__add_intent_training_sample.sql`）存「问题原文 + 预测意图标签」，`QueryController` 在
+`prepare()` 成功后立即记录（与生成阶段结果无关），复用已有分类结果不新增 LLM 调用。关键参数
+均为用户 brainstorming 阶段逐项确认：**不自动清理**（人工删除）、**不脱敏**（原样存问题原文）、
+**全局开关**（非按组织可选）、**默认开启**（`rag.intent-training-data.enabled=true`，与
+`rag.nli.enabled` 等默认关闭的既有惯例不同，是本次特意的例外）。表结构对齐既有 `tenantFilter`
+租户隔离约定。设计文档：`openspec/changes/intent-classification-training-data-retention/design.md`。
 - **Depends on / blocked by:** 无硬阻塞，随时可作为独立 change 立项。
 
 ### 意图分类准确率的系统性评估（2026-07-17）
@@ -303,3 +305,19 @@ top1 分数低于阈值即拒答；139/139 后端测试通过，新增 3 个单�
   跳过的空白行不会推进 `currentLine`，导致当表格里数据行与空行交错时，产出 chunk 的
   `lineStart`/`lineEnd` 会比真实原始行号偏小。目前没有测试断言这一点，问题是潜在的、按计划范围
   判断为 out of scope，但记录在此供后续处理。
+
+## rag_query_audit 的外键缺 ON DELETE CASCADE，有查询记录后无法删除知识库/组织（2026-07-17，`/review` 发现）
+
+- **What:** `rag_query_audit`（`V006__add_rag_query_audit.sql`）的 `org_id`/`kb_id`/`member_id`
+  外键都没有 `ON DELETE CASCADE`（默认 `NO ACTION`），而 `document` 表（`V003`）对
+  `knowledge_base` 的外键是有 CASCADE 的——这是既有的不一致。一旦某个知识库被查询过一次
+  （几乎总是），后续删除该知识库会因外键冲突失败。
+- **Why:** `intent_training_sample`（`V015`，本次新增）复用了同样的 org/kb/member 外键形状，
+  评审时发现并确认 `rag_query_audit` 早就有这个问题——`intent_training_sample` 本身已经加上了
+  `ON DELETE CASCADE`（新表零成本做对），但没有回头修 `rag_query_audit`（改现有表的外键约束是
+  更大的迁移改动，且与本次功能无关）。
+- **验证结果**：全仓搜索确认知识库删除（`KnowledgeBaseService.delete()`）目前没有任何测试覆盖
+  （不论是否存在审计记录），Member 删除功能本身也还不存在（`MemberService` 没有 delete 方法）。
+- **Depends on / blocked by:** 需要一个新 Flyway 迁移改 `rag_query_audit` 的外键约束（Postgres
+  改外键需要先 DROP CONSTRAINT 再 ADD CONSTRAINT ... ON DELETE CASCADE），加一个删除知识库时
+  验证审计记录被级联清理的测试。

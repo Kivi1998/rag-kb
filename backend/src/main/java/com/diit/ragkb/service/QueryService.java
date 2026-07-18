@@ -116,7 +116,9 @@ public class QueryService {
                 retrievalLatencyMs, result.chunks(), result.diagnostics(), result.refused(), result.refusalReason(),
                 toAuditLabel(intent));
         if (result.refused()) {
-            return PreparedQuery.refused(question, result.refusalReason(), audit);
+            // resolvedQuestion（而非原始 question）才是意图分类实际处理过的文本——训练样本落库
+            // 时读的是 resolvedQuestion，两者不一致会让 predicted_intent 标签和存下的文本对不上。
+            return PreparedQuery.refused(question, resolvedQuestion, result.refusalReason(), audit);
         }
         assertBoundary(result.chunks(), organizationId, knowledgeBaseId);
         Map<UUID, String> documentNames = documentRepository
@@ -230,9 +232,10 @@ public class QueryService {
             citations = citations == null ? List.of() : List.copyOf(citations);
         }
 
-        static PreparedQuery refused(String question, String reason, QueryAuditSnapshot audit) {
-            return new PreparedQuery(question, question, null, null, null, null, null, List.of(), List.of(), reason,
-                    audit);
+        static PreparedQuery refused(String question, String resolvedQuestion, String reason,
+                                     QueryAuditSnapshot audit) {
+            return new PreparedQuery(question, resolvedQuestion, null, null, null, null, null, List.of(), List.of(),
+                    reason, audit);
         }
     }
 }
