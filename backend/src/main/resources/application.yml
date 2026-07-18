@@ -156,6 +156,36 @@ rag:
     vector-dimensions: ${RAG_ES_VECTOR_DIMENSIONS:0}
     connect-timeout-ms: ${RAG_ES_CONNECT_TIMEOUT_MS:3000}
     socket-timeout-ms: ${RAG_ES_SOCKET_TIMEOUT_MS:30000}
+    visibility-backfill:
+      # 一次性迁移命令，默认只在显式开启时创建；建议先 dry-run，再执行正式回填。
+      enabled: ${RAG_ES_VISIBILITY_BACKFILL_ENABLED:false}
+      dry-run: ${RAG_ES_VISIBILITY_BACKFILL_DRY_RUN:true}
+      batch-size: ${RAG_ES_VISIBILITY_BACKFILL_BATCH_SIZE:500}
+      max-attempts: ${RAG_ES_VISIBILITY_BACKFILL_MAX_ATTEMPTS:3}
+  vector:
+    # 默认继续使用 ES kNN；shadow 只做差异观测，milvus 才切换线上向量候选。
+    provider: ${RAG_VECTOR_PROVIDER:elasticsearch}
+    fallback-to-elasticsearch: ${RAG_VECTOR_FALLBACK_TO_ES:true}
+    shadow-timeout-ms: ${RAG_VECTOR_SHADOW_TIMEOUT_MS:1500}
+    shadow-sample-rate: ${RAG_VECTOR_SHADOW_SAMPLE_RATE:1.0}
+  milvus:
+    enabled: ${RAG_MILVUS_ENABLED:false}
+    uri: ${RAG_MILVUS_URI:}
+    auth-enabled: ${RAG_MILVUS_AUTH_ENABLED:false}
+    token: ${RAG_MILVUS_TOKEN:}
+    username: ${RAG_MILVUS_USERNAME:}
+    password: ${RAG_MILVUS_PASSWORD:}
+    database-name: ${RAG_MILVUS_DATABASE:default}
+    collection-name: ${RAG_MILVUS_COLLECTION:rag_chunks_vector_v1}
+    vector-dimensions: ${RAG_MILVUS_VECTOR_DIMENSIONS:1024}
+    metric-type: ${RAG_MILVUS_METRIC_TYPE:COSINE}
+    index-type: ${RAG_MILVUS_INDEX_TYPE:HNSW}
+    hnsw-m: ${RAG_MILVUS_HNSW_M:16}
+    ef-construction: ${RAG_MILVUS_EF_CONSTRUCTION:200}
+    search-ef: ${RAG_MILVUS_SEARCH_EF:128}
+    connect-timeout-ms: ${RAG_MILVUS_CONNECT_TIMEOUT_MS:3000}
+    rpc-timeout-ms: ${RAG_MILVUS_RPC_TIMEOUT_MS:3000}
+    tls-enabled: ${RAG_MILVUS_TLS_ENABLED:false}
   retrieval:
     # T201/T202 完成后显式开启；缺少 Embedding 或 ES Bean 时启动应失败而非走未过滤检索。
     enabled: ${RAG_RETRIEVAL_ENABLED:false}

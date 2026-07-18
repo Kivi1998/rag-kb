@@ -6,16 +6,17 @@ import com.diit.ragkb.ragcore.model.ModelClientException;
 import com.diit.ragkb.ragcore.model.RetrievedChunk;
 import com.diit.ragkb.ragcore.rerank.RerankerClient;
 import com.diit.ragkb.ragcore.index.SearchRequest;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.ObjectProvider;
 
 import java.util.List;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
 
 /** 服务端注入租户边界的混合检索、可选重排与拒答决策。 */
 @Slf4j
-@RequiredArgsConstructor
 public class HybridRetriever implements Retriever {
 
     private static final double MIN_RRF_SCORE = 0.01;
@@ -35,9 +36,53 @@ public class HybridRetriever implements Retriever {
      */
     private static final double MIN_RERANK_SCORE = 0.06;
 
-    private final HybridCandidateSource candidateSource;
+    private final HybridCandidateSource legacyCandidateSource;
+    private final LexicalCandidateSource lexicalCandidateSource;
+    private final VectorCandidateSource vectorCandidateSource;
+    private final ChunkHydrator chunkHydrator;
     private final EmbeddingClient embeddingClient;
     private final ObjectProvider<RerankerClient> rerankerProvider;
+    private final VectorRetrievalMetrics vectorMetrics;
+
+    /** 新检索端口构造器；生产装配使用该入口。 */
+    public HybridRetriever(LexicalCandidateSource lexicalCandidateSource,
+                           VectorCandidateSource vectorCandidateSource,
+                           ChunkHydrator chunkHydrator,
+                           EmbeddingClient embeddingClient,
+                           ObjectProvider<RerankerClient> rerankerProvider) {
+        this(lexicalCandidateSource, vectorCandidateSource, chunkHydrator, embeddingClient, rerankerProvider, null);
+    }
+
+    /** 生产构造器，额外记录 Milvus 命中但 ES 正文缺失的孤儿向量。 */
+    public HybridRetriever(LexicalCandidateSource lexicalCandidateSource,
+                           VectorCandidateSource vectorCandidateSource,
+                           ChunkHydrator chunkHydrator,
+                           EmbeddingClient embeddingClient,
+                           ObjectProvider<RerankerClient> rerankerProvider,
+                           VectorRetrievalMetrics vectorMetrics) {
+        this.legacyCandidateSource = null;
+        this.lexicalCandidateSource = Objects.requireNonNull(lexicalCandidateSource, "词法候选源不能为空");
+        this.vectorCandidateSource = Objects.requireNonNull(vectorCandidateSource, "向量候选源不能为空");
+        this.chunkHydrator = Objects.requireNonNull(chunkHydrator, "Chunk 补齐器不能为空");
+        this.embeddingClient = Objects.requireNonNull(embeddingClient, "EmbeddingClient 不能为空");
+        this.rerankerProvider = Objects.requireNonNull(rerankerProvider, "RerankerProvider 不能为空");
+        this.vectorMetrics = vectorMetrics;
+    }
+
+    /**
+     * 评测脚本与存量测试的过渡构造器。新生产代码不得继续依赖数据库耦合的双路接口。
+     */
+    @Deprecated(forRemoval = false)
+    public HybridRetriever(HybridCandidateSource candidateSource, EmbeddingClient embeddingClient,
+                           ObjectProvider<RerankerClient> rerankerProvider) {
+        this.legacyCandidateSource = Objects.requireNonNull(candidateSource, "候选源不能为空");
+        this.lexicalCandidateSource = null;
+        this.vectorCandidateSource = null;
+        this.chunkHydrator = null;
+        this.embeddingClient = Objects.requireNonNull(embeddingClient, "EmbeddingClient 不能为空");
+        this.rerankerProvider = Objects.requireNonNull(rerankerProvider, "RerankerProvider 不能为空");
+        this.vectorMetrics = null;
+    }
 
     @Override
     public List<RetrievedChunk> retrieve(UUID organizationId, UUID knowledgeBaseId, String query, RetrievalOptions options) {
@@ -52,7 +97,7 @@ public class HybridRetriever implements Retriever {
         }
         SearchRequest textRequest = new SearchRequest(organizationId, knowledgeBaseId, query, options.candidateLimit(),
                 options.documentIds());
-        List<RetrievedChunk> bm25 = candidateSource.searchBm25(textRequest);
+        List<RetrievedChunk> bm25 = searchBm25(textRequest);
 
         List<RetrievedChunk> vector;
         boolean embeddingFallback = false;
@@ -65,7 +110,7 @@ public class HybridRetriever implements Retriever {
                 }
                 queryVector = embedding.vectors().get(0);
             }
-            vector = candidateSource.searchKnn(new VectorSearchRequest(organizationId, knowledgeBaseId,
+            vector = searchVector(new VectorSearchRequest(organizationId, knowledgeBaseId,
                     queryVector, options.candidateLimit(), options.documentIds()));
         } catch (ModelClientException ex) {
             // 向量模型短暂不可用时，保留关键词召回能力，避免整个检索入口不可用。
@@ -115,6 +160,27 @@ public class HybridRetriever implements Retriever {
             }
         }
         return new RetrievalResult(selected, null, finalDiagnostics);
+    }
+
+    private List<RetrievedChunk> searchBm25(SearchRequest request) {
+        return legacyCandidateSource != null
+                ? legacyCandidateSource.searchBm25(request)
+                : lexicalCandidateSource.search(request);
+    }
+
+    private List<RetrievedChunk> searchVector(VectorSearchRequest request) {
+        if (legacyCandidateSource != null) return legacyCandidateSource.searchKnn(request);
+        List<VectorHit> hits = vectorCandidateSource.search(request);
+        if (hits.isEmpty()) return List.of();
+        List<com.diit.ragkb.ragcore.model.Chunk> chunks = chunkHydrator.findByChunkIds(
+                request.organizationId(), request.knowledgeBaseId(), hits.stream().map(VectorHit::chunkId).toList());
+        Map<String, com.diit.ragkb.ragcore.model.Chunk> byId = new HashMap<>();
+        chunks.forEach(chunk -> byId.put(chunk.id(), chunk));
+        if (vectorMetrics != null) vectorMetrics.recordOrphans(hits.size() - byId.size());
+        return hits.stream()
+                .filter(hit -> byId.containsKey(hit.chunkId()))
+                .map(hit -> new RetrievedChunk(byId.get(hit.chunkId()), null, hit.rank(), null, null, hit.score()))
+                .toList();
     }
 
     /** {@code MIN_RRF_SCORE} 的早退检查专用：始终按等权重（1.0/1.0）计算，不受查询意图分类影响。 */

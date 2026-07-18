@@ -1,7 +1,8 @@
 package com.diit.ragkb.ragcore.ingestion;
 
 import com.diit.ragkb.model.KnowledgeDocument;
-import com.diit.ragkb.ragcore.index.ChunkIndex;
+import com.diit.ragkb.ragcore.index.LexicalChunkIndex;
+import com.diit.ragkb.ragcore.index.VectorChunkIndex;
 import com.diit.ragkb.ragcore.model.IngestionStatus;
 import com.diit.ragkb.ragcore.storage.ObjectStorage;
 import com.diit.ragkb.repository.IngestionJobRepository;
@@ -18,7 +19,7 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * 文档删除补偿：ES 引用先于对象与元数据清理，失败状态保留为 DELETING 以便重试。
+ * 文档删除补偿：ES 先隐藏 → Milvus 删除 → ES 物理删除 → 对象与元数据清理。
  */
 @Slf4j
 @Service
@@ -32,7 +33,8 @@ public class DocumentDeletionService {
     private final KnowledgeDocumentRepository documentRepository;
     private final IngestionJobRepository jobRepository;
     private final ObjectStorage objectStorage;
-    private final ObjectProvider<ChunkIndex> chunkIndexProvider;
+    private final ObjectProvider<LexicalChunkIndex> lexicalIndexProvider;
+    private final ObjectProvider<VectorChunkIndex> vectorIndexProvider;
 
     /** 先持久化删除意图，保证外部清理失败后仍可由补偿任务发现。 */
     @Transactional
@@ -58,10 +60,19 @@ public class DocumentDeletionService {
             return false;
         }
         try {
-            ChunkIndex chunkIndex = chunkIndexProvider.getIfAvailable();
-            if (chunkIndex != null) {
-                // 先删除可检索内容，避免已请求删除的内部文档继续出现在问答引用中。
-                chunkIndex.deleteByDocumentId(document.getOrg().getId(), document.getKnowledgeBase().getId(), document.getId());
+            UUID orgId = document.getOrg().getId();
+            UUID kbId = document.getKnowledgeBase().getId();
+            LexicalChunkIndex lexicalIndex = lexicalIndexProvider.getIfAvailable();
+            VectorChunkIndex vectorIndex = vectorIndexProvider.getIfAvailable();
+            if (lexicalIndex != null) {
+                // 先关闭正文权威源可见性；后续任一步失败也不会继续出现在问答引用中。
+                lexicalIndex.deactivateDocument(orgId, kbId, document.getId());
+            }
+            if (vectorIndex != null) {
+                vectorIndex.deleteByDocumentId(orgId, kbId, document.getId());
+            }
+            if (lexicalIndex != null) {
+                lexicalIndex.deleteByDocumentId(orgId, kbId, document.getId());
             }
             if (document.getObjectStoragePath() != null && !document.getObjectStoragePath().isBlank()) {
                 objectStorage.delete(document.getObjectStoragePath());

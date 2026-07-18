@@ -19,6 +19,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -28,7 +29,7 @@ import java.util.regex.Pattern;
  * <p>所有写入都包含组织、知识库和文档标识。删除 API 同时强制三个条件，防止误删相同
  * documentId 之外的数据。检索由 T201 专门实现，避免在索引层暴露无租户过滤的泛型 search。</p>
  */
-public class ElasticsearchChunkIndex implements ChunkIndex {
+public class ElasticsearchChunkIndex implements ChunkIndex, LexicalChunkIndex {
 
     private static final Pattern SYMBOL = Pattern.compile("\\b(?:[A-Za-z_$][\\w$]*\\.)*[A-Za-z_$][\\w$]*\\b");
     private static final Pattern CONFIG_KEY = Pattern.compile("(?m)^\\s*([A-Za-z][\\w.-]{1,})\\s*[:=]");
@@ -37,6 +38,7 @@ public class ElasticsearchChunkIndex implements ChunkIndex {
     private final RestClient restClient;
     private final RagElasticsearchProperties properties;
     private final ObjectMapper objectMapper;
+    private final AtomicBoolean visibilityMappingEnsured = new AtomicBoolean();
 
     public ElasticsearchChunkIndex(RestClient restClient, RagElasticsearchProperties properties,
                                    ObjectMapper objectMapper) {
@@ -47,6 +49,17 @@ public class ElasticsearchChunkIndex implements ChunkIndex {
 
     @Override
     public void upsert(List<Chunk> chunks, List<List<Float>> vectors, String embeddingModelVersion) {
+        stage(chunks, vectors, embeddingModelVersion);
+        if (chunks == null || chunks.isEmpty()) return;
+        chunks.stream()
+                .map(chunk -> new DocumentBoundary(chunk.organizationId(), chunk.knowledgeBaseId(), chunk.documentId()))
+                .distinct()
+                .forEach(boundary -> activateDocument(boundary.organizationId(), boundary.knowledgeBaseId(),
+                        boundary.documentId()));
+    }
+
+    @Override
+    public void stage(List<Chunk> chunks, List<List<Float>> vectors, String embeddingModelVersion) {
         if (chunks == null || chunks.isEmpty()) {
             return;
         }
@@ -59,7 +72,7 @@ public class ElasticsearchChunkIndex implements ChunkIndex {
             Chunk chunk = chunks.get(i);
             validateChunk(chunk, vectors.get(i));
             appendJsonLine(ndjson, Map.of("index", Map.of("_index", properties.getIndexName(), "_id", chunk.id())));
-            appendJsonLine(ndjson, toIndexDocument(chunk, vectors.get(i), embeddingModelVersion));
+            appendJsonLine(ndjson, toIndexDocument(chunk, vectors.get(i), embeddingModelVersion, false));
         }
         Request request = new Request("POST", "/" + properties.getIndexName() + "/_bulk");
         request.setJsonEntity(ndjson.toString());
@@ -74,6 +87,16 @@ public class ElasticsearchChunkIndex implements ChunkIndex {
         } catch (IOException ex) {
             throw new ElasticsearchIndexException("ES Bulk 写入失败", ex);
         }
+    }
+
+    @Override
+    public void activateDocument(UUID organizationId, UUID knowledgeBaseId, UUID documentId) {
+        updateVisibility(organizationId, knowledgeBaseId, documentId, true);
+    }
+
+    @Override
+    public void deactivateDocument(UUID organizationId, UUID knowledgeBaseId, UUID documentId) {
+        updateVisibility(organizationId, knowledgeBaseId, documentId, false);
     }
 
     @Override
@@ -105,6 +128,7 @@ public class ElasticsearchChunkIndex implements ChunkIndex {
             Response response = restClient.performRequest(new Request("HEAD", "/" + properties.getIndexName()));
             int status = response.getStatusLine().getStatusCode();
             if (status >= 200 && status < 300) {
+                ensureVisibilityMapping();
                 return;
             }
             if (status != 404) {
@@ -122,6 +146,7 @@ public class ElasticsearchChunkIndex implements ChunkIndex {
         create.setJsonEntity(writeJson(indexMapping()));
         try {
             restClient.performRequest(create);
+            visibilityMappingEnsured.set(true);
         } catch (ResponseException ex) {
             // 多实例并发启动时另一个实例可能已经创建；再次 HEAD 确认即可。
             if (ex.getResponse().getStatusLine().getStatusCode() == 400 && indexExists()) {
@@ -154,6 +179,7 @@ public class ElasticsearchChunkIndex implements ChunkIndex {
         propertiesMap.put("content_search", Map.of("type", "text"));
         propertiesMap.put("content_vector", Map.of("type", "dense_vector", "dims", properties.getVectorDimensions(),
                 "index", true, "similarity", "cosine"));
+        propertiesMap.put("retrieval_ready", Map.of("type", "boolean"));
         propertiesMap.put("heading_path", Map.of("type", "keyword"));
         keyword(propertiesMap, "source_path");
         propertiesMap.put("page_no", Map.of("type", "integer"));
@@ -175,7 +201,8 @@ public class ElasticsearchChunkIndex implements ChunkIndex {
         propertiesMap.put(field, Map.of("type", "keyword"));
     }
 
-    private Map<String, Object> toIndexDocument(Chunk chunk, List<Float> vector, String modelVersion) {
+    private Map<String, Object> toIndexDocument(Chunk chunk, List<Float> vector, String modelVersion,
+                                                boolean retrievalReady) {
         Map<String, Object> source = new LinkedHashMap<>();
         source.put("chunk_id", chunk.id());
         source.put("org_id", chunk.organizationId().toString());
@@ -185,6 +212,7 @@ public class ElasticsearchChunkIndex implements ChunkIndex {
         source.put("content", chunk.content());
         source.put("content_search", chunk.content());
         source.put("content_vector", vector);
+        source.put("retrieval_ready", retrievalReady);
         source.put("heading_path", chunk.headingPath());
         source.put("source_path", chunk.sourcePath());
         source.put("page_no", chunk.pageNo());
@@ -200,6 +228,40 @@ public class ElasticsearchChunkIndex implements ChunkIndex {
         source.put("error_codes", extract(ERROR_CODE, chunk.content(), 64));
         source.put("metadata", chunk.metadata());
         return source;
+    }
+
+    private void ensureVisibilityMapping() {
+        if (visibilityMappingEnsured.get()) return;
+        Request request = new Request("PUT", "/" + properties.getIndexName() + "/_mapping");
+        request.setJsonEntity(writeJson(Map.of("properties",
+                Map.of("retrieval_ready", Map.of("type", "boolean")))));
+        try {
+            restClient.performRequest(request);
+            visibilityMappingEnsured.set(true);
+        } catch (IOException ex) {
+            throw new ElasticsearchIndexException("更新 ES retrieval_ready mapping 失败", ex);
+        }
+    }
+
+    private void updateVisibility(UUID organizationId, UUID knowledgeBaseId, UUID documentId, boolean ready) {
+        requireIds(organizationId, knowledgeBaseId, documentId);
+        ensureIndex();
+        Map<String, Object> body = Map.of(
+                "script", Map.of("source", "ctx._source.retrieval_ready = params.ready", "lang", "painless",
+                        "params", Map.of("ready", ready)),
+                "query", Map.of("bool", Map.of("filter", List.of(
+                        Map.of("term", Map.of("org_id", organizationId.toString())),
+                        Map.of("term", Map.of("kb_id", knowledgeBaseId.toString())),
+                        Map.of("term", Map.of("document_id", documentId.toString()))))));
+        Request request = new Request("POST", "/" + properties.getIndexName() + "/_update_by_query");
+        request.addParameter("conflicts", "proceed");
+        request.addParameter("refresh", "true");
+        request.setJsonEntity(writeJson(body));
+        try {
+            restClient.performRequest(request);
+        } catch (IOException ex) {
+            throw new ElasticsearchIndexException(ready ? "激活 ES Chunk 失败" : "隐藏 ES Chunk 失败", ex);
+        }
     }
 
     private List<String> extract(Pattern pattern, String content, int limit) {
@@ -257,4 +319,6 @@ public class ElasticsearchChunkIndex implements ChunkIndex {
         }
         return "unknown";
     }
+
+    private record DocumentBoundary(UUID organizationId, UUID knowledgeBaseId, UUID documentId) { }
 }

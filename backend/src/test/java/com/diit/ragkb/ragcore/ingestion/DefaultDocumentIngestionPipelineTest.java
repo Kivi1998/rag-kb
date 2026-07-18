@@ -2,7 +2,7 @@ package com.diit.ragkb.ragcore.ingestion;
 
 import com.diit.ragkb.ragcore.chunk.Chunker;
 import com.diit.ragkb.ragcore.embedding.EmbeddingClient;
-import com.diit.ragkb.ragcore.index.ChunkIndex;
+import com.diit.ragkb.ragcore.index.LexicalChunkIndex;
 import com.diit.ragkb.ragcore.model.Chunk;
 import com.diit.ragkb.ragcore.model.DocumentSection;
 import com.diit.ragkb.ragcore.model.EmbeddingResult;
@@ -52,7 +52,8 @@ class DefaultDocumentIngestionPipelineTest {
                 task.objectStoragePath(), null, 1, 1, "markdown", "hash", Map.of());
         Chunker chunker = (parsed, context, options) -> List.of(chunk);
         EmbeddingClient embedding = texts -> new EmbeddingResult("embedding-v1", List.of(List.of(0.1f, 0.2f)));
-        ChunkIndex index = mock(ChunkIndex.class);
+        LexicalChunkIndex index = mock(LexicalChunkIndex.class);
+        ChunkProjectionOrchestrator projections = new ChunkProjectionOrchestrator(index, null);
         ObjectStorage storage = new ObjectStorage() {
             @Override public void put(String key, InputStream input, long size, String contentType) { }
             @Override public InputStream open(String key) { return new ByteArrayInputStream("正文".getBytes(StandardCharsets.UTF_8)); }
@@ -64,14 +65,15 @@ class DefaultDocumentIngestionPipelineTest {
         when(artifactStore.save(eq(task), any(ParsedDocument.class))).thenReturn(
                 new ParsedArtifactStore.SavedArtifact("org/x/kb/y/doc.md.parsed-v1.json", "local-java-parser", "1"));
 
-        new DefaultDocumentIngestionPipeline(parserFactory, chunker, embedding, index, storage, lifecycle,
+        new DefaultDocumentIngestionPipeline(parserFactory, chunker, embedding, projections, storage, lifecycle,
                 artifactStore, new IngestionMetrics(new SimpleMeterRegistry())).process(task);
 
         verify(lifecycle).recordParsedArtifact(task, "org/x/kb/y/doc.md.parsed-v1.json", "local-java-parser", "1");
         verify(lifecycle).advance(task, IngestionStatus.CHUNKING);
         verify(lifecycle).advance(task, IngestionStatus.EMBEDDING);
         verify(lifecycle).advance(task, IngestionStatus.INDEXING);
-        verify(index).upsert(eq(List.of(chunk)), eq(List.of(List.of(0.1f, 0.2f))), eq("embedding-v1"));
+        verify(index).stage(eq(List.of(chunk)), eq(List.of(List.of(0.1f, 0.2f))), eq("embedding-v1"));
+        verify(index).activateDocument(orgId, kbId, documentId);
         verify(lifecycle).advance(task, IngestionStatus.READY);
     }
 }

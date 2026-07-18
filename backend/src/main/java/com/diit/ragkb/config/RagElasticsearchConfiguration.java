@@ -1,9 +1,14 @@
 package com.diit.ragkb.config;
 
-import com.diit.ragkb.ragcore.index.ChunkIndex;
 import com.diit.ragkb.ragcore.index.ElasticsearchChunkIndex;
 import com.diit.ragkb.ragcore.retrieval.ElasticsearchHybridCandidateSource;
+import com.diit.ragkb.ragcore.retrieval.ElasticsearchChunkHydrator;
+import com.diit.ragkb.ragcore.retrieval.ElasticsearchLexicalCandidateSource;
+import com.diit.ragkb.ragcore.retrieval.ElasticsearchVectorCandidateSource;
+import com.diit.ragkb.ragcore.retrieval.ChunkHydrator;
 import com.diit.ragkb.ragcore.retrieval.HybridCandidateSource;
+import com.diit.ragkb.ragcore.retrieval.LexicalCandidateSource;
+import com.diit.ragkb.ragcore.retrieval.VectorCandidateSource;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.http.Header;
 import org.apache.http.message.BasicHeader;
@@ -35,8 +40,8 @@ public class RagElasticsearchConfiguration {
 
     @Bean
     @ConditionalOnProperty(prefix = "rag.elasticsearch", name = "enabled", havingValue = "true")
-    public ChunkIndex chunkIndex(RestClient ragRestClient, RagElasticsearchProperties properties,
-                                 ObjectMapper objectMapper) {
+    public ElasticsearchChunkIndex chunkIndex(RestClient ragRestClient, RagElasticsearchProperties properties,
+                                              ObjectMapper objectMapper) {
         return new ElasticsearchChunkIndex(ragRestClient, properties, objectMapper);
     }
 
@@ -45,6 +50,28 @@ public class RagElasticsearchConfiguration {
     public HybridCandidateSource hybridCandidateSource(RestClient ragRestClient, RagElasticsearchProperties properties,
                                                        ObjectMapper objectMapper) {
         return new ElasticsearchHybridCandidateSource(ragRestClient, properties, objectMapper);
+    }
+
+    @Bean
+    @ConditionalOnProperty(prefix = "rag.elasticsearch", name = "enabled", havingValue = "true")
+    public LexicalCandidateSource lexicalCandidateSource(RestClient ragRestClient,
+                                                         RagElasticsearchProperties properties,
+                                                         ObjectMapper objectMapper) {
+        return new ElasticsearchLexicalCandidateSource(ragRestClient, properties, objectMapper);
+    }
+
+    @Bean
+    @ConditionalOnProperty(prefix = "rag.elasticsearch", name = "enabled", havingValue = "true")
+    public ElasticsearchVectorCandidateSource elasticsearchVectorCandidateSource(
+            RestClient ragRestClient, RagElasticsearchProperties properties, ObjectMapper objectMapper) {
+        return new ElasticsearchVectorCandidateSource(ragRestClient, properties, objectMapper);
+    }
+
+    @Bean
+    @ConditionalOnProperty(prefix = "rag.elasticsearch", name = "enabled", havingValue = "true")
+    public ChunkHydrator chunkHydrator(RestClient ragRestClient, RagElasticsearchProperties properties,
+                                      ObjectMapper objectMapper) {
+        return new ElasticsearchChunkHydrator(ragRestClient, properties, objectMapper);
     }
 
     private void validate(RagElasticsearchProperties properties) {
