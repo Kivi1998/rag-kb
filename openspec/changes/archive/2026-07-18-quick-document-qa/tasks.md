@@ -78,4 +78,4 @@
 - [x] 8.1 更新 `docs/检索与审计验收.md` 或新增小节说明这个能力的验收步骤
 - [x] 8.2 更新 `TODOS.md`/`CHANGELOG.md`
 - [x] 8.3 `/review` 代码评审，修复所有 CRITICAL/HIGH 发现
-- [ ] 8.4 提交 PR，合并后用 `openspec-archive-change` 归档本 change 并同步 delta specs
+- [x] 8.4 提交 PR，合并后用 `openspec-archive-change` 归档本 change 并同步 delta specs
