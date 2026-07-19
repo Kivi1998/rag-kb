@@ -78,11 +78,11 @@
 
 ## Query 扩写与重写(deferred，2026-07-15 讨论记录)
 
-- **What:** 检索前对用户 query 做处理：**扩写**=给问题加同义词/相关词后多路一起检索（求"全"，提召回）；**重写**=把口语化问题改写成贴近知识库表达的规范问法（求"准"，提精度）。当前两者都没有：`HybridRetriever` 拿原始 query 直接跑 BM25+embedding，`QueryRequest.rewrite` 字段是预留空壳且注释明确"首期固定关闭"。
+- **What:** 检索前对用户 query 做处理：**扩写**=给问题加同义词/相关词后多路一起检索（求"全"，提召回）；**重写**=把口语化问题改写成贴近知识库表达的规范问法（求"准"，提精度）。当前两者都没有：多轮场景只做窄范围指代消解，随后直接用 `resolvedQuestion` 跑 BM25+embedding；意图分类只调整融合权重，不改写问题文本。`QueryRequest.rewrite` 字段是预留空壳且注释明确"首期固定关闭"。
 - **Why:** 扩写解决"文档写'索赔'、用户问'理赔'搜不到"的词汇错配；但我们是混合检索，bge-m3 向量腿天然覆盖大部分同义词漂移，剩余收益主要在向量模型没学过的领域黑话/内部术语。重写在技术文档场景风险大于收益：高价值查询恰是 `NullPointerException`、配置 key 这类必须逐字精确的 token（BM25 已给 `symbol_names`/`config_keys`/`error_codes` 加 7-8 倍权重），LLM"润色"可能把精确匹配改没。
 - **Pros:** 扩写若命中领域黑话场景可直接提升召回，且纯词典方案零 LLM 调用、零延迟成本。
 - **Cons:** 需要自建技术领域同义词表（数据工作）；无证据前属预防性堆功能。
-- **Context:** 2026-07-15 结合外部学习材料与 rag系统1/rag系统2 对比讨论。两个旧项目都有扩写但均来自 RAGFlow（rag系统2 直接复制了 `FulltextQueryer`：同义词词典降权拼进查询 + 正则清洗疑问虚词；rag系统1 调 RAGFlow API 且 `keyword=true`）。**结论：现在不加**——基线 Recall@5=0.904，应先对 eval-set-v2 上约 12 道 Recall@5 失败题做错误归因，确认失败原因确实是同义词错配再动手。实现方式必须自研（CLAUDE.md 禁止复制 RAGFlow 代码）：自建小型同义词表 + 在 `ElasticsearchHybridCandidateSource.searchBm25()` 的 should 子句里加降权同义词匹配，几十行即可。重写维持关闭，理由已写在 `QueryController.QueryRequest` 注释里。
+- **Context:** 2026-07-15 结合外部学习材料与 rag系统1/rag系统2 对比讨论。两个旧项目都有扩写但均来自 RAGFlow（rag系统2 直接复制了 `FulltextQueryer`：同义词词典降权拼进查询 + 正则清洗疑问虚词；rag系统1 调 RAGFlow API 且 `keyword=true`）。**结论：现在不加**——基线 Recall@5=0.904，应先对 eval-set-v2 上约 12 道 Recall@5 失败题做错误归因，确认失败原因确实是同义词错配再动手。实现方式必须自研（CLAUDE.md 禁止复制 RAGFlow 代码）：自建小型同义词表，在 `ElasticsearchLexicalCandidateSource.search()` 的 should 子句里增加降权同义词匹配。重写维持关闭，理由已写在 `QueryController.QueryRequest` 注释里。
 - **Depends on / blocked by:** 前置步骤是失败题错误归因（评估集与脚本已就绪，随时可跑）。
 
 ## 查询意图识别（2026-07-17 已实现 LLM Prompt 粗分类 + 影响检索策略）

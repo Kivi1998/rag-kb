@@ -13,6 +13,7 @@
 - 独立 Parser Gateway 提供 OCR、ASR、Office 图片提取和字幕时间戳；
 - 结构感知切块（V3）：多风格层级识别、递归多级级联、表格分组+表头重复、句子边界重叠、chunk 元数据（sectionPath/contentType/isKeyClause/prev-nextChunkId）；
 - Elasticsearch BM25 + kNN + RRF、可选 Rerank、服务端引用与 SSE 问答；向量检索可切流至 Milvus（ES/Milvus/影子三模式，默认仍为 ES kNN，2026-07-18 新增，观察期内未默认启用）；
+- 可选 Query 意图粗分类：精确检索型提高 BM25 权重、语义型提高向量权重；默认关闭，权重效果尚未完成真实评估；
 - 多轮对话与记忆管理：滑动窗口+语义历史检索+摘要压缩、用户画像+读时衰减遗忘机制、指代消解（2026-07-15 新增，学习性质的能力储备，当前规模非刚需驱动）；历史会话列表：切换/删除历史对话，刷新页面自动恢复上一次会话；
 - 生成阶段防幻觉：NO_RETRIEVAL 事实核验（生成模型自判 `{"found":true/false}`）+ 生成后自检（复用 Reranker 逐句核查资料支撑，已知对"部分相关的编造"拦截力不足，见 TODOS）；
 - 引用溯源：点击正文里的 `[资料N]` 在右侧抽屉展示对应来源的文档名/定位/原文片段，历史会话恢复后同样可点击（2026-07-17 起持久化到消息记录，此前上线的旧消息不回填）；
@@ -29,7 +30,8 @@ Vue 前端
        └─ ragcore（自研）
             ├─ Parser / TechnicalChunker
             ├─ Embedding / Rerank / Generation Client
-            ├─ Elasticsearch：BM25 + kNN + RRF
+            ├─ Elasticsearch：BM25 + 默认 kNN 候选；Milvus：可选 ANN 候选
+            ├─ HybridRetriever：RRF 融合 / Rerank / 拒答
             ├─ Conversation Memory：滑动窗口 / 指代消解 / 用户画像
             ├─ 引用、拒答、SSE 与审计
             └─ Worker、重试、指标与评测
@@ -38,7 +40,7 @@ PostgreSQL：业务数据、任务与会话元数据（chat_session）
 MinIO/S3：原文件与解析产物
 Elasticsearch：Chunk、全文与向量（默认）；统一记忆索引（rag_memory_v1）
 Milvus：可选向量投影（rag_chunks_vector_v1，`rag.vector.provider` 切流，默认关闭）
-Redis：JWT 黑名单（DB 0）+ 会话记忆滑动窗口（DB 1，rag-kb 专属实例）
+Redis：JWT 黑名单（DB 0）+ 会话记忆滑动窗口（DB 1）+ 临时文档（DB 2）
 MongoDB：会话消息长期存档 + 用户画像条目（只服务记忆子系统）
 Parser Gateway：OCR / ASR / 多模态解析
 模型服务：OpenAI 兼容的 Embedding / Rerank / LLM
@@ -96,12 +98,12 @@ openspec/        需求规格与变更记录
 
 - **Embedding 模型选择**：[Embedding 指南](docs/Embedding指南.md)（选型过程：bge-large-zh-v1.5→bge-m3 切换实录与 512 token 报错、降级行为、指令前缀待办）；代码：[`EmbeddingClient.java`](backend/src/main/java/com/diit/ragkb/ragcore/embedding/EmbeddingClient.java)（接口）、[`OpenAiCompatibleEmbeddingClient.java`](backend/src/main/java/com/diit/ragkb/ragcore/embedding/OpenAiCompatibleEmbeddingClient.java)（OpenAI 兼容实现，当前对接硅基流动 `BAAI/bge-m3`）
 - **向量维度选择**：1024 维（`bge-m3` 原生维度），ES `dense_vector`/Milvus `FLOAT_VECTOR(1024)` 两端一致；切换模型或维度不兼容时按新 Collection/新索引处理，不原地覆盖（见下）
-- **向量库（Milvus）+ ANN 索引**（2026-07-18 新增，默认关闭）：向量投影可从 ES 切流至 Milvus 独立承载，Collection `rag_chunks_vector_v1` 只存向量与最小过滤字段（`chunk_id`/`embedding`/`org_id`/`kb_id`/`document_id`/`retrieval_ready`），首版索引参数 HNSW + COSINE + `M=16`/`efConstruction=200`/查询 `ef=128`（全部可配置）；文档：[Milvus 向量检索迁移设计](docs/Milvus向量检索迁移设计.md) D3（Collection Schema 与 HNSW 参数）；代码：[`MilvusCollectionManager.java`](backend/src/main/java/com/diit/ragkb/ragcore/index/MilvusCollectionManager.java)（Collection/索引创建与兼容性校验）、[`MilvusVectorIndex.java`](backend/src/main/java/com/diit/ragkb/ragcore/index/MilvusVectorIndex.java)（写入/暂存/激活/删除）、[`RagMilvusProperties.java`](backend/src/main/java/com/diit/ragkb/config/RagMilvusProperties.java)（endpoint/collection/维度/HNSW 参数配置）；查询期怎么在 ES/Milvus/影子模式间路由见第 5 章
+- **向量库（Milvus）+ ANN 索引**（2026-07-18 新增，默认关闭）：向量投影可从 ES 切流至 Milvus 独立承载，Collection `rag_chunks_vector_v1` 只存向量与最小过滤字段（`chunk_id`/`embedding`/`org_id`/`kb_id`/`document_id`/`retrieval_ready`），首版索引参数 HNSW + COSINE + `M=16`/`efConstruction=200`/查询 `ef=128`（全部可配置）；文档：[Milvus 向量检索迁移设计](docs/Milvus向量检索迁移设计.md)第 4、8 节；代码：[`MilvusCollectionManager.java`](backend/src/main/java/com/diit/ragkb/ragcore/index/MilvusCollectionManager.java)（Collection/索引创建与兼容性校验）、[`MilvusVectorIndex.java`](backend/src/main/java/com/diit/ragkb/ragcore/index/MilvusVectorIndex.java)（写入/暂存/激活/删除）、[`RagMilvusProperties.java`](backend/src/main/java/com/diit/ragkb/config/RagMilvusProperties.java)（URI/Collection/维度/HNSW 参数配置）；查询期怎么在 ES/Milvus/影子模式间路由见第 5 章
 - **微调 Embedding 模型**：**未实现**，如实记录——当前 Embedding 全部使用硅基流动在线 API 提供的通用模型（`bge-m3`），没有针对本项目语料做过微调或领域适配，属于后续可探索方向，未立项、未评估
 
 ### 第 5 章 检索召回·混合检索
 
-- 文档：[混合检索指南](docs/混合检索指南.md)（BM25+kNN+RRF 实现结构、关键参数与实验数字来源、降级行为、Milvus 向量检索切流）、[Milvus 向量检索迁移设计](docs/Milvus向量检索迁移设计.md)（D1-D7 关键决策：ES/Milvus 分工、双端可见性闸门、三种 Provider 模式、三次租户过滤）；OpenSpec 归档：`openspec/changes/archive/2026-07-18-migrate-vector-retrieval-to-milvus/`；主规格：`openspec/specs/milvus-vector-index/`、`openspec/specs/rag-query/`
+- 文档：[混合检索指南](docs/混合检索指南.md)（BM25+kNN+RRF 实现结构、关键参数与实验数字来源、降级行为、Milvus 向量检索切流）、[Milvus 向量检索迁移设计](docs/Milvus向量检索迁移设计.md)（当前实现、配置、迁移阶段与验收门）；D1-D7 原始决策见 OpenSpec 归档：`openspec/changes/archive/2026-07-18-migrate-vector-retrieval-to-milvus/`；主规格：`openspec/specs/milvus-vector-index/`、`openspec/specs/rag-query/`
 - 代码：[`HybridRetriever.java`](backend/src/main/java/com/diit/ragkb/ragcore/retrieval/HybridRetriever.java)（编排：词法+向量召回→RRF 融合→可选 Rerank→拒答判定）、[`LexicalCandidateSource`/`VectorCandidateSource`/`ChunkHydrator`](backend/src/main/java/com/diit/ragkb/ragcore/retrieval/)（拆分端口，ES 与 Milvus 各自实现，`HybridRetriever` 不直接依赖数据库 SDK）、[`ProviderVectorCandidateSource.java`](backend/src/main/java/com/diit/ragkb/ragcore/retrieval/ProviderVectorCandidateSource.java)（ES/Milvus/影子三模式路由与故障回退）、[`MilvusVectorIndex.java`](backend/src/main/java/com/diit/ragkb/ragcore/index/MilvusVectorIndex.java)（Milvus 暂存/激活/关闭可见性/删除）、[`ElasticsearchChunkHydrator.java`](backend/src/main/java/com/diit/ragkb/ragcore/retrieval/ElasticsearchChunkHydrator.java)（Milvus 命中回查 ES 补齐正文+二次租户校验）、[`RrfFusion.java`](backend/src/main/java/com/diit/ragkb/ragcore/retrieval/RrfFusion.java)（倒数排名融合）、[`RetrievalOptions.java`](backend/src/main/java/com/diit/ragkb/ragcore/retrieval/RetrievalOptions.java)（候选池大小/topK/documentIds 过滤等可调参数）
 - **已知限制（记录于 TODOS）**：历史 ES 向量批量回填 Milvus、真实环境集成验收、150 题 ES/Milvus 对比评测、目标并发压测均未做，默认配置仍是纯 ES 模式
 
@@ -112,8 +114,8 @@ openspec/        需求规格与变更记录
 
 ### 第 7 章 Query 理解与改写
 
-- 文档：[Query 理解与改写现状](docs/Query理解与改写现状.md)——**如实记录：已实现的只有指代消解**；Query 扩写/重写/HYDE/意图识别均为评估后明确暂缓（每项的理由与启动条件见文内与 `TODOS.md`），不假装有功能
-- 代码：[`DeepSeekCoreferenceResolver.java`](backend/src/main/java/com/diit/ragkb/ragcore/conversation/impl/DeepSeekCoreferenceResolver.java)（窄范围指代消解，fail-open）
+- 文档：[Query 理解与改写现状](docs/Query理解与改写现状.md)——已实现指代消解和可选 LLM 意图分类/动态 RRF 权重；扩写、重写、HYDE 仍保持关闭；意图分类默认关闭且效果尚未完成真实评估
+- 代码：[`DeepSeekCoreferenceResolver.java`](backend/src/main/java/com/diit/ragkb/ragcore/conversation/impl/DeepSeekCoreferenceResolver.java)（窄范围指代消解，fail-open）、[`ragcore/intent/`](backend/src/main/java/com/diit/ragkb/ragcore/intent)（意图分类端口、LLM 实现与分类枚举）、[`QueryService.java`](backend/src/main/java/com/diit/ragkb/service/QueryService.java)（按意图应用权重）
 
 ### 第 8 章 多轮对话与记忆管理
 
@@ -153,7 +155,7 @@ openspec/        需求规格与变更记录
 | Kibana | http://localhost:5601 | 容器 `rag-kb-dev-kibana`，图形化查看 ES 索引/文档 |
 | MinIO API | http://localhost:9010 | 容器 `rag-kb-dev-minio`，bucket `rag-kb` |
 | MinIO 控制台 | http://localhost:9011 | 账号密码见本机 `.env` 的 `MINIO_ACCESS_KEY`/`MINIO_SECRET_KEY` |
-| Redis | localhost:6380 | 容器 `rag-kb-dev-redis`（rag-kb 专属，2026-07-15 起不再共用 `thxpace-redis-local`）；DB 0 = JWT 黑名单，DB 1 = 会话记忆滑动窗口 |
+| Redis | localhost:6380 | 容器 `rag-kb-dev-redis`（rag-kb 专属，2026-07-15 起不再共用 `thxpace-redis-local`）；DB 0 = JWT 黑名单，DB 1 = 会话记忆滑动窗口，DB 2 = 临时文档 |
 | MongoDB | localhost:27018 | 容器 `rag-kb-dev-mongo`，库 `rag_kb_memory`，只服务会话记忆子系统（`chat_messages`/`memory_items`），账号密码见 `.env` |
 | Parser Gateway | http://localhost:8081 | `/v1/parse` 解析接口，`/health`/`/ready`/`/metrics` |
 

@@ -1,8 +1,8 @@
 ## Context
 
-`HybridRetriever.retrieveWithDecision()` 目前唯一的拒答依据是 rerank 相关性分数阈值（`MIN_RERANK_SCORE=0.06`，见 [拒答阈值校准报告](../../../eval/reports/refusal-threshold-calibration-20260714.md)）。按拒答子类型细分后，这道阈值对 LOW_CONFIDENCE（4/4 全中）、OUT_OF_SCOPE（10/9）有效，但对 NO_RETRIEVAL 类完全无效——8 道标注题的 rerank 分数普遍在 0.178–0.921，因为 reranker 衡量"主题相关性"，而 NO_RETRIEVAL 的特征恰恰是主题相关但具体事实缺失。这是检索分数机制的天花板，不是调参能解决的，需要在生成阶段补一道事实核验。
+`HybridRetriever.retrieveWithDecision()` 目前唯一的拒答依据是 rerank 相关性分数阈值（`MIN_RERANK_SCORE=0.06`，见 [拒答阈值校准报告](../../../../eval/reports/refusal-threshold-calibration-20260714.md)）。按拒答子类型细分后，这道阈值对 LOW_CONFIDENCE（4/4 全中）、OUT_OF_SCOPE（10/9）有效，但对 NO_RETRIEVAL 类完全无效——8 道标注题的 rerank 分数普遍在 0.178–0.921，因为 reranker 衡量"主题相关性"，而 NO_RETRIEVAL 的特征恰恰是主题相关但具体事实缺失。这是检索分数机制的天花板，不是调参能解决的，需要在生成阶段补一道事实核验。
 
-完整背景与逐节确认过程见 [brainstorming 设计文档](../../../docs/superpowers/specs/2026-07-16-no-retrieval-fact-verification-design.md)（已提交，本 design.md 是其在 OpenSpec 流程下的提炼版）。
+完整背景与逐节确认过程见 [brainstorming 设计文档](../../../../docs/superpowers/specs/2026-07-16-no-retrieval-fact-verification-design.md)（已提交，本 design.md 是其在 OpenSpec 流程下的提炼版）。
 
 ## Goals / Non-Goals
 

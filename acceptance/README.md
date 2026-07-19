@@ -49,3 +49,18 @@ docker start rag-kb-acceptance-worker-a-1
 `model-stub` 只能用于链路和协议验收，禁止将其结果描述为真实向量模型的检索质量结果。
 
 本地验收后端使用 `Dockerfile.acceptance`，以规避部分 Docker Desktop 环境的基础镜像清单缓存故障；正式发布镜像必须使用 `backend/Dockerfile` 的精简 JRE 多阶段构建。
+
+## Milvus 验收边界
+
+`compose.yml` 提供 `milvus` profile，用于启动隔离的 Milvus、etcd 和对象存储依赖：
+
+```bash
+export RAG_MILVUS_MINIO_ACCESS_KEY=<本地验收账号>
+export RAG_MILVUS_MINIO_SECRET_KEY=<本地验收强密码>
+docker compose -f compose.yml --profile milvus up -d milvus
+```
+
+该 profile 当前只签收基础设施可启动，不会自动把 5000 份验收 Worker 切到 Milvus，也不能替代
+ES+Milvus 双写、检索、删除、跨租户隔离和 150 题质量对比。完整配置与待完成门槛见
+[`docs/Milvus向量检索迁移设计.md`](../docs/Milvus向量检索迁移设计.md)。默认 5000 份验收仍以
+Elasticsearch 投影为准。

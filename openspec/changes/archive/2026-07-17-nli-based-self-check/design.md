@@ -1,6 +1,6 @@
 ## Context
 
-`AnswerSelfChecker`（`multi-passage-fusion-and-self-check`）复用 Reranker 做生成后逐句自检，真实验证显示 Reranker 的"主题相关性"打分对"部分相关的编造"命中率不足（4/6）。硅基流动账号下没有 NLI 模型，需要本机部署一个真实的开源中文 NLI 模型。完整背景与设计过程见 [brainstorming 设计文档](../../../docs/superpowers/specs/2026-07-16-nli-based-self-check-design.md)。
+`AnswerSelfChecker`（`multi-passage-fusion-and-self-check`）复用 Reranker 做生成后逐句自检，真实验证显示 Reranker 的"主题相关性"打分对"部分相关的编造"命中率不足（4/6）。硅基流动账号下没有 NLI 模型，需要本机部署一个真实的开源中文 NLI 模型。完整背景与设计过程见 [brainstorming 设计文档](../../../../docs/superpowers/specs/2026-07-16-nli-based-self-check-design.md)。
 
 ## Goals / Non-Goals
 

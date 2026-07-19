@@ -2,7 +2,7 @@
 
 ## 背景
 
-`multi-passage-fusion-and-self-check` change 新增了两道防线：检索阶段对全部候选片段应用 `MIN_RERANK_SCORE` 过滤（低可信片段过滤），以及生成阶段用 `AnswerSelfChecker` 复用 Reranker 对正文逐句核查是否有资料支撑（"两道闸"的第二道）。低可信片段过滤复用的是已校准阈值、逻辑简单，单元测试已充分覆盖；本报告聚焦 `AnswerSelfChecker` 这个全新机制的真实效果——[design.md](../../openspec/changes/multi-passage-fusion-and-self-check/design.md) 明确说明这次没有先例数据，复用 `MIN_RERANK_SCORE=0.06` 只是起步值，需要真实验证摸底。
+`multi-passage-fusion-and-self-check` change 新增了两道防线：检索阶段对全部候选片段应用 `MIN_RERANK_SCORE` 过滤（低可信片段过滤），以及生成阶段用 `AnswerSelfChecker` 复用 Reranker 对正文逐句核查是否有资料支撑（"两道闸"的第二道）。低可信片段过滤复用的是已校准阈值、逻辑简单，单元测试已充分覆盖；本报告聚焦 `AnswerSelfChecker` 这个全新机制的真实效果——[design.md](../../openspec/changes/archive/2026-07-16-multi-passage-fusion-and-self-check/design.md) 明确说明这次没有先例数据，复用 `MIN_RERANK_SCORE=0.06` 只是起步值，需要真实验证摸底。
 
 ## 方法
 
