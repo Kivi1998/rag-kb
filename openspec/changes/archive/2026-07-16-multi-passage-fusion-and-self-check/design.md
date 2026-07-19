@@ -1,6 +1,6 @@
 ## Context
 
-现有防幻觉机制只有两层：检索阶段的 `MIN_RERANK_SCORE` 整体拒答阈值（只检查排名第一的片段），和生成阶段的 `FactVerificationGate`（`no-retrieval-fact-verification` change，只做一次粗粒度"整体有没有答案"判断）。对照"回答控制"审计后确认两处缺口需要补：多段片段的取舍/过滤、以及生成后独立于生成模型的逐句核查。完整背景与设计过程见 [brainstorming 设计文档](../../../docs/superpowers/specs/2026-07-16-multi-passage-fusion-and-self-check-design.md)。
+现有防幻觉机制只有两层：检索阶段的 `MIN_RERANK_SCORE` 整体拒答阈值（只检查排名第一的片段），和生成阶段的 `FactVerificationGate`（`no-retrieval-fact-verification` change，只做一次粗粒度"整体有没有答案"判断）。对照"回答控制"审计后确认两处缺口需要补：多段片段的取舍/过滤、以及生成后独立于生成模型的逐句核查。完整背景与设计过程见 [brainstorming 设计文档](../../../../docs/superpowers/specs/2026-07-16-multi-passage-fusion-and-self-check-design.md)。
 
 ## Goals / Non-Goals
 

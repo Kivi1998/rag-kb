@@ -1,5 +1,10 @@
 # rag-kb RAG 重构可复用资产清单
 
+> 文档性质：**重构前的选型与代码来源记录**，用于追溯 rag1/rag2/rag3 的复用依据，不是当前
+> 代码结构或开发任务清单。当前实现入口以 [`README.md`](../README.md) 和
+> [总体架构](architecture.md) 为准；已经落地的类名、解析方案和 Milvus 可选向量投影可能与本文
+> 当时的目标命名不同。
+>
 > 目标：在不使用 RAGFlow、LangChain、LlamaIndex 等高层 RAG 编排框架的前提下，最大化复用 `rag1`、`rag2`、`rag3` 的成熟资产，减少 rag-kb 自研 RAG Core 的开发量。
 >
 > 适用范围：内部技术文档知识库（Markdown、代码、配置、PDF、DOCX）。

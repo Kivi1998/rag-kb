@@ -1,6 +1,7 @@
 # rag-kb 架构设计
 
-> 当前状态：旧 RAGFlow 摄取与问答实现已下线，项目进入自研 RAG Core 重构阶段。
+> 当前状态：旧 RAGFlow 摄取与问答实现已下线，自研 RAG Core 主链路已经落地并持续迭代；
+> Milvus 当前为可选投影，默认仍使用 Elasticsearch 向量检索。
 >
 > 详细实施设计见：[自研 RAG 核心重构架构设计](自研RAG核心重构架构设计.md)。
 
@@ -22,7 +23,8 @@ Vue 前端
        └─ ragcore（自研）
             ├─ 文档解析与技术切块
             ├─ Embedding / Rerank / LLM Client
-            ├─ Elasticsearch：BM25 + kNN + RRF（向量默认，可切流 Milvus，见决策 12）
+            ├─ Elasticsearch：BM25 + 默认 kNN 候选（向量可切流 Milvus，见决策 12）
+            ├─ HybridRetriever：RRF 融合 / Rerank / 拒答
             ├─ Conversation Memory：滑动窗口 / 指代消解 / 用户画像 / 会话历史列表（2026-07-15 新增）
             ├─ 引用构造、拒答与 SSE 输出
             └─ 评测、重试与可观测性
@@ -32,7 +34,7 @@ Elasticsearch（chunk、全文、向量默认投影；统一记忆索引）/
 Milvus（可选向量投影，`rag.vector.provider` 切流，默认关闭，见决策 12）/
 Redis（JWT 黑名单 + 会话记忆滑动窗口 + 临时文档，逻辑 DB 隔离）/
 MongoDB（会话消息长期存档 + 用户画像，只服务记忆子系统）/
-硅基流动（Embedding/Rerank）+ DeepSeek（生成模型）
+OpenAI 兼容模型服务（已验证基线：硅基流动 Embedding/Rerank + DeepSeek 生成）
 ```
 
 > 注：限流尚未实现（此前版本图里的"限流"是规划态描述，代码中未落地）。
@@ -131,7 +133,7 @@ MongoDB（会话消息长期存档 + 用户画像，只服务记忆子系统）/
 - **为什么要三种 Provider 模式而不是直接切换**：`elasticsearch`（默认回滚模式）、`shadow`（线上仍用 ES 结果，同时采样查询 Milvus 记录 TopK 差异与延迟，不影响用户）、`milvus`（Milvus 主查询，超时/故障自动退回 ES kNN，再失败退化纯 BM25）——切流必须经过影子验证质量、达标后再灰度，不能靠"上线就直接换"；模式由服务端配置决定，外部 API 不暴露也不接受请求覆盖；
 - **为什么租户过滤要做三次**：Milvus 查询表达式由服务端按类型化的 `orgId+kbId+documentIds` 构造（参数化模板，禁止透传任意表达式/字符串拼接）→ 命中后 ES 批量回查再次带相同边界 → 转换为 `RetrievedChunk` 前再比对返回记录的组织与知识库，任何不一致直接丢弃并计入安全指标；Collection 用共享 Collection + 标量过滤而非每租户一个 Collection，当前百人级团队规模下运维更简单，未来超大租户需要物理隔离再独立演进；
 - **评审中发现并修复的问题**：`code-review` 8 角度里 4 个独立角度交叉确认了同一个 HIGH 级缺陷——`MilvusVectorIndex.setVisibility()` 用单次 `QueryReq(limit=16384)` 拉取文档全部 chunk_id 再翻转可见性，超过该上限的文档会静默漏掉尾部 chunk（删除场景下超限内容在文档"删除"后仍可被检索到），已修复为按 offset 翻页查询直到取完，并补了跨页回归测试；
-- **已知限制（观察期内不阻塞合并，见 TODOS）**：历史 ES 向量批量回填 Milvus、真实 ES+Milvus 环境集成验收、150 题 ES/Milvus 对比评测、目标并发压测均未做（design.md 里 `tasks.md` 第 7-8 节），当前默认配置仍是纯 ES 模式，Milvus 未默认启用；完整决策记录见 [Milvus 向量检索迁移设计](Milvus向量检索迁移设计.md)（D1-D7）与归档的 `openspec/changes/archive/2026-07-18-migrate-vector-retrieval-to-milvus/design.md`。
+- **已知限制（观察期内不阻塞合并，见 TODOS）**：历史 ES 向量批量回填 Milvus、真实 ES+Milvus 环境集成验收、150 题 ES/Milvus 对比评测、目标并发压测均未做；当前默认配置仍是纯 ES 模式，Milvus 未默认启用。当前状态与配置见 [Milvus 向量检索迁移设计](Milvus向量检索迁移设计.md)，D1-D7 原始决策见 OpenSpec 归档 `openspec/changes/archive/2026-07-18-migrate-vector-retrieval-to-milvus/design.md`。
 
 ## 四、当前重构边界
 

@@ -6,8 +6,10 @@
 
 - **接口**：`EmbeddingClient`（`backend/.../ragcore/embedding/EmbeddingClient.java`），批量输入文本、返回向量列表；
 - **实现**：`OpenAiCompatibleEmbeddingClient`（OpenAI 兼容协议），带分批与超时处理；
-- **当前模型**：硅基流动（SiliconFlow）在线 API 的 `BAAI/bge-m3`（1024 维，8K 上下文），配置在 `.env`，key 不入库；
-- **约束**：Elasticsearch 索引（`rag_chunks_v1`）的向量维度必须与模型输出维度完全一致（1024），换模型必须重建索引重灌向量。
+- **已验证基线模型**：硅基流动（SiliconFlow）在线 API 的 `BAAI/bge-m3`（1024 维，8K 上下文），配置在 `.env`，key 不入库；代码只依赖 OpenAI 兼容协议，不把供应商硬编码为硅基流动；
+- **约束**：Elasticsearch 索引（`rag_chunks_v1`）与可选 Milvus Collection
+  （`rag_chunks_vector_v1`）的向量维度必须与模型输出维度完全一致（1024）；换成不兼容维度
+  或模型版本时应创建新索引/Collection 并回填，不原地混写。
 
 ## 选型过程（数字与结论怎么来的）
 

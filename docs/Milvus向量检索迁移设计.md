@@ -1,7 +1,8 @@
 # Milvus 向量检索迁移设计
 
-> 状态：方案设计，尚未替换生产检索链路  
-> 分支：`feat/milvus-vector-retrieval`  
+> 状态：核心代码已实现并合入；默认仍使用 Elasticsearch，历史回填、真实集成、质量对比与压测未完成
+>
+> 实现依据：`openspec/changes/archive/2026-07-18-migrate-vector-retrieval-to-milvus/`
 > 决策：保留 Elasticsearch 的全文检索能力；将知识库 Chunk 的**向量召回**逐步迁移至 Milvus。第一期不迁移对话记忆索引 `rag_memory_v1`。
 
 ## 1. 结论与立项理由
@@ -44,7 +45,7 @@ flowchart LR
 
 | 组件 | 迁移后职责 | 是否是事实来源 |
 |---|---|---|
-| PostgreSQL | 知识库、文档、摄取任务、索引状态 | 是（业务状态） |
+| PostgreSQL | 知识库、文档与 `ingestion_job` 摄取/重试状态 | 是（业务状态） |
 | MinIO | 原文件、解析产物 | 是（文件） |
 | Elasticsearch `rag_chunks_v1` | Chunk 正文、BM25、技术字段、引用定位、按 ID 批量取回 | 是（检索文本投影） |
 | Milvus `rag_chunks_vector_v1` | 1024 维向量、向量 ANN、租户/知识库/文档过滤字段 | 否（可重建的向量投影） |
@@ -69,13 +70,14 @@ flowchart LR
 
 | 字段 | 类型 | 用途 |
 |---|---|---|
-| `chunk_id` | `VARCHAR`，主键 | 与 ES Chunk 的唯一连接键，建议直接使用现有 UUID 字符串 |
+| `chunk_id` | `VARCHAR`，主键 | 与 ES Chunk 的唯一连接键，复用现有确定性 Chunk ID（不要求 UUID 格式） |
 | `embedding` | `FLOAT_VECTOR(1024)` | BGE-M3 dense embedding |
 | `org_id` | `VARCHAR` | 强制租户过滤 |
 | `kb_id` | `VARCHAR` | 强制知识库过滤 |
 | `document_id` | `VARCHAR` | 文档级过滤、删除与重建 |
 | `embedding_model` | `VARCHAR` | 防止混用不同模型/维度的向量 |
 | `chunk_version` | `VARCHAR` | 支持切块规则升级后的可追溯重建 |
+| `retrieval_ready` | `BOOL` | 双端可见性闸门；暂存为 false，文档提交时置 true |
 | `indexed_at` | `INT64` | 索引观测与排障 |
 
 首版索引选择：`HNSW` + `COSINE`，初始参数建议 `M=16`、`efConstruction=200`；查询参数从 `ef=128` 起，以真实评测集校准。HNSW 适合持续插入并追求低延迟的知识库检索；若未来规模极大且内存成为主约束，再基于评测比较 IVF/DiskANN，而不是预先猜测。
@@ -84,30 +86,26 @@ flowchart LR
 
 ## 5. 代码重构边界
 
-当前 `ElasticsearchHybridCandidateSource` 同时实现 BM25 与 kNN，且 `ChunkIndex` 同时承担文本和向量写入。迁移后应按职责拆开，避免再把“混合检索”绑定为某个数据库实现。
+原实现由 `ElasticsearchHybridCandidateSource`/`ChunkIndex` 同时承担双路检索和索引写入。
+当前代码已经按职责拆开，旧接口仅作为评测脚本和存量测试的兼容入口。
 
 ```text
-现状
-ElasticsearchChunkIndex
-  └─ 写 ES 文本 + 向量
-ElasticsearchHybridCandidateSource
-  ├─ searchBm25()
-  └─ searchKnn()
-
-目标
-ElasticsearchLexicalIndex             # 写 ES 文本、删除、按 chunk_id 批量取回
-MilvusVectorIndex                     # upsert/delete 向量
+当前实现
+ElasticsearchChunkIndex               # LexicalChunkIndex：ES 暂存/激活/删除
+MilvusVectorIndex                     # VectorChunkIndex：Milvus 暂存/激活/删除
 ElasticsearchLexicalCandidateSource   # BM25
-MilvusVectorCandidateSource           # ANN + 标量过滤
-ChunkHydrator                         # ES mget，补齐 Milvus 命中的正文/定位
-HybridRetriever                       # 保持：两路召回 → RRF → Rerank → 拒答
+ElasticsearchVectorCandidateSource    # 默认/回滚 ES kNN
+MilvusVectorCandidateSource           # Milvus ANN + 标量过滤
+ProviderVectorCandidateSource         # elasticsearch/shadow/milvus 路由与降级
+ElasticsearchChunkHydrator            # 按 chunk_id 回 ES 补齐正文/定位
+HybridRetriever                       # 两路召回 → RRF → Rerank → 拒答
 ```
 
 建议新增的稳定接口：
 
 ```java
 interface LexicalCandidateSource {
-    List<RetrievedChunk> searchBm25(SearchRequest request);
+    List<RetrievedChunk> search(SearchRequest request);
 }
 
 interface VectorCandidateSource {
@@ -115,7 +113,7 @@ interface VectorCandidateSource {
 }
 
 interface ChunkHydrator {
-    List<RetrievedChunk> findByChunkIds(UUID orgId, UUID kbId, List<String> chunkIds);
+    List<Chunk> findByChunkIds(UUID orgId, UUID kbId, List<String> chunkIds);
 }
 ```
 
@@ -125,15 +123,18 @@ interface ChunkHydrator {
 
 ### 6.1 新文档：可恢复双写
 
-摄取 Worker 解析、切块、Embedding 后，创建一条同一批次的索引任务：
+摄取 Worker 解析、切块、Embedding 后，由 `ChunkProjectionOrchestrator` 严格按以下顺序提交：
 
-1. 写 ES 的文本/元数据投影；
-2. Upsert Milvus 向量投影；
-3. 两端均成功才将该文档置为 `READY`；
-4. 任一步失败，任务保持可重试状态，重试使用稳定 `chunk_id` 幂等 Upsert；
-5. 删除文档时，以相同 `org_id + kb_id + document_id` 分别删除两端投影，并记录每端结果。
+1. ES 暂存文本、元数据与向量，`retrieval_ready=false`；
+2. 启用 Milvus 时，暂存向量投影，`retrieval_ready=false`；
+3. 激活 Milvus 文档向量；
+4. 最后激活 ES 文档投影；
+5. 只有第 4 步成功，Pipeline 才将文档与任务推进到 `READY`。
 
-为避免“ES 成功、Milvus 失败”后任务丢失，正式实现采用 PostgreSQL Outbox/索引状态表，而不是内存中的顺序调用。每个文档记录 `lexical_index_status`、`vector_index_status`、重试次数、最后错误和版本；Worker 可只重放未完成的一端。
+当前实现**没有新增 Outbox 或独立的双端索引状态表**。它复用 PostgreSQL `ingestion_job`、
+Worker 租约、失败重试、可复用解析产物和确定性 Chunk ID；失败任务从该文档投影的第一步
+重新执行，用 Upsert 和可见性闸门幂等收敛。这个方案避免新增消息队列和状态表，但也意味着
+不能只重放失败的一端，真实大规模环境仍需通过故障注入验证重试成本。
 
 ### 6.2 历史数据回填
 
@@ -178,17 +179,29 @@ Milvus 的过滤是性能优化和第一道隔离，不是唯一授权边界。�
 建议配置（具体凭据仅放 `.env` 或密钥管理）：
 
 ```properties
-RAG_VECTOR_PROVIDER=elasticsearch|milvus|shadow
-RAG_MILVUS_ENDPOINT=http://milvus:19530
+RAG_VECTOR_PROVIDER=elasticsearch
+RAG_VECTOR_FALLBACK_TO_ES=true
+RAG_VECTOR_SHADOW_TIMEOUT_MS=1500
+RAG_VECTOR_SHADOW_SAMPLE_RATE=1.0
+RAG_MILVUS_ENABLED=true
+RAG_MILVUS_URI=http://milvus:19530
+RAG_MILVUS_AUTH_ENABLED=false
+RAG_MILVUS_DATABASE=default
 RAG_MILVUS_COLLECTION=rag_chunks_vector_v1
-RAG_MILVUS_DIMENSIONS=1024
+RAG_MILVUS_VECTOR_DIMENSIONS=1024
 RAG_MILVUS_METRIC_TYPE=COSINE
 RAG_MILVUS_INDEX_TYPE=HNSW
 RAG_MILVUS_HNSW_M=16
 RAG_MILVUS_EF_CONSTRUCTION=200
 RAG_MILVUS_SEARCH_EF=128
-RAG_MILVUS_TIMEOUT_MS=3000
+RAG_MILVUS_CONNECT_TIMEOUT_MS=3000
+RAG_MILVUS_RPC_TIMEOUT_MS=3000
+RAG_MILVUS_TLS_ENABLED=false
 ```
+
+鉴权开启时还需配置 `RAG_MILVUS_TOKEN`，或同时配置 `RAG_MILVUS_USERNAME` 与
+`RAG_MILVUS_PASSWORD`。`shadow`/`milvus` 模式必须同时启用并正确配置 Milvus；本地依赖可用
+`deploy/milvus/compose.yml` 启动。不要把 `RAG_MILVUS_ENABLED=true` 等同于已完成生产切流。
 
 ### 8.2 必须新增的指标与告警
 
@@ -213,22 +226,23 @@ RAG_MILVUS_TIMEOUT_MS=3000
 
 若 Milvus 没有带来可观测的延迟、吞吐、容量或运维收益，就停留在 P2/P3，不进入 P4。这是正确结果，不应为了“用了 Milvus”而切换。
 
-## 10. 实施任务顺序
+## 10. 实施完成度
 
-1. 建立性能基线：补齐当前 ES kNN 的压测、P95/P99、候选数、评测报告。
-2. 新增 Milvus 开发/验收部署和健康检查，不接入主链路。
-3. 落地 `VectorCandidateSource`、`ChunkHydrator` 等端口，并将 ES 实现迁到新端口，行为不变。
-4. 新增 `MilvusVectorIndex`、`MilvusVectorCandidateSource`、Collection 初始化和受控过滤。
-5. 新增索引状态/Outbox 双写机制、幂等与删除补偿；补齐单元和集成测试。
-6. 执行历史回填、完整性校验与补偿扫描。
-7. 实现影子读、差异审计和指标面板；运行既有离线评测集。
-8. 按 P3 灰度策略切流；满足验收门槛后再决定 P4。
-9. 稳定观察后单独评审 ES 向量字段和对话记忆向量索引是否迁移。
+| 范围 | 状态 | 说明 |
+|---|---|---|
+| SDK、配置校验、Standalone Compose | 已完成 | 配置绑定、鉴权/TLS、健康检查和资源关闭已有测试 |
+| 检索/索引端口拆分 | 已完成 | ES 词法、ES 向量、Milvus 向量与正文补齐已解耦 |
+| 双端可见性闸门、摄取与删除补偿 | 已完成 | 使用现有任务重试，不使用 Outbox |
+| 三种 Provider、影子读、回退与指标 | 已完成 | 默认仍为 `elasticsearch` |
+| 历史 ES 向量回填 Milvus | 未完成 | 缺少检查点、断点续跑与一致性报告 |
+| 真实 ES+Milvus 全链路验收 | 未完成 | 包括安全、删除残留和故障恢复 |
+| 150 题质量对比与目标并发压测 | 未完成 | 未达到前不得把 Milvus 设为默认 |
+| 生产灰度与稳定观察 | 未开始 | 依赖上述验收结果 |
 
 ## 11. 待确认事项
 
 1. 目标规模：未来 12 个月预计 Chunk 数、峰值 QPS、允许的 P95 延迟和可用性目标。
 2. 公司生产环境：是否已有 Kubernetes、可复用的 etcd/对象存储、统一监控与密钥管理。
-3. 是否接受先上 Milvus Standalone 做真实压测，再决定是否建设高可用集群。
-4. 是否把“Milvus 查询异常回退 ES kNN”保留整个观察期，还是仅在影子/灰度期保留。
-5. 向量模型升级策略：维度或模型版本变化时，采用新 Collection 影子回填而不是原地覆盖。
+3. 生产形态选择：Standalone 只用于验证，正式环境是否建设 Kubernetes 高可用集群。
+4. 影子采样比例、灰度比例、稳定观察期和允许的回退率。
+5. 向量模型升级时新 Collection 的命名、影子回填和切换流程。
