@@ -41,6 +41,12 @@ class Settings(BaseSettings):
     rag_multimodal_parser_api_key: str = ""
     rag_multimodal_parser_timeout_ms: int = 600_000
 
+    # ASR(faster-whisper，从 parser-gateway 移植进 app.ragcore.parser.asr 的内置模块调用，
+    # 环境变量名沿用 parser-gateway 里的 PARSER_WHISPER_* 语义)
+    rag_whisper_model: str = "small"
+    rag_whisper_device: str = "cpu"
+    rag_whisper_compute_type: str = "int8"
+
     # 对象存储
     rag_storage_type: str = "local"
     rag_local_storage_root: str = "./data/rag-objects"
