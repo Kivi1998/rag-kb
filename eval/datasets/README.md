@@ -64,14 +64,15 @@
 2. **GT 偏向词面可定位事实**：锚点法天然偏好有特异短语的答案；纯推理型问题
    （需综合多段落）未纳入，这类问题本就不适合检索召回评估（指南 §1 原则三）；
 3. **评估集锚定 "本科毕设语料 + V3 TechnicalChunker" 组合**：切分器升级或语料变更后
-   chunk_id 失效，需重跑 `EvalCorpusIndexer` + `build_eval_set_v2.py --report` 重对齐。
+   chunk_id 失效，需重跑 `eval_corpus_indexer.py` + `build_eval_set_v2.py --report` 重对齐。
 
 ## 跑评测
 
 ```bash
 # 真实检索（入库 ES 独立评测索引 + 产品 HybridRetriever，混合/BM25-only 自适应）
-set -a && source .env && set +a
-java -cp "eval/scripts:$(cat /tmp/rag-cp.txt):backend/target/classes" EvalRetrievalRunner \
+# eval_retrieval_runner.py 自己会加载 backend-py/.env（见 eval/scripts/_eval_common.py），
+# 不需要手动 source .env
+python3 eval/scripts/eval_retrieval_runner.py \
   eval/datasets/corpus-index.jsonl eval/datasets/eval-set-v2.jsonl \
   eval/predictions/predicted-v2-hybrid-$(date +%Y%m%d).jsonl
 
