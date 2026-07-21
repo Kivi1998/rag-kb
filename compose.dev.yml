@@ -2,8 +2,8 @@ name: rag-kb
 
 # rag-kb 项目专属本地开发依赖,不与其他项目(thxpace 等)共用任何组件,包括 Postgres——
 # 之前 Postgres 一直借用本机原生共享实例(和其他十几个项目的库挤在一起),现在改成
-# 独立容器,数据从原生库迁移过来(见迁移记录)。Java 后端(backend/)和 Python 后端
-# (backend-py/)共用这一套依赖,两边 .env 指向同一批端口。
+# 独立容器,数据从原生库迁移过来(见迁移记录)。Java 后端(backend/)已退役删除,
+# backend-py/ 是唯一后端。
 
 services:
   postgres:

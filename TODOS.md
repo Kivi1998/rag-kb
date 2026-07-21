@@ -2,6 +2,26 @@
 
 延后但已记录的工作项。每项注明动机、现状与起点,避免日后丢失上下文。
 
+## Java 退役后数据库迁移工具处于空白状态(2026-07-21)
+
+- **What:** Java 版用 Flyway 管理 schema(`backend/src/main/resources/db/migration/V001`～
+  `V015`)，这批 SQL 文件随 `backend/` 一起删除了。`backend-py/pyproject.toml` 里声明了
+  `alembic==1.14.0` 依赖，但从未实际初始化——仓库里没有 `alembic.ini`，也没有
+  `alembic/versions/` 目录，SQLAlchemy 模型（`app/models/*.py`）只是对着 Flyway 当年建好
+  的、现在已经冻结在 V015 状态的表结构做只读映射，从未自己建过表或跑过一次迁移。
+- **Why:** 这是给 README 写"如何搭建开发环境"章节时发现的，不是这次退役 Java 计划内的
+  审计项，但如果不记录会被忽略——现在这套系统事实上**没有任何机制**能安全地做下一次
+  schema 变更（新增列、新表等），全靠手写 SQL 直接 `psql` 执行、人工保证幂等和多环境
+  一致性。
+- **现状:** 本机开发环境的表结构是当初 Java/Flyway 跑出来的历史产物（迁移 Docker 容器时
+  用 `pg_dump`/`restore` 整体搬过来的，见此前的会话记录），backend-py 从未也不需要自己
+  建表就能跑；但这只在"表结构不再变化"的前提下成立，下一次真的需要加字段/加表时就会
+  暴露这个空白。
+- **Depends on / blocked by:** 无硬阻塞。需要决策：初始化 Alembic 并把当前 schema
+  `stamp` 成 baseline（之后新变更走 Alembic revision），还是继续手写 SQL 但补一个简单的
+  版本追踪表模拟 Flyway 的 `flyway_schema_history` 语义。两种都能长期维护，纯粹是选型
+  问题，不阻塞现有功能。
+
 ## Java 退役前接口对照发现的 3 个后台任务缺口(2026-07-21)
 
 - **What:** 逐个对照 Java 版 `@Scheduled` 定时任务与 Python 版等价实现,REST 接口层面
