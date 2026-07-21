@@ -105,8 +105,16 @@ def bootstrap() -> tuple[str, str, str]:
 
 
 def unique_payload(base: bytes, index: int, kind: str) -> bytes:
-    marker = f"\nRAG-ACCEPTANCE-ID:{kind}:{index:05d}\n".encode()
-    return base + marker
+    marker = f"RAG-ACCEPTANCE-ID:{kind}:{index:05d}"
+    if kind == "structured":
+        # JSON 语法严格,不能像文本/代码文件那样直接在末尾追加一行——那样会破坏
+        # 闭合结构,导致 json.loads() 抛 "Extra data" 而不是产出唯一内容。往顶层
+        # 对象里加一个字段,保持语法合法,同时仍然带上唯一标记。
+        payload = json.loads(base)
+        if isinstance(payload, dict):
+            payload["acceptanceMarker"] = marker
+            return json.dumps(payload).encode()
+    return base + f"\n{marker}\n".encode()
 
 
 def upload_one(index: int, fixture: dict[str, Any], base: bytes,
@@ -189,7 +197,10 @@ def verify_database(kb_id: str) -> dict[str, Any]:
               "parsedTimestamps": parsed, "failed": failed, "flywayVersion": migration,
               "maxAttempt": max_attempt, "retriedJobs": retried_jobs}
     core_values = (total, hashes, artifacts, parsed, failed)
-    migration_is_current = str(migration).lstrip("0") == "11"
+    # 迁移脚本已从 V001 增长到 V015(编写本检查时只有到 V011;Java 退役后 backend-py
+    # 借用同一套 Flyway 脚本执行建表,见 backend-py/db/migration/),这里同步更新到
+    # 当前实际的最新版本号,而不是继续断言一个已经过时的历史值。
+    migration_is_current = str(migration).lstrip("0") == "15"
     if core_values != (EXPECTED_TOTAL, EXPECTED_TOTAL, EXPECTED_TOTAL, EXPECTED_TOTAL, 0) \
             or not migration_is_current:
         raise RuntimeError(f"数据库验收失败: {result}")
@@ -252,7 +263,7 @@ def verify_elasticsearch() -> dict[str, int]:
 def main() -> None:
     global EXPECTED_TOTAL
     overall_started = time.perf_counter()
-    wait_ready(API_BASE + "/actuator/health")
+    wait_ready(API_BASE + "/health")
     wait_ready("http://model-stub:8082/health")
     wait_ready(ES_ENDPOINT)
     fixtures = json.loads((FIXTURE_ROOT / "fixtures.json").read_text(encoding="utf-8"))
