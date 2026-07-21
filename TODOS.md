@@ -2,6 +2,37 @@
 
 延后但已记录的工作项。每项注明动机、现状与起点,避免日后丢失上下文。
 
+## Java 退役前接口对照发现的 3 个后台任务缺口(2026-07-21)
+
+- **What:** 逐个对照 Java 版 `@Scheduled` 定时任务与 Python 版等价实现,REST 接口层面
+  34/34 完全对齐,但有 3 处后台维护任务在 Python 侧存在等价代码却没有被启动/接入,或者
+  压根没有落地：
+  1. **文档删除补偿循环未接入**：`app/ragcore/ingestion/deletion_worker.py` 的
+     `run_deletion_cleanup_loop` 对应 Java `DocumentDeletionWorker`(`@Scheduled`),但
+     `app/main.py` 的 lifespan 里没有 `asyncio.create_task` 启动它——只有当
+     `DocumentDeletionService.cleanup()` 在 DELETE 请求内联调用时**同步**失败(如 ES 暂时
+     不可用),文档才会永久卡在 `DELETING` 状态,没有任何后台重试机制。
+  2. **过期上传会话清理未接入**：`DocumentDirectUploadService.cleanup_expired_session`
+     对应 Java `cleanupExpiredSessions`(`@Scheduled fixedDelayString=60000`),方法本身
+     存在且逻辑完整,但该方法自己的 docstring 就写着"定时清理任务不属于本次四层……独立的
+     worker 模块里周期性调用"——那个独立 worker 模块从未被建过,全仓库没有任何代码调用
+     这个方法。`document_upload_session` 表的过期 PENDING 行会无限堆积(不影响功能正确性
+     ——`complete_direct_upload` 自己会在使用时校验 `expires_at`,只是不会主动清理)。
+  3. **没有 Prometheus `/metrics` 端点**：Java 有 `spring-boot-starter-actuator` +
+     `X-Metrics-Key` 保护的自定义 metrics 端点；Python 侧 `prometheus-client` 只是
+     `pyproject.toml` 里的一个依赖，`app/ragcore/ingestion/metrics.py`/
+     `vector_retrieval_metrics.py` 只在内部收集数据，从未注册过 HTTP 端点把这些指标暴露
+     给 Prometheus 抓取。
+- **Why:** 这是"照接口/方法逐一对照确保功能都有,再退役 Java"这次审计发现的,REST API
+  行为不受影响(用户能感知的功能都在),纯粹是运维/可观测性层面的缺口，按已达成的共识
+  （对好接口就退役 Java,后续缺口按 bug 处理）不阻塞这次退役。
+- **现状:** 3 处都只是"代码存在但没接线"或"从未落地"，不是需要新设计的功能缺失；
+  第 1 项修起来最简单(照抄 `IngestionWorker`/`memory_cleanup_task` 已有的
+  `asyncio.create_task` 接入模式),但 `DocumentDeletionService` 目前是按"一个请求一个
+  session"设计的,接入长驻后台循环前需要先改造成 `SqlAlchemyIngestionJobLifecycleService`
+  那种 `session_factory` 模式,不是简单加一行 `create_task` 就完事，所以本次没有顺手改。
+- **Depends on / blocked by:** 无硬阻塞，三项都可以独立排期。
+
 ## Milvus 向量检索迁移——观察期验收项未做(2026-07-18)
 
 - **What:** `openspec/changes/archive/2026-07-18-migrate-vector-retrieval-to-milvus/tasks.md` 第 7、8 节未完成：①历史回填检查点表/Flyway 迁移、ES 向量分页读取与模型/维度/切块版本兼容性判断、Milvus 批量回填断点续跑、总数/租户分布/孤儿 ID/抽样向量一致性校验报告；②真实 ES+Milvus 环境全链路集成测试、跨组织/跨知识库/伪造 ID/删除残留安全验收、150 题 ES/Milvus 对比评测（确认 Recall@1/5、MRR、拒答指标不低于已签字基线）、目标并发压测（P50/P95/P99、吞吐、内存、磁盘、单位查询成本）。
