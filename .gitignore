@@ -72,5 +72,11 @@ venv/
 parser-gateway/app/deepdoc/res/*.trie
 parser-gateway/app/deepdoc/res/deepdoc/
 
+# ===== deepdoc 模型缓存（backend-py 侧，从 parser-gateway 移植而来，同上不入库）=====
+# 只排除模型二进制本身（.onnx / OCR 字典 .res / huqie 分词 trie），res 目录结构本身进 git
+backend-py/app/ragcore/parser/deepdoc/res/deepdoc/*.onnx
+backend-py/app/ragcore/parser/deepdoc/res/deepdoc/*.res
+backend-py/app/ragcore/parser/deepdoc/res/huqie.txt.trie
+
 # ===== 本地并行开发用的 git worktree =====
 .worktrees/

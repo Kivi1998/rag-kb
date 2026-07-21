@@ -36,6 +36,17 @@ dependencies = [
     "pymupdf==1.26.3",
     "python-docx==1.2.0",
     "python-pptx==1.0.2",
+    # 以下为 deepdoc OCR/版面识别/表格结构识别 + NLP 分词器模块的依赖,移植自
+    # parser-gateway/requirements.txt(版本号照抄,勿自行升级)。
+    "onnxruntime==1.27.0",
+    "huggingface_hub==1.23.0",
+    "opencv-python-headless==5.0.0.93",
+    "shapely==2.1.2",
+    "pyclipper==1.4.0",
+    "six==1.17.0",
+    "datrie==0.8.3",
+    "hanziconv==0.3.2",
+    "nltk==3.10.0",
 ]
 
 [project.optional-dependencies]
