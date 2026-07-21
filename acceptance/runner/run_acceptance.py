@@ -252,7 +252,6 @@ def verify_elasticsearch() -> dict[str, int]:
 def main() -> None:
     global EXPECTED_TOTAL
     overall_started = time.perf_counter()
-    parser_ready = wait_ready("http://parser-gateway:8081/ready")
     wait_ready(API_BASE + "/actuator/health")
     wait_ready("http://model-stub:8082/health")
     wait_ready(ES_ENDPOINT)
@@ -304,7 +303,7 @@ def main() -> None:
         "formats": {fixture["kind"]: (1 if MODE == "smoke" else fixture["weight"])
                     for fixture in fixtures},
         "environment": {"platform": platform.platform(), "python": platform.python_version(),
-                        "uploadConcurrency": CONCURRENCY, "parserReady": parser_ready},
+                        "uploadConcurrency": CONCURRENCY},
         "upload": {"success": len(uploaded), "failed": 0, "elapsedSeconds": round(upload_elapsed, 3),
                    "documentsPerSecond": round(EXPECTED_TOTAL / upload_elapsed, 3),
                    "latencyMs": {"mean": round(statistics.fmean(latencies) * 1000, 3),

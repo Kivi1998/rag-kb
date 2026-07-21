@@ -20,10 +20,7 @@ x-backend-common: &backend-common
     MINIO_BUCKET: rag-kb
     MINIO_ACCESS_KEY: ragacceptance
     MINIO_SECRET_KEY: ragacceptance-secret
-    RAG_MULTIMODAL_PARSER_ENABLED: "true"
-    RAG_MULTIMODAL_PARSER_ENDPOINT: http://parser-gateway:8081/v1/parse
-    RAG_MULTIMODAL_PARSER_API_KEY: parser-acceptance-key
-    RAG_MULTIMODAL_PARSER_TIMEOUT_MS: 600000
+    RAG_MULTIMODAL_PARSER_ENABLED: "false"
     RAG_UPLOAD_MAX_SIZE_BYTES: 2147483648
     RAG_UPLOAD_MAX_FILE_SIZE: 2048MB
     RAG_UPLOAD_MAX_REQUEST_SIZE: 2050MB
@@ -46,8 +43,6 @@ x-backend-common: &backend-common
       condition: service_healthy
     minio-init:
       condition: service_completed_successfully
-    parser-gateway:
-      condition: service_healthy
 
 x-worker-environment: &worker-environment
   <<: *backend-environment
@@ -249,43 +244,6 @@ services:
       timeout: 5s
       retries: 20
 
-  parser-gateway:
-    build:
-      context: ../parser-gateway
-    image: rag-parser-gateway:acceptance
-    restart: unless-stopped
-    init: true
-    environment:
-      PARSER_API_KEY: parser-acceptance-key
-      PARSER_METRICS_KEY: parser-acceptance-metrics-key
-      PARSER_MAX_FILE_BYTES: 2147483648
-      PARSER_MAX_CONCURRENCY: 2
-      PARSER_WHISPER_MODEL: tiny.en
-      PARSER_WHISPER_DEVICE: cpu
-      PARSER_WHISPER_COMPUTE_TYPE: int8
-      PARSER_PRELOAD_WHISPER: "true"
-      PARSER_REQUIRE_ASR_READY: "true"
-      PARSER_PRELOAD_OCR: "true"
-      PARSER_REQUIRE_OCR_READY: "true"
-    volumes:
-      - parser_models:/models
-    tmpfs:
-      - /tmp:size=4g,mode=1777
-    read_only: true
-    cap_drop:
-      - ALL
-    security_opt:
-      - no-new-privileges:true
-    pids_limit: 512
-    cpus: 4.0
-    mem_limit: 4g
-    healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8081/ready"]
-      interval: 10s
-      timeout: 5s
-      retries: 60
-      start_period: 10m
-
   api:
     <<: *backend-common
     environment:
@@ -367,8 +325,5 @@ volumes:
   milvus_etcd_data:
   milvus_object_data:
   milvus_data:
-  parser_models:
-    name: ${PARSER_MODEL_VOLUME:-rag-parser-model-cache}
-    external: true
   acceptance_fixtures:
   acceptance_reports:
