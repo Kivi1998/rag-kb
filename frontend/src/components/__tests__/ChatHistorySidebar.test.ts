@@ -55,6 +55,23 @@ describe('ChatHistorySidebar', () => {
     expect(wrapper.text()).toContain('新对话') // s-2 的空标题兜底文案
   })
 
+  it('面板保持展开时切换 kbId 也要重新拉取该知识库的会话列表', async () => {
+    const wrapper = mount(ChatHistorySidebar, {
+      props: { kbId: 'kb-1', activeSessionId: null, expanded: true },
+      global: { plugins: [ElementPlus] }
+    })
+    await flushPromises()
+    expect(listSessions).toHaveBeenNthCalledWith(1, '', 'kb-1', expect.anything())
+    vi.mocked(listSessions).mockClear()
+
+    // expanded 全程保持 true 不变，只切换 kbId：不能因为 expanded 没变就漏刷新，
+    // 否则历史列表会停留在切换前那个知识库的内容上。
+    await wrapper.setProps({ kbId: 'kb-2' })
+    await flushPromises()
+
+    expect(listSessions).toHaveBeenCalledWith('', 'kb-2', expect.anything())
+  })
+
   it('点击历史项触发 select 事件', async () => {
     const wrapper = mount(ChatHistorySidebar, {
       props: { kbId: 'kb-1', activeSessionId: null, expanded: true },

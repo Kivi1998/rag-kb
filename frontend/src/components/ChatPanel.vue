@@ -31,7 +31,7 @@ const sessionReady = ref(false)
 const historySidebar = ref<InstanceType<typeof ChatHistorySidebar> | null>(null)
 /** 历史对话面板的展开/收起状态提到 ChatPanel 里统一管理——开关按钮挪到标题栏，
  * 跟"技术文档问答"标题同一行，收起时不再单独占一条带边框/背景的竖条。 */
-const historyExpanded = ref(false)
+const historyExpanded = ref(true)
 /** 引用来源不再默认全部展示在回答下方，点击正文里的 [资料N] 才在右侧弹出对应这一条。 */
 const citationDrawerVisible = ref(false)
 const selectedCitation = ref<Citation | null>(null)

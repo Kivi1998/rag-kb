@@ -38,9 +38,11 @@ async function refresh() {
   }
 }
 
+/** 同时监听 expanded 和 kbId：面板已展开时切换知识库，expanded 本身不变，
+ * 若只监听 expanded 会漏掉这次切换，导致列表停留在旧知识库的内容上。 */
 watch(
-  () => props.expanded,
-  (value) => { if (value) void refresh() },
+  () => [props.expanded, props.kbId] as const,
+  ([expanded]) => { if (expanded) void refresh() },
   { immediate: true }
 )
 
