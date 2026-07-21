@@ -18,7 +18,7 @@ Milvus 是面向高性能、大规模相似度检索的开源向量数据库，�
 ## 2. 不做什么
 
 - 不删除 Elasticsearch，不把 BM25 改为 Milvus 的全文检索；技术文档中的类名、配置键、错误码仍优先由 ES 倒排索引处理。
-- 不引入 LangChain、LlamaIndex、RAGFlow 等 RAG 编排框架；调用仍在现有 Spring Boot `ragcore` 内完成。
+- 不引入 LangChain、LlamaIndex、RAGFlow 等 RAG 编排框架；调用仍在现有 `backend-py/app/ragcore`（FastAPI）内完成。
 - 不在第一期迁移 `rag_memory_v1`。会话记忆与用户画像继续由 Elasticsearch 向量索引承载，避免把知识库检索迁移与会话记忆稳定性绑定。
 - 不在切换当日删除 ES 中的 `content_vector`。它是快速回滚和影子比对的依据，至少保留一个稳定观察期。
 
@@ -166,7 +166,7 @@ Worker 租约、失败重试、可复用解析产物和确定性 Chunk ID；失�
 5. 保留现有 RRF 融合、意图权重、Rerank 和拒答策略；
 6. Milvus 或 Embedding 不可用时，继续返回 ES BM25 结果；在过渡期可配置回退 ES kNN。
 
-Milvus 的过滤是性能优化和第一道隔离，不是唯一授权边界。授权仍由 Spring Boot 的 JWT/RBAC 与 ES 回查二次校验共同保证。
+Milvus 的过滤是性能优化和第一道隔离，不是唯一授权边界。授权仍由 FastAPI 应用层的 JWT/RBAC 与 ES 回查二次校验共同保证。
 
 ## 8. 部署、配置与可观测性
 

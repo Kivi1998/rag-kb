@@ -42,6 +42,6 @@ LLM Prompt 粗分类（`ragcore/intent/QueryIntentClassifier`，随 PR#25 走 Su
 - **THEN** 异常被捕获并记录为服务端日志，不向上抛出、不中断本次 SSE 问答响应
 
 #### Scenario: 跨组织隔离
-- **WHEN** 通过 JPA 仓库以某个 `org_id` 查询 `intent_training_sample` 表
-- **THEN** 只返回该 `org_id` 的记录，不会返回其他组织的问题原文或标签（Hibernate
-  `tenantFilter` 强制生效，与 `KnowledgeDocument` 等既有租户隔离约定一致）
+- **WHEN** 通过仓库以某个 `org_id` 查询 `intent_training_sample` 表
+- **THEN** 只返回该 `org_id` 的记录，不会返回其他组织的问题原文或标签（`contextvars.ContextVar`
+  租户上下文强制生效，与知识库文档等既有租户隔离约定一致）

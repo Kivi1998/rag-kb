@@ -17,7 +17,7 @@
 
 ```text
 Vue 前端
-  └─ Spring Boot 应用层
+  └─ FastAPI 应用层（backend-py/）
        ├─ JWT / 组织团队 / RBAC / 审计
        ├─ 知识库与文档任务管理
        └─ ragcore（自研）
@@ -41,11 +41,12 @@ OpenAI 兼容模型服务（已验证基线：硅基流动 Embedding/Rerank + De
 
 ## 三、关键技术决策
 
-### 决策 1：保持 Spring Boot 单体模块化
+### 决策 1：单体模块化，2026-07-19 全量迁移到 Python/FastAPI
 
-- 现有认证、租户与权限代码保留；
-- RAG Core 放在 `com.diit.ragkb.ragcore`，以接口隔离 Parser、Chunker、Index、Retriever、Reranker 与 Generator；
-- 在真正出现独立扩缩容需求前，不拆微服务、不引入消息队列全家桶。
+- 项目早期（Java 阶段）曾以"保持 Spring Boot 单体模块化，不拆微服务"为决策；2026-07-19 完成 Java→Python 全量迁移后，`backend/`（Spring Boot）已删除退役，`backend-py/`（FastAPI）是唯一后端，原 `parser-gateway` 多模态解析微服务也已合并进 `backend-py`（进程内 `LocalMultimodalDocumentParser`），`nli-gateway` 保持独立微服务未合并（PyTorch 依赖较重，且当前 `RAG_NLI_ENABLED=false` 未启用）；
+- 认证、租户与权限逻辑原样迁移保留（Hibernate `@Filter tenantFilter` → `contextvars.ContextVar` 租户隔离）；
+- RAG Core 放在 `backend-py/app/ragcore`，以接口隔离 Parser、Chunker、Index、Retriever、Reranker 与 Generator；
+- 在真正出现独立扩缩容需求前，不继续拆分更多微服务、不引入消息队列全家桶。
 
 ### 决策 2：直接使用基础设施，不使用高层 RAG 框架
 
@@ -139,7 +140,7 @@ OpenAI 兼容模型服务（已验证基线：硅基流动 Embedding/Rerank + De
 
 - 已删除：RAGFlow Client、RAGFlow dataset/chat/session 管理、旧文档摄取、旧 SSE 问答、相关前后端页面与测试；
 - 保留：认证、组织、团队、成员、知识库 CRUD 和应用外壳；
-- 历史 Flyway 迁移保留，确保已部署环境可以演进；新逻辑不得继续使用其中的 RAGFlow 字段；
+- 历史 Flyway 迁移文件（V001-V015）随 `backend/` 一并删除，其 SQL 内容已搬迁进 `backend-py/db/migration/`，目前仅作为 `acceptance/` 验收测试一次性初始化全新数据库用；`backend-py/pyproject.toml` 声明了 `alembic` 依赖，但尚未初始化 `alembic.ini`/`versions/`，生产环境当前**没有**正式的 schema 演进工具（见 TODOS.md），新逻辑仍不得使用其中的 RAGFlow 遗留字段；
 - 新实现遵循“任务表 + Worker”异步摄取，完成压测后再决定是否引入消息队列。
 
 ## 五、企业级必备能力

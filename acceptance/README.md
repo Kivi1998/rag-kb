@@ -12,10 +12,6 @@ ACCEPTANCE_MODE=smoke docker compose -f compose.yml --profile acceptance up --ab
 
 ```bash
 cd acceptance
-docker volume create rag-parser-model-cache
-export JAVA_HOME=$(/usr/libexec/java_home -v 17)
-export PATH="$JAVA_HOME/bin:$PATH"
-mvn -f ../backend/pom.xml test package
 docker compose -f compose.yml config -q
 docker compose -f compose.yml --profile acceptance build
 docker compose -f compose.yml --profile acceptance up --abort-on-container-exit --exit-code-from runner runner
@@ -48,7 +44,7 @@ docker start rag-kb-acceptance-worker-a-1
 
 `model-stub` 只能用于链路和协议验收，禁止将其结果描述为真实向量模型的检索质量结果。
 
-本地验收后端使用 `Dockerfile.acceptance`，以规避部分 Docker Desktop 环境的基础镜像清单缓存故障；正式发布镜像必须使用 `backend/Dockerfile` 的精简 JRE 多阶段构建。
+验收后端与正式发布镜像共用 `backend-py/Dockerfile`（两阶段构建：builder 安装依赖含 onnxruntime/opencv-python-headless/faster-whisper，运行态基于 `python:3.13-slim`，非 root 用户）。
 
 ## Milvus 验收边界
 

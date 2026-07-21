@@ -2,91 +2,51 @@
 
 ## Purpose
 
-企业知识库 CRUD 及多租户隔离——创建/查询/更新/删除知识库，关联 RAGFlow dataset，强制 RBAC 与跨组织隔离。
+企业知识库 CRUD 及多租户隔离——创建/查询/更新/删除知识库，强制跨组织隔离。知识库是自研 RAG Core 摄取与检索链路(Parser/Chunker/Embedding/Index/Retriever)的业务归属单元，不再关联任何外部黑盒系统的 dataset 或 chat assistant。
+
 ## Requirements
 ### Requirement: 知识库 CRUD
 
-系统 SHALL 允许有权限的成员在其组织内创建、查询、更新、删除知识库。每个知识库 MUST 归属唯一组织,可选归属某团队。
+系统 SHALL 允许成员在其组织内创建、查询、更新、删除知识库。每个知识库 MUST 归属唯一组织,可选归属某团队。删除是纯业务记录删除,不触发任何外部系统调用。
 
 #### Scenario: 创建知识库
 
-- **WHEN** admin 在其组织内创建名为 X 的知识库
-- **THEN** 系统持久化知识库,记录其组织归属与创建者
+- **WHEN** 成员在其组织内创建名为 X 的知识库
+- **THEN** 系统持久化知识库(初始状态 `ACTIVE`),记录其组织归属与创建者
 
 #### Scenario: 授权更新知识库
 
-- **WHEN** owner 或 admin 更新本组织知识库的名称/描述
-- **THEN** 系统持久化更新;dataset 绑定关系不变
+- **WHEN** 成员更新本组织知识库的名称
+- **THEN** 系统持久化更新后的名称
 
-#### Scenario: 删除知识库级联清理
+#### Scenario: 删除知识库
 
-- **WHEN** 有权限成员删除一个知识库
-- **THEN** 系统按"先删 RAGFlow dataset、再删业务库记录"的顺序级联清理,全部成功才算完成
+- **WHEN** 成员删除一个知识库
+- **THEN** 系统直接删除该知识库的业务记录,接口返回 200、`code=0`、`data="已删除"`
 
-#### Scenario: 删除时 dataset 清理失败转入对账
+> **历史遗留(不是当前实际行为):** 项目早期知识库创建时会同步在 RAGFlow 创建一个专属 dataset,删除知识库要求"先删 RAGFlow dataset、再删业务记录",dataset 删除失败会把知识库标记 `PENDING_CLEANUP` 并转入对账。该机制已随 RAGFlow 退役被移除——`KnowledgeBaseService.delete()` 当前实现内部恒返回"已完全删除"。路由层与 `KbStatus.PENDING_CLEANUP` 枚举值、前端"待清理"标签仍保留了应对"未完全删除→202"的防御性分支,但在当前实现下没有任何代码路径会触发它(见 `backend-py/app/routers/knowledge_bases.py::delete`、`backend-py/app/services/knowledge_base_service.py::delete`)。`knowledge_base` 表中的 `ragflow_dataset_id`、`ragflow_chat_id`(早期"知识库懒建 RAGFlow Chat Assistant 并复用其 ID"设计遗留)两列因兼容旧数据而保留,自研链路(问答走自研 RAG Core 生成管线,不再有 Chat Assistant 概念)不再读写它们。
 
-- **WHEN** 删除过程中 RAGFlow dataset 删除失败
-- **THEN** 系统不留下指向已失效 dataset 的悬挂记录:将该知识库标记为"待清理"并转入孤儿对账,由对账任务最终删除 dataset 与记录,接口返回明确错误
+### Requirement: 知识库级权限
 
-### Requirement: 知识库与 RAGFlow dataset 映射
+系统 SHALL 在每个知识库访问路径强制校验:调用者 MUST 属于知识库所属组织(见"知识库跨租户隔离")。
 
-系统 SHALL 在创建知识库时,通过 RAGFlow REST 接口创建一个**独立 dataset**,并持久化"知识库 ID ↔ dataset ID"映射。每个知识库 MUST 对应专属 dataset,不得多个知识库共用同一 dataset。
-
-系统创建 dataset 时 MUST 带可识别本产品归属的命名前缀/标签(如 `ragkb:<org_id>:<kb_id>`),以便对账时区分本产品 dataset 与 RAGFlow 上的其他 dataset。dataset 创建调用 MUST 幂等(携带幂等键或重试前查重),避免超时重试产生重复 dataset。
-
-#### Scenario: 创建即开专属 dataset
-
-- **WHEN** 知识库创建成功
-- **THEN** 系统已为其创建带归属标签的专属 RAGFlow dataset,并保存知识库与 dataset 的映射
-
-#### Scenario: dataset 创建失败整体回滚
-
-- **WHEN** RAGFlow dataset 创建失败
-- **THEN** 系统不保留半成品知识库记录(整体失败/回滚),并返回错误
-
-#### Scenario: 创建超时重试不产生重复 dataset
-
-- **WHEN** dataset 创建请求超时后被重试
-- **THEN** 凭幂等键/查重确保最终只存在一个 dataset,不产生重复
-
-### Requirement: 知识库级 RBAC
-
-系统 SHALL 在每个知识库访问路径强制校验:调用者 MUST 属于知识库所属组织,且其角色满足该操作。owner 与 admin SHALL 可管理(增删改),member 默认可读。
+> **已知差异(未解决,待产品决策):** 早期设计曾要求"owner/admin 才能增删改,member 仅可读,越权返回 403"(角色分级管理)。经代码核查(`backend-py/app/services/knowledge_base_service.py::create/update/delete`、`backend-py/app/routers/knowledge_bases.py`),当前实现**没有任何角色校验**——只要是该组织成员(含 MEMBER),即可创建/重命名/删除组织内任意知识库,不存在返回 403 的代码路径。`docs/user-guide.md` 的权限对照表与此一致(MEMBER/ADMIN/OWNER 三行"创建/删除知识库"均为 ✅),但与本文件曾经的"越权 403"表述矛盾。这是"仅按组织隔离、组织内成员平权管理知识库"的产品决策,还是遗漏的角色校验实现缺口,尚未有人拍板——不是本次文档核查能直接判定对错的问题,已记录在 `TODOS.md`。
 
 #### Scenario: 授权读取
 
 - **WHEN** 组织内 member 读取本组织的知识库
 - **THEN** 系统返回知识库内容
 
-#### Scenario: 越权写入被拒
-
-- **WHEN** member 尝试删除知识库
-- **THEN** 系统返回 403,知识库不被删除
-
 ### Requirement: 知识库跨租户隔离(安全红线)
 
-系统 MUST 确保成员无法访问、列举或操作其他组织的知识库及其 RAGFlow dataset。
+系统 MUST 确保成员无法访问、列举或操作其他组织的知识库。
 
 #### Scenario: 跨组织访问知识库按不存在处理
 
 - **WHEN** 组织 A 的成员按 ID 直取组织 B 的知识库
-- **THEN** 系统返回 404(按"资源不存在"处理),绝不返回内容,也不访问对方的 dataset,不泄露其是否存在
+- **THEN** 系统返回 404(按"资源不存在"处理),绝不返回内容,不泄露其是否存在
 
 #### Scenario: 列举仅限本组织知识库
 
 - **WHEN** 成员列举知识库
 - **THEN** 结果只包含其所属组织的知识库
-
-### Requirement: 知识库关联 RAGFlow Chat Assistant
-
-系统 SHALL 在 `knowledge_base` 表中存储 `ragflow_chat_id` 字段，记录该知识库对应的 RAGFlow Chat Assistant ID。该字段 SHALL 在首次发起问答时懒建并写入，之后复用。
-
-#### Scenario: 首次问答写入 ragflow_chat_id
-
-- **WHEN** 知识库 `ragflow_chat_id` 为空时发起首次问答
-- **THEN** 系统创建 Chat Assistant 后将 chatId 持久化到 `knowledge_base.ragflow_chat_id`，后续问答直接读取该值
-
-#### Scenario: ragflow_chat_id 不影响已有知识库操作
-
-- **WHEN** 对已有知识库执行 CRUD（创建/更新/删除/列举）操作
-- **THEN** `ragflow_chat_id` 字段的存在不改变任何已有行为；删除知识库时 SHALL 一并清理对应 Chat Assistant

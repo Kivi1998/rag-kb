@@ -50,7 +50,7 @@ schema 变更请同步更新本文件 + `eval/metrics.py` + `eval/README.md`。
 NO_RETRIEVAL | LOW_CONFIDENCE | OUT_OF_SCOPE | SAFETY
 ```
 
-禁止新增枚举值；如需新增，先更新 frontend/src/types/query.ts + 后端 Java 枚举 + 本 schema。
+禁止新增枚举值；如需新增，先更新 frontend/src/types/query.ts + 后端 `refusal_reason` 取值处（`backend-py/app/services/query_service.py` 等，Python 侧为 `str | None` 字面量，无独立 Enum 类）+ 本 schema。
 
 ## 校验规则
 

@@ -2,6 +2,28 @@
 
 延后但已记录的工作项。每项注明动机、现状与起点,避免日后丢失上下文。
 
+## 知识库 CRUD 无角色校验,与 openspec 规格历史表述矛盾(2026-07-21,需要产品决策)
+
+- **What:** 全仓库文档核查时,委派子 Agent 重写 4 个 RAGFlow 时代遗留的 openspec 规格
+  (`document-management`/`knowledge-base`/`frontend-document-management`/
+  `frontend-kb-management`)期间,子 Agent 报告并经我独立核查确认:
+  `backend-py/app/services/knowledge_base_service.py` 的 `create`/`update`/`delete` 与
+  `backend-py/app/routers/knowledge_bases.py` 对应路由**没有任何角色校验**——只要是该
+  组织成员(含 MEMBER),即可创建/重命名/删除组织内**任意**知识库,代码里不存在返回 403
+  的路径。
+- **矛盾点:** `openspec/specs/knowledge-base/spec.md` 曾经的"知识库级 RBAC"小节写着
+  "owner/admin 才能增删改,member 越权删除返回 403";但 `docs/user-guide.md` 的权限对照表
+  独立地把"创建/删除知识库"标成 MEMBER/ADMIN/OWNER 全部 ✅,与代码实际行为一致。已把
+  openspec 规格的对应小节改为如实描述现状,并注明这处矛盾,不代替产品做判断。
+- **Why 不直接判定:** 这可能是"知识库只按组织隔离,组织内成员互相视为可信同事、平权管理"
+  的有意产品设计(内部技术团队工具,信任边界是组织而不是角色),也可能是早期 Java 版就有
+  该角色校验、迁移到 Python 时遗漏了实现——两种可能性都合理,不属于文档核查能直接拍板
+  fix 的范畴。
+- **Depends on / blocked by:** 需要人决定:(a) 维持现状、把 openspec 规格和
+  `docs/user-guide.md` 都明确写成"组织内成员平权管理知识库,无角色限制";还是 (b) 在
+  `knowledge_base_service.py` 的 `update`/`delete` 补上 owner/admin 校验、`docs/user-guide.md`
+  权限表相应两格改回 ❌。在决定前,两份文档已如实反映代码现状,不再自相矛盾。
+
 ## Java 退役后数据库迁移工具处于空白状态(2026-07-21)
 
 - **What:** Java 版用 Flyway 管理 schema(`backend/src/main/resources/db/migration/V001`～

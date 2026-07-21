@@ -54,8 +54,13 @@ python3 eval/scripts/build_qa_set.py
 
 ### Step 5: 跑 baseline 评测
 ```bash
-# 还需要后端跑一次实际检索，输出 predicted JSONL
-# （本期未实现：需要 rag-kb 后端加一个 /api/v1/eval/run 端点）
+# eval_retrieval_runner.py 直接调用 backend-py 生产 HybridRetriever 跑真实检索，
+# 输出 predicted JSONL，不经过任何后端 HTTP 端点
+python3 eval/scripts/eval_retrieval_runner.py \
+  eval/datasets/corpus-index.jsonl \
+  eval/datasets/eval-set-2026Q3.jsonl \
+  eval/datasets/predicted.jsonl
+
 python3 eval/runner.py \
   --ground-truth eval/datasets/eval-set-2026Q3.jsonl \
   --predicted    eval/datasets/predicted.jsonl \
@@ -64,9 +69,8 @@ python3 eval/runner.py \
 
 ## 工具维护要点
 
-### EvalCorpusIndexer.java
-- **必须 Java 17**（rag-kb 编译产物版本 61.0）
-- classpath 必须含 `backend/target/classes`
+### eval_corpus_indexer.py
+- 直接 import `backend-py` 的 `DocumentParserFactory`/`TechnicalChunker`，无需单独编译/classpath
 - 输出 JSONL 字段：chunk_id/document_id/document_name/ordinal/heading_path/page_no/line_start/line_end/language/content_hash/snippet/content/metadata
 - 失败的文档会 `[skip]` 跳过，但继续跑其他文件
 

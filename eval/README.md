@@ -58,8 +58,11 @@ python3 -m eval.runner \
 
 ### 3. 准备生产 prediction
 
-T201/T202 落地后，后端评测入口（`/api/v1/eval/run`，由 T306 安全复核）应输出本 schema 的 JSONL。
-本地离线测试可手工构造或基于 fixture 生成。
+规划阶段曾设想由后端提供 `/api/v1/eval/run` HTTP 端点直接产出 prediction；实际落地路径是
+`eval/scripts/` 下的离线 runner（`eval_corpus_indexer.py`/`eval_retrieval_runner.py`/
+`eval_fact_verification_runner.py`/`eval_answer_self_checker_runner.py`），直接调用
+`backend-py` 的 `DocumentParserFactory`/`TechnicalChunker`/`HybridRetriever` 等真实组件跑离线检索，
+产出本 schema 的 JSONL，不经过 HTTP 层，也没有该端点。用法详见 `eval/scripts/README.md`。
 
 ## 指标说明
 

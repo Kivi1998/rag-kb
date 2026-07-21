@@ -6,7 +6,7 @@
 
 ## 已实现：指代消解
 
-- **代码**：`DeepSeekCoreferenceResolver`（`backend/.../ragcore/conversation/impl/`），
+- **代码**：`DeepSeekCoreferenceResolver`（`backend-py/app/ragcore/memory/deepseek_coreference_resolver.py`），
   由 `ConversationMemoryOrchestrator.prepareContext()` 在检索前调用；
 - **行为**：仅当会话存在历史消息时，调 LLM 把当前问题的代词/省略补全为独立完整问题
   （如“那它过了还能退吗”→“重疾险过了还能退吗”）；prompt 明确只做指代消解，不改写
@@ -15,7 +15,7 @@
 
 ## 已实现但默认关闭：查询意图分类与动态 RRF 权重
 
-- **代码**：`QueryIntentClassifier`、`LlmQueryIntentClassifier`、`QueryIntent`（`backend/.../ragcore/intent/`），
+- **代码**：`QueryIntentClassifier`、`LlmQueryIntentClassifier`、`QueryIntent`（`backend-py/app/ragcore/intent/`），
   由 `QueryService.prepare()` 在指代消解后调用；
 - **分类**：`precise-lookup`、`semantic`、`comparative`、`out-of-scope` 四类；模型调用失败或输出
   不可解析时返回 `UNKNOWN`，继续使用默认等权检索，不阻断问答；
