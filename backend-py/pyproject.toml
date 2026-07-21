@@ -1,0 +1,49 @@
+[project]
+name = "rag-kb-backend"
+version = "0.1.0"
+description = "toB 企业级文档知识库 — 编排后端(Python/FastAPI 重写,替代 backend/ Java 版)"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi==0.116.1",
+    "uvicorn[standard]==0.35.0",
+    "pydantic==2.9.2",
+    "pydantic-settings==2.6.1",
+    "sqlalchemy[asyncio]==2.0.36",
+    "asyncpg==0.30.0",
+    "alembic==1.14.0",
+    "python-jose[cryptography]==3.3.0",
+    "passlib[bcrypt]==1.7.4",
+    # passlib 1.7.4 的 bcrypt 后端探测代码读取 `bcrypt.__about__.__version__`；
+    # bcrypt>=4.1 移除了这个属性，会导致 passlib 在首次 hash/verify 时抛出
+    # AttributeError/ValueError（详见 pyup.io/passlib#171 系列已知问题）。锁定
+    # 兼容区间，不是引入新依赖，只是约束 passlib[bcrypt]] extra 实际解析到的版本。
+    "bcrypt>=4.0,<4.1",
+    "redis==5.2.0",
+    "motor==3.6.0",
+    "minio==7.2.12",
+    "elasticsearch==8.17.0",
+    # elasticsearch 的 AsyncElasticsearch 传输层需要 aiohttp 作为 HTTP 节点实现;
+    # 之前没人真实实例化过这个客户端(全是 mock 测试),整合联调时才发现缺失。
+    "aiohttp==3.11.11",
+    "pymilvus==2.6.2",
+    # httpx.AsyncClient() 默认信任系统代理环境变量;本机(以及不少企业网络环境)配了
+    # SOCKS 代理(all_proxy=socks5://...),没有 socksio 会在构造客户端时直接 ImportError。
+    # 补齐依赖比强制 trust_env=False 更稳妥——后者会让"部署环境本来就需要代理才能出网"
+    # 的场景反而连不上真实模型 API。
+    "httpx[socks]==0.28.1",
+    "python-multipart==0.0.20",
+    "prometheus-client==0.21.1",
+    "pymupdf==1.26.3",
+    "python-docx==1.2.0",
+    "python-pptx==1.0.2",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest==8.3.4",
+    "pytest-asyncio==0.25.0",
+    "mypy==1.14.0",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
