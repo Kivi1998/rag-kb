@@ -168,11 +168,14 @@ class DocumentDirectUploadService:
 
         stream: BinaryIO = await self._object_storage.open(snapshot.object_storage_path)
         try:
+            # 不能用 stream.seek(0) 倒带重读:MinioObjectStorage.open() 返回的是
+            # MinIO SDK 的 HTTP 响应体(urllib3 流),和本地文件流不同,只能顺序读一次,
+            # 不支持 seek——用已读到的 prefix 直接喂给摘要计算的第一段,而不是读两遍。
             prefix = stream.read(CONTENT_SNIFF_BYTES)
-            stream.seek(0)
             detected_content_type = UploadContentInspector.inspect(snapshot.file_name, prefix)
 
             digest = hashlib.sha256()
+            digest.update(prefix)
             while True:
                 chunk = stream.read(65536)
                 if not chunk:

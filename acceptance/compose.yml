@@ -2,28 +2,34 @@ name: rag-kb-acceptance
 
 x-backend-common: &backend-common
   build:
-    context: ../backend
-    dockerfile: Dockerfile.acceptance
+    context: ../backend-py
+    dockerfile: Dockerfile
   image: rag-kb-backend:acceptance
   restart: unless-stopped
   init: true
   environment: &backend-environment
-    DB_URL: jdbc:postgresql://postgres:5432/ragkb
-    DB_USERNAME: ragkb
-    DB_PASSWORD: ragkb-acceptance
+    # Java 版是 JDBC URL(不含密码,密码走独立的 DB_USERNAME/DB_PASSWORD);Python 版
+    # `app/core/db.py` 把 db_url 整串直接传给 SQLAlchemy create_async_engine(),
+    # DB_USERNAME/DB_PASSWORD 这两个 Settings 字段从未被用来连接——asyncpg 方言 +
+    # 用户名密码内嵌在 URL 里才是 Python 侧唯一生效的连接方式。
+    DB_URL: postgresql+asyncpg://ragkb:ragkb-acceptance@postgres:5432/ragkb
     REDIS_HOST: redis
     REDIS_PORT: 6379
     JWT_SECRET: acceptance-only-jwt-secret-at-least-32-bytes-2026
+    # Python 侧尚未实现 Prometheus /metrics 端点(见 TODOS.md 已知缺口),这个变量在
+    # Python 侧是完全无效的死配置,留着不报错(pydantic-settings extra="ignore"),
+    # 不删是为了未来实现 metrics 端点时环境变量名已经就位。
     RAG_METRICS_TOKEN: backend-acceptance-metrics-key
     RAG_STORAGE_TYPE: minio
     MINIO_ENDPOINT: http://minio:9000
     MINIO_BUCKET: rag-kb
     MINIO_ACCESS_KEY: ragacceptance
     MINIO_SECRET_KEY: ragacceptance-secret
-    RAG_MULTIMODAL_PARSER_ENABLED: "false"
+    # 本地 deepdoc OCR + faster-whisper ASR(app.ragcore.parser.local_multimodal_parser),
+    # 已验证真实可用,打开后验收覆盖扫描 PDF/图片/音视频/内嵌图片 DOCX·PPTX 这几类
+    # 必须走多模态兜底的格式,不再像早期(parser-gateway 刚下线时)保守关闭。
+    RAG_MULTIMODAL_PARSER_ENABLED: "true"
     RAG_UPLOAD_MAX_SIZE_BYTES: 2147483648
-    RAG_UPLOAD_MAX_FILE_SIZE: 2048MB
-    RAG_UPLOAD_MAX_REQUEST_SIZE: 2050MB
     RAG_ES_HEALTH_ENABLED: "false"
   read_only: true
   tmpfs:
@@ -42,6 +48,8 @@ x-backend-common: &backend-common
     redis:
       condition: service_healthy
     minio-init:
+      condition: service_completed_successfully
+    migrate:
       condition: service_completed_successfully
 
 x-worker-environment: &worker-environment
@@ -140,6 +148,30 @@ services:
       - ALL
     tmpfs:
       - /tmp:size=16m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+
+  # backend-py 目前没有自己的 DB 迁移工具(Java 版靠 Flyway 在应用启动时自动建表,
+  # Python 版 `app/core/db.py` 明确说明"DDL 权威来源不变",一直借用 Java 那份 Flyway
+  # 脚本,只是从未把建表这一步独立出来)。Java 退役时 `db/migration/` 整个目录跟着
+  # backend/ 一起被删除,backend-py 完全没有替代的建表机制——这是本次改造过程中
+  # 发现的、任务描述之外的额外缺口。这里用官方 Flyway CLI 镜像做一次性迁移
+  # 容器,复用从 Java 版恢复到 `backend-py/db/migration/` 的原始 V001-V015 DDL
+  # (纯 SQL,表名已与 backend-py 的 SQLAlchemy 模型逐一核对一致),迁移完成后
+  # `flyway_schema_history` 表存在,api/worker 依赖它 completed_successfully 才启动。
+  migrate:
+    image: flyway/flyway:10-alpine
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ../backend-py/db/migration:/flyway/sql:ro
+    command:
+      - -url=jdbc:postgresql://postgres:5432/ragkb
+      - -user=ragkb
+      - -password=ragkb-acceptance
+      - -connectRetries=20
+      - migrate
     security_opt:
       - no-new-privileges:true
 
@@ -254,7 +286,9 @@ services:
     ports:
       - "127.0.0.1:${ACCEPTANCE_API_PORT:-18090}:8090"
     healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8090/actuator/health"]
+      # Java 是 Spring Boot Actuator 的 /actuator/health;Python 版 app/main.py 手写的
+      # 是 /health(返回 {"status": "UP"})。
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8090/health"]
       interval: 10s
       timeout: 5s
       retries: 30
