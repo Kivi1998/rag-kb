@@ -35,11 +35,9 @@ class Settings(BaseSettings):
     redis_password: str = ""
     redis_database: int = 0
 
-    # 多模态解析网关
+    # 多模态解析(本地 deepdoc OCR + faster-whisper ASR 兜底;不再需要
+    # endpoint/api-key/timeout 等 HTTP 网关相关配置,原网关客户端已下线)
     rag_multimodal_parser_enabled: bool = False
-    rag_multimodal_parser_endpoint: str = ""
-    rag_multimodal_parser_api_key: str = ""
-    rag_multimodal_parser_timeout_ms: int = 600_000
 
     # ASR(faster-whisper，从 parser-gateway 移植进 app.ragcore.parser.asr 的内置模块调用，
     # 环境变量名沿用 parser-gateway 里的 PARSER_WHISPER_* 语义)

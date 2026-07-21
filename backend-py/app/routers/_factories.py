@@ -278,14 +278,14 @@ def build_parser_factory() -> "DocumentParserFactory":
     """Ingestion Worker / 临时文档共享的解析器链工厂。
 
     9 个解析器:6 个本地 (Pdf/Docx/Pptx/Markdown/StructuredData/Code) +
-    TextParser / SubtitleParser / HttpMultimodalDocumentParser(网关兜底,关闭时
-    supports() 自动 False)。无内部状态,模块级单例即可。
+    TextParser / SubtitleParser / LocalMultimodalDocumentParser(本地 OCR/ASR
+    兜底,关闭时 supports() 自动 False)。无内部状态,模块级单例即可。
     """
     from app.ragcore.parser.code_parser import CodeParser
     from app.ragcore.parser.docx_parser import DocxParser
     from app.ragcore.parser.factory import DocumentParserFactory
+    from app.ragcore.parser.local_multimodal_parser import LocalMultimodalDocumentParser
     from app.ragcore.parser.markdown_parser import MarkdownParser
-    from app.ragcore.parser.multimodal_parser import HttpMultimodalDocumentParser
     from app.ragcore.parser.pdf_parser import PdfParser
     from app.ragcore.parser.pptx_parser import PptxParser
     from app.ragcore.parser.structured_data_parser import StructuredDataParser
@@ -302,7 +302,7 @@ def build_parser_factory() -> "DocumentParserFactory":
             CodeParser(),
             TextParser(),
             SubtitleParser(),
-            HttpMultimodalDocumentParser(),
+            LocalMultimodalDocumentParser(),
         ]
     )
 

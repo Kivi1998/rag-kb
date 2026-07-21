@@ -56,7 +56,7 @@ class QuickDocumentService:
         # 临时文档本就受 rag.quick-document.max-total-characters 额度限制,一次性
         # 读入内存可接受。
         raw_bytes = await file.read()
-        parsed = self._factory.parse(_to_parser_input(doc_id, file, raw_bytes))
+        parsed = await self._factory.parse(_to_parser_input(doc_id, file, raw_bytes))
         content = _join_sections(parsed)
 
         existing = sum(d.character_count for d in await self._store.find_all_by_session(session_id))

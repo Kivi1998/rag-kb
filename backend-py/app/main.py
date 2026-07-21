@@ -87,10 +87,10 @@ def _build_ingestion_components():
     from app.ragcore.parser.code_parser import CodeParser
     from app.ragcore.parser.docx_parser import DocxParser
     from app.ragcore.parser.factory import DocumentParserFactory
-    from app.ragcore.parser.markdown_parser import MarkdownParser
-    from app.ragcore.parser.multimodal_parser import (
-        HttpMultimodalDocumentParser,
+    from app.ragcore.parser.local_multimodal_parser import (
+        LocalMultimodalDocumentParser,
     )
+    from app.ragcore.parser.markdown_parser import MarkdownParser
     from app.ragcore.parser.pdf_parser import PdfParser
     from app.ragcore.parser.pptx_parser import PptxParser
     from app.ragcore.parser.structured_data_parser import (
@@ -104,7 +104,8 @@ def _build_ingestion_components():
 
     stop_event = asyncio.Event()
 
-    # 1) 9 个本地解析器 + 多模态网关,factory 无状态、模块级单例
+    # 1) 8 个本地解析器 + 本地多模态兜底(deepdoc OCR + faster-whisper ASR),
+    #    factory 无状态、模块级单例
     parser_factory = DocumentParserFactory(
         [
             MarkdownParser(),
@@ -115,7 +116,7 @@ def _build_ingestion_components():
             StructuredDataParser(),
             TextParser(),
             SubtitleParser(),
-            HttpMultimodalDocumentParser(),
+            LocalMultimodalDocumentParser(),
         ]
     )
 

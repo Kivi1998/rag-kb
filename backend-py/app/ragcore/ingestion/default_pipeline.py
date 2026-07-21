@@ -124,7 +124,7 @@ class DefaultDocumentIngestionPipeline(DocumentIngestionPipeline):
         if cached is not None:
             return cached
         content = await self._read_object(task)
-        parsed = self._factory.parse(_DocumentInputAdapter(task, content))
+        parsed = await self._factory.parse(_DocumentInputAdapter(task, content))
         saved = await self._artifact_store.save(task, parsed)
         if hasattr(self._lifecycle, "record_parsed_artifact"):
             await self._lifecycle.record_parsed_artifact(

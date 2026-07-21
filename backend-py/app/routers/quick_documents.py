@@ -20,7 +20,7 @@ from app.ragcore.parser.code_parser import CodeParser
 from app.ragcore.parser.docx_parser import DocxParser
 from app.ragcore.parser.factory import DocumentParserFactory
 from app.ragcore.parser.markdown_parser import MarkdownParser
-from app.ragcore.parser.multimodal_parser import HttpMultimodalDocumentParser
+from app.ragcore.parser.local_multimodal_parser import LocalMultimodalDocumentParser
 from app.ragcore.parser.pdf_parser import PdfParser
 from app.ragcore.parser.pptx_parser import PptxParser
 from app.ragcore.parser.structured_data_parser import StructuredDataParser
@@ -43,7 +43,7 @@ router = APIRouter(
 
 
 # 模块级单例:9 个解析器(6 本地 + 3 新增)与 DocumentParserFactory 都无内部状态,
-# 允许多请求共用。多模态网关解析器在 settings 关闭时 supports() 自动返回 False,
+# 允许多请求共用。本地多模态解析器在 settings 关闭时 supports() 自动返回 False,
 # 不影响临时文档同步解析的现有契约。
 _PARSER_FACTORY = DocumentParserFactory(
     [
@@ -55,7 +55,7 @@ _PARSER_FACTORY = DocumentParserFactory(
         CodeParser(),
         TextParser(),
         SubtitleParser(),
-        HttpMultimodalDocumentParser(),
+        LocalMultimodalDocumentParser(),
     ]
 )
 

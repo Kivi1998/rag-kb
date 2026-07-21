@@ -1,4 +1,13 @@
-"""可插拔文档格式解析器的接口定义。对应 DocumentParser.java / MultimodalDocumentParser.java。"""
+"""可插拔文档格式解析器的接口定义。对应 DocumentParser.java。
+
+历史说明:曾经还有一个 `MultimodalDocumentParser` ABC(对应 Java 版
+`MultimodalDocumentParser.java`),`supports(document_input)` 签名与本文件的
+`DocumentParser.supports(content_type, filename)` 不一致——那是当年专门为
+"把 OCR/ASR 转发给独立 parser-gateway HTTP 服务"这个适配层设计的接口。现在
+OCR(deepdoc)/ASR(faster-whisper)都已经下沉为进程内模块,`LocalMultimodalDocument
+Parser`(见 `app.ragcore.parser.local_multimodal_parser`)直接实现本文件的
+`DocumentParser` 接口即可,不再需要这个签名不一致的历史 ABC,已删除。
+"""
 
 from __future__ import annotations
 
@@ -17,20 +26,3 @@ class DocumentParser(ABC):
     @abstractmethod
     def parse(self, document_input: DocumentInput) -> ParsedDocument:
         """解析文档；解析器判断需要 OCR/ASR 时应抛出 NeedsMultimodalParsingException。"""
-
-
-class MultimodalDocumentParser(ABC):
-    """OCR、版面识别和语音转写的外部适配边界。
-
-    对应 MultimodalDocumentParser.java：编排服务不绑定具体 OCR/ASR 实现，
-    生产部署把它替换为独立 parser-gateway 服务，结果统一以 ParsedDocument 结构
-    进入后续切块与索引链路。
-    """
-
-    @abstractmethod
-    def supports(self, document_input: DocumentInput) -> bool:
-        """是否支持该输入(通常按扩展名判断)。"""
-
-    @abstractmethod
-    def parse(self, document_input: DocumentInput) -> ParsedDocument:
-        """调用多模态网关完成解析。"""
