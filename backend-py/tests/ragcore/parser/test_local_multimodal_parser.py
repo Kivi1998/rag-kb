@@ -2,17 +2,17 @@
 
 deepdoc OCR 真实模型加载需要下载约 90MB 权重(见
 `tests/ragcore/parser/deepdoc/test_deepdoc_pipeline.py` 里 `TestParsePageEndToEnd`
-的 skip 说明),单测里一律 monkeypatch 掉 `_safe_parse_page`/`_ocr_bytes`/
-`transcribe_media` 这几个"真正调用模型"的边界函数,只验证:
+的 skip 说明),单测里一律 monkeypatch 掉 `_safe_parse_page`/`_ocr_bytes` 这几个
+"真正调用模型"的边界函数,只验证:
 - `supports()` 开关 × 扩展名矩阵;
 - 各扩展名正确分发到对应处理逻辑(PDF 原生文本页 vs OCR 页、DOCX/PPTX 内嵌图片
-  OCR、图片直接 OCR、音视频落盘转写);
-- OCR/ASR 产出空结果时的 `ParseError` 语义;
+  OCR、图片直接 OCR);
+- OCR 产出空结果时的 `ParseError` 语义;
 - 解析器返回值真的是 `await` 得到的结果(而不是协程对象本身),覆盖
   `DocumentParserFactory` 侧需要的"parse() 是 async def"这一契约。
 
-真实 OCR/ASR 全链路已经在任务报告里用真实文件手动验证过一次,不在这里重复跑
-真实模型推理。
+真实 OCR 全链路已经在任务报告里用真实文件手动验证过一次,不在这里重复跑真实
+模型推理。2026-09 已移除音视频(ASR)支持,原音视频落盘转写相关测试一并删除。
 """
 
 from __future__ import annotations
@@ -24,9 +24,11 @@ from docx import Document
 from PIL import Image
 
 from app.ragcore.parser import local_multimodal_parser as lmp
-from app.ragcore.parser.asr import AsrTranscript, ParseError, ParserUnavailableError
-from app.ragcore.parser.local_multimodal_parser import LocalMultimodalDocumentParser
-from app.ragcore.model import DocumentSection
+from app.ragcore.parser.local_multimodal_parser import (
+    LocalMultimodalDocumentParser,
+    ParseError,
+    ParserUnavailableError,
+)
 from tests.ragcore.parser.conftest import FakeDocumentInput
 
 
@@ -43,8 +45,7 @@ class TestSupports:
     def test_supports_all_documented_extensions_when_enabled(self, monkeypatch):
         monkeypatch.setattr(lmp.settings, "rag_multimodal_parser_enabled", True)
         parser = LocalMultimodalDocumentParser()
-        for ext in ("pdf", "docx", "pptx", "png", "jpg", "jpeg", "tif", "tiff",
-                    "mp4", "mov", "mkv", "mp3", "wav"):
+        for ext in ("pdf", "docx", "pptx", "png", "jpg", "jpeg", "tif", "tiff"):
             assert parser.supports(None, f"file.{ext}") is True, ext
 
     def test_rejects_unsupported_extension(self, monkeypatch):
@@ -226,48 +227,6 @@ class TestParseDispatch:
         parser = LocalMultimodalDocumentParser()
         with pytest.raises(ParseError, match="图片 OCR 未产出任何文字"):
             await parser.parse(_input(buf.getvalue(), "blank.png"))
-
-    async def test_media_extension_routes_to_asr_via_temp_file(self, monkeypatch):
-        captured_path = {}
-
-        def _fake_transcribe(path):
-            captured_path["path"] = path
-            assert path.exists()
-            return AsrTranscript(
-                sections=(DocumentSection(text="转写出的文字", metadata={"type": "subtitle"}),),
-                metadata={"format": "wav", "language": "zh"},
-            )
-
-        monkeypatch.setattr(lmp, "transcribe_media", _fake_transcribe)
-
-        parser = LocalMultimodalDocumentParser()
-        result = await parser.parse(_input(b"fake-audio-bytes", "clip.wav"))
-
-        assert len(result.sections) == 1
-        assert result.sections[0].text == "转写出的文字"
-        assert result.metadata["parser"] == "local-multimodal"
-        # 临时文件用完即删,不残留磁盘垃圾。
-        assert not captured_path["path"].exists()
-
-    async def test_media_asr_produces_no_text_propagates_parse_error(self, monkeypatch):
-        def _fake_transcribe(path):
-            raise ParseError("ASR 未产生任何转写文本")
-
-        monkeypatch.setattr(lmp, "transcribe_media", _fake_transcribe)
-
-        parser = LocalMultimodalDocumentParser()
-        with pytest.raises(ParseError, match="ASR 未产生任何转写文本"):
-            await parser.parse(_input(b"silence", "silence.mp3"))
-
-    async def test_media_asr_unavailable_propagates_parser_unavailable_error(self, monkeypatch):
-        def _fake_transcribe(path):
-            raise ParserUnavailableError("ASR 模型不可用: tiny")
-
-        monkeypatch.setattr(lmp, "transcribe_media", _fake_transcribe)
-
-        parser = LocalMultimodalDocumentParser()
-        with pytest.raises(ParserUnavailableError):
-            await parser.parse(_input(b"clip", "clip.mp4"))
 
 
 class TestOcrModelUnavailable:

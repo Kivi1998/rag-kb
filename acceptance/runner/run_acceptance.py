@@ -240,9 +240,6 @@ def verify_artifacts(kb_id: str, representatives: dict[str, dict[str, Any]]) -> 
             ocr_count = int(metadata.get("ocrPageCount", metadata.get("ocrImageCount", "0")))
             if ocr_count < 1:
                 raise RuntimeError(f"{kind} 未提供 OCR 证据: {metadata}")
-        if kind.startswith("audio-") or kind.startswith("video-"):
-            if not any(section.get("metadata", {}).get("timeRange") for section in parsed.get("sections", [])):
-                raise RuntimeError(f"{kind} 缺少字幕时间戳")
         evidence[kind] = {"parser": parser_name, "sections": len(parsed.get("sections", [])),
                           "metadata": metadata}
     object_count = sum(1 for _ in client.list_objects(MINIO_BUCKET, recursive=True))

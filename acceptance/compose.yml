@@ -25,9 +25,10 @@ x-backend-common: &backend-common
     MINIO_BUCKET: rag-kb
     MINIO_ACCESS_KEY: ragacceptance
     MINIO_SECRET_KEY: ragacceptance-secret
-    # 本地 deepdoc OCR + faster-whisper ASR(app.ragcore.parser.local_multimodal_parser),
-    # 已验证真实可用,打开后验收覆盖扫描 PDF/图片/音视频/内嵌图片 DOCX·PPTX 这几类
-    # 必须走多模态兜底的格式,不再像早期(parser-gateway 刚下线时)保守关闭。
+    # 本地 deepdoc OCR(app.ragcore.parser.local_multimodal_parser),已验证真实
+    # 可用,打开后验收覆盖扫描 PDF/图片/内嵌图片 DOCX·PPTX 这几类必须走多模态
+    # 兜底的格式,不再像早期(parser-gateway 刚下线时)保守关闭。音视频(ASR)
+    # 支持已于 2026-09 移除。
     RAG_MULTIMODAL_PARSER_ENABLED: "true"
     RAG_UPLOAD_MAX_SIZE_BYTES: 2147483648
     RAG_ES_HEALTH_ENABLED: "false"

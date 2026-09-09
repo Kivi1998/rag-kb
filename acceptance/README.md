@@ -1,8 +1,8 @@
 # 文档上传与解析生产同构验收
 
-本目录验证真实的 PostgreSQL、Redis、MinIO、Elasticsearch、双摄取 Worker、OCR 与 ASR 网关。Embedding 使用可注入 429/5xx 的确定性协议替身，因此这里签收的是上传、解析、切块、模型协议容错和索引写入可靠性，不签收向量模型的检索质量。
+本目录验证真实的 PostgreSQL、Redis、MinIO、Elasticsearch、双摄取 Worker、OCR 网关。Embedding 使用可注入 429/5xx 的确定性协议替身，因此这里签收的是上传、解析、切块、模型协议容错和索引写入可靠性，不签收向量模型的检索质量。
 
-验收数据固定为 5000 份，覆盖 Markdown、代码、JSON、DOCX、文本/图片型 PPTX、文本/扫描 PDF、PNG/JPG/TIFF、SRT/VTT、WAV/MP3 与 MP4/MOV/MKV。每份文件均通过 `initiate -> MinIO presigned PUT -> complete` 的真实 HTTP 链路进入系统。
+验收数据固定为 5000 份，覆盖 Markdown、代码、JSON、DOCX、文本/图片型 PPTX、文本/扫描 PDF、PNG/JPG/TIFF、SRT/VTT。每份文件均通过 `initiate -> MinIO presigned PUT -> complete` 的真实 HTTP 链路进入系统。
 
 首次修改解析链路时先运行每种格式 1 份的快速兼容性测试：
 
@@ -24,7 +24,7 @@ docker compose -f compose.yml cp runner:/reports/acceptance-report.json ./report
 docker compose -f compose.yml --profile acceptance down -v --remove-orphans
 ```
 
-通过条件：5000/5000 上传成功、5000/5000 最终 `READY`、内容哈希和解析产物路径均唯一且非空、全部写入解析时间、代表格式可从 MinIO 解析产物恢复出预期文本、OCR 格式有 OCR 证据、音视频有时间戳、Elasticsearch chunk 数量不少于 5000。默认模型替身的前两次 Embedding 请求返回 503，最终仍必须 0 失败。
+通过条件：5000/5000 上传成功、5000/5000 最终 `READY`、内容哈希和解析产物路径均唯一且非空、全部写入解析时间、代表格式可从 MinIO 解析产物恢复出预期文本、OCR 格式有 OCR 证据、Elasticsearch chunk 数量不少于 5000。默认模型替身的前两次 Embedding 请求返回 503，最终仍必须 0 失败。
 
 ## Worker 故障转移验收
 
@@ -44,7 +44,7 @@ docker start rag-kb-acceptance-worker-a-1
 
 `model-stub` 只能用于链路和协议验收，禁止将其结果描述为真实向量模型的检索质量结果。
 
-验收后端与正式发布镜像共用 `backend-py/Dockerfile`（两阶段构建：builder 安装依赖含 onnxruntime/opencv-python-headless/faster-whisper，运行态基于 `python:3.13-slim`，非 root 用户）。
+验收后端与正式发布镜像共用 `backend-py/Dockerfile`（两阶段构建：builder 安装依赖含 onnxruntime/opencv-python-headless，运行态基于 `python:3.13-slim`，非 root 用户）。
 
 ## Milvus 验收边界
 

@@ -52,7 +52,7 @@ class IngestionJobLifecycleService(Protocol):
         parser_name: str,
         parser_version: str,
     ) -> None:
-        """解析成功后记录可复用产物,后续向量化/索引失败重试不重复 OCR/ASR。"""
+        """解析成功后记录可复用产物,后续向量化/索引失败重试不重复 OCR。"""
 
     async def recover_expired_leases(self) -> int:
         """仅回收明确已过期的任务;超过最大尝试次数的任务转 FAILED,避免无限重试。"""

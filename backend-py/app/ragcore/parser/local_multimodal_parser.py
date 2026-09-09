@@ -1,10 +1,16 @@
 """本地多模态解析兜底实现。取代已下线的 `HttpMultimodalDocumentParser`。
 
 背景:parser-gateway 最初被拆成独立 HTTP 微服务,是因为主编排后端历史上是 Java,
-Java 没有好用的 OCR/ASR 生态。现在主后端(backend-py)本身也是 Python 了,
-deepdoc(OCR + 版面识别 + 表格结构识别,见 `app.ragcore.parser.deepdoc`)和
-faster-whisper ASR(见 `app.ragcore.parser.asr`)都已经下沉为进程内模块,不再
-需要跨进程 HTTP 往返、也不再需要网关那套 multipart 契约。
+Java 没有好用的 OCR 生态。现在主后端(backend-py)本身也是 Python 了,
+deepdoc(OCR + 版面识别 + 表格结构识别,见 `app.ragcore.parser.deepdoc`)已经
+下沉为进程内模块,不再需要跨进程 HTTP 往返、也不再需要网关那套 multipart 契约。
+
+**2026-09 已移除音视频(ASR)支持**:当前业务不再需要音视频转写能力,原
+`app.ragcore.parser.asr`(faster-whisper 封装)模块、`mp3/wav/mp4/mov/mkv`
+扩展名的分发分支与对应上传校验规则一并删除。`ParseError`/`ParserUnavailableError`
+两个异常原定义在 `asr.py` 里,但语义上一直是"多模态实现执行失败"的通用异常
+(OCR 侧同样在用),随 `asr.py` 一起删除会破坏 OCR 路径,因此改为直接定义在本
+文件里,不再从已删除的模块导入。
 
 **设计决策 1 —— 不再实现 `MultimodalDocumentParser` 这个历史 ABC**:
 `MultimodalDocumentParser.supports(document_input)` 的签名和 `DocumentParser.
@@ -35,15 +41,11 @@ supports(content_type, filename)` 不一致,是当年专门为 HTTP 网关适配
     - pptx: 逐页取文本框文字(风格对齐本地 `PptxParser`),对
       `MSO_SHAPE_TYPE.PICTURE` 类型的图片形状同样跑纯文字 OCR。
     - png/jpg/jpeg/tif/tiff: 整张图片直接跑 `deepdoc.pipeline.parse_page()`。
-    - mp3/wav/mp4/mov/mkv: 先把字节内容落到一个临时文件(`transcribe_media()`
-      要求磁盘路径),再调 `app.ragcore.parser.asr.transcribe_media()`,处理完
-      清理临时文件。
 
-**异常语义**:直接复用 `app.ragcore.parser.asr` 里已经定义的 `ParseError`
-(执行失败,如 OCR/ASR 均未产出任何文本)和 `ParserUnavailableError`(OCR/ASR
-底层模型不可用),不新增一套平行的异常类——这两个异常描述的是"某个具体多模态
-实现自身失败了",OCR 和 ASR 属于同一层级的失败语义,没有必要为 OCR 侧另开一个
-名字相同、含义相同的异常类。
+**异常语义**:`ParseError`(执行失败,如 OCR 均未产出任何文本)和
+`ParserUnavailableError`(OCR 底层模型不可用)定义在本文件里,不新增一套平行的
+异常类——这两个异常描述的是"多模态实现自身失败了",不是
+`NeedsMultimodalParsingException` 那种"移交决策"信号。
 """
 
 from __future__ import annotations
@@ -51,8 +53,6 @@ from __future__ import annotations
 import asyncio
 import io
 import logging
-import tempfile
-from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -61,26 +61,33 @@ from PIL import Image
 from app.core.config import settings
 from app.ragcore.model import DocumentInput, DocumentSection, ParsedDocument
 from app.ragcore.parser._util import extension_of
-from app.ragcore.parser.asr import ParseError, ParserUnavailableError, transcribe_media
 from app.ragcore.parser.base import DocumentParser
 from app.ragcore.parser.deepdoc import pipeline as deepdoc_pipeline
 from app.ragcore.parser.docx_parser import _iter_block_items
 
 logger = logging.getLogger(__name__)
 
+
+class ParseError(RuntimeError):
+    """多模态解析执行失败(如 OCR 未产生任何文本片段)。"""
+
+
+class ParserUnavailableError(RuntimeError):
+    """OCR 运行时未安装,或模型加载失败,导致解析能力当前不可用。"""
+
+
 _IMAGE_EXTENSIONS = {"png", "jpg", "jpeg", "tif", "tiff"}
-_AV_EXTENSIONS = {"mp4", "mov", "mkv", "mp3", "wav"}
-_SUPPORTED_EXTENSIONS = {"pdf", "docx", "pptx", *_IMAGE_EXTENSIONS, *_AV_EXTENSIONS}
+_SUPPORTED_EXTENSIONS = {"pdf", "docx", "pptx", *_IMAGE_EXTENSIONS}
 
 # 文本型 PDF 逐页判定阈值:与 parser-gateway `_parse_pdf` 一致的经验值。
 _MIN_CHARS_PER_PAGE = 100
 
 
 class LocalMultimodalDocumentParser(DocumentParser):
-    """OCR(deepdoc) + ASR(faster-whisper) 的本地多模态兜底解析器。
+    """OCR(deepdoc)的本地多模态兜底解析器。
 
     在 `DocumentParserFactory` 的解析器列表里应放在最后一位:本地格式解析器
-    (`PdfParser`/`DocxParser`/`PptxParser` 等)判定"需要 OCR/ASR"时抛出
+    (`PdfParser`/`DocxParser`/`PptxParser` 等)判定"需要 OCR"时抛出
     `NeedsMultimodalParsingException`,factory 捕获后继续尝试列表里的下一个
     candidate,自然落到这里对整份文档重新完整解析。
     """
@@ -110,8 +117,6 @@ class LocalMultimodalDocumentParser(DocumentParser):
             sections, metadata = await asyncio.to_thread(_parse_pptx_bytes, content)
         elif ext in _IMAGE_EXTENSIONS:
             sections, metadata = await asyncio.to_thread(_parse_image_bytes, content, ext)
-        elif ext in _AV_EXTENSIONS:
-            sections, metadata = await asyncio.to_thread(_parse_media_bytes, content, ext)
         else:
             # supports() 已经把关,理论上不会走到这里;保留 fail-fast 兜底
             # 避免未来扩展 _SUPPORTED_EXTENSIONS 时忘记同步分发分支。
@@ -296,25 +301,6 @@ def _parse_image_bytes(content: bytes, ext: str) -> tuple[list[DocumentSection],
         raise ParseError("图片 OCR 未产出任何文字")
 
     return sections, {"format": ext, "ocrPageCount": "1", "parser": "local-multimodal"}
-
-
-def _parse_media_bytes(content: bytes, ext: str) -> tuple[list[DocumentSection], dict[str, str]]:
-    """把音视频字节落到临时文件后调用 `transcribe_media()`,完成后清理临时文件。
-
-    `transcribe_media()` 要求磁盘路径(`Path`),而 `DocumentInput.open_stream()`
-    只提供同步二进制流,因此需要这一层落盘桥接。
-    """
-    with tempfile.NamedTemporaryFile(suffix=f".{ext}", delete=False) as tmp:
-        tmp.write(content)
-        tmp_path = Path(tmp.name)
-    try:
-        transcript = transcribe_media(tmp_path)
-    finally:
-        tmp_path.unlink(missing_ok=True)
-
-    metadata = dict(transcript.metadata)
-    metadata.setdefault("parser", "local-multimodal")
-    return list(transcript.sections), metadata
 
 
 # ---------------------------------------------------------------------------

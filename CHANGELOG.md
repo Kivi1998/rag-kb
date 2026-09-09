@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.8.0] - 2026-09-09
+
+### 变更
+
+- **移除音视频（ASR）解析支持** —— 当前业务不再需要音视频文档解析。删除
+  `app.ragcore.parser.asr`（faster-whisper 封装）及其单测；`LocalMultimodalDocumentParser`
+  不再分发 `mp3/wav/mp4/mov/mkv` 扩展名，`ParseError`/`ParserUnavailableError`
+  两个通用异常（OCR 侧同样在用）改为直接定义在该文件内，不再从已删除的 `asr.py`
+  导入；上传扩展名白名单（`DocumentUploadPolicy`）与文件头嗅探
+  （`UploadContentInspector`）同步移除这五个扩展名；配置项 `rag_whisper_model`/
+  `rag_whisper_device`/`rag_whisper_compute_type` 与 `faster-whisper`/`requests`
+  依赖一并删除。
+
 ## [0.7.0] - 2026-07-18
 
 ### 新增功能

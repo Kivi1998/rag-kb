@@ -104,7 +104,7 @@ def _build_ingestion_components():
 
     stop_event = asyncio.Event()
 
-    # 1) 8 个本地解析器 + 本地多模态兜底(deepdoc OCR + faster-whisper ASR),
+    # 1) 8 个本地解析器 + 本地多模态兜底(deepdoc OCR),
     #    factory 无状态、模块级单例
     parser_factory = DocumentParserFactory(
         [

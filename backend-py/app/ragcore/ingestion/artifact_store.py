@@ -1,4 +1,4 @@
-"""解析结果对象存储,避免后续阶段重试时重复执行高成本 OCR/ASR。
+"""解析结果对象存储,避免后续阶段重试时重复执行高成本 OCR。
 
 对应 Java 版 `ragcore/ingestion/ParsedArtifactStore.java`。
 产物路径约定: `<原始对象路径>.parsed-v<版本>.json`,与 `parserVersion` 字段对齐

@@ -78,28 +78,6 @@ def inspect(filename: str, prefix: bytes) -> str:
         big_endian = _starts_with(prefix, b"MM\x00\x2a")
         _require(little_endian or big_endian, "TIFF 文件头无效")
         return "image/tiff"
-    if extension == "wav":
-        _require(
-            len(prefix) >= 12
-            and _starts_with(prefix, b"RIFF")
-            and prefix[8:12] == b"WAVE",
-            "WAV 文件头无效",
-        )
-        return "audio/wav"
-    if extension == "mp3":
-        id3 = _starts_with(prefix, b"ID3")
-        frame = len(prefix) >= 2 and (prefix[0] & 0xFF) == 0xFF and ((prefix[1] & 0xE0) == 0xE0)
-        _require(id3 or frame, "MP3 文件头无效")
-        return "audio/mpeg"
-    if extension in {"mp4", "mov"}:
-        _require(
-            len(prefix) >= 12 and prefix[4:8] == b"ftyp",
-            "MP4/MOV 文件头无效",
-        )
-        return "video/quicktime" if extension == "mov" else "video/mp4"
-    if extension == "mkv":
-        _require(_starts_with(prefix, b"\x1a\x45\xdf\xa3"), "MKV 文件头无效")
-        return "video/x-matroska"
     if extension in _TEXTUAL_EXTENSIONS:
         _require(not _contains_nul(prefix), "文本或代码文件包含二进制空字节")
         return {

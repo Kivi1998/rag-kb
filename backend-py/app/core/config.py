@@ -35,15 +35,11 @@ class Settings(BaseSettings):
     redis_password: str = ""
     redis_database: int = 0
 
-    # 多模态解析(本地 deepdoc OCR + faster-whisper ASR 兜底;不再需要
-    # endpoint/api-key/timeout 等 HTTP 网关相关配置,原网关客户端已下线)
+    # 多模态解析(本地 deepdoc OCR 兜底;不再需要 endpoint/api-key/timeout 等
+    # HTTP 网关相关配置,原网关客户端已下线)
+    # 2026-09 已移除音视频(ASR/faster-whisper)支持,原 rag_whisper_* 配置项
+    # 一并删除,当前业务不再需要音视频解析。
     rag_multimodal_parser_enabled: bool = False
-
-    # ASR(faster-whisper，从 parser-gateway 移植进 app.ragcore.parser.asr 的内置模块调用，
-    # 环境变量名沿用 parser-gateway 里的 PARSER_WHISPER_* 语义)
-    rag_whisper_model: str = "small"
-    rag_whisper_device: str = "cpu"
-    rag_whisper_compute_type: str = "int8"
 
     # 对象存储
     rag_storage_type: str = "local"

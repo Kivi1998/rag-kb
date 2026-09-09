@@ -25,4 +25,4 @@ class DocumentParser(ABC):
 
     @abstractmethod
     def parse(self, document_input: DocumentInput) -> ParsedDocument:
-        """解析文档；解析器判断需要 OCR/ASR 时应抛出 NeedsMultimodalParsingException。"""
+        """解析文档；解析器判断需要 OCR 时应抛出 NeedsMultimodalParsingException。"""

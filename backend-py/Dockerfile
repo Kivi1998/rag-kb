@@ -48,7 +48,7 @@ RUN pip install --no-cache-dir --upgrade pip \
 FROM python:3.13-slim AS runtime
 
 # 运行期系统依赖:
-#   - libgomp1:  onnxruntime 和 faster-whisper(ctranslate2)运行时都链接 OpenMP。
+#   - libgomp1:  onnxruntime 运行时链接 OpenMP。
 #   - curl:      compose healthcheck 用(`curl -fsS http://127.0.0.1:8090/health`)。
 #   - ca-certificates: 出站 HTTPS(embedding/ES/HuggingFace 模型下载等)校验证书链需要。
 # opencv-python-headless 本身就是免 GUI 依赖(libGL 等)的发行版,不需要额外装图形库。
@@ -71,9 +71,10 @@ ENV PATH="/opt/venv/bin:${PATH}" \
 
 # 非 root 用户是 --no-create-home,没有 /home/app;镜像/生产环境常以 read_only
 # 根文件系统运行(见 acceptance/compose.yml 的 read_only: true + /tmp tmpfs),
-# faster-whisper 首次加载模型时走 huggingface_hub 默认缓存路径 ~/.cache/huggingface
-# 会写失败——这个不像 huqie trie 那样能静默降级,ASR 模型下不下来就是真的不可用。
-# 指到 /tmp 下(tmpfs 可写)是必须的,不是可选优化。
+# deepdoc(OCR/版面分析/表格结构识别)首次加载模型时走 huggingface_hub 默认缓存
+# 路径 ~/.cache/huggingface 会写失败——这个不像 huqie trie 那样能静默降级,
+# deepdoc 模型下不下来就是真的不可用。指到 /tmp 下(tmpfs 可写)是必须的,不是
+# 可选优化。
 
 WORKDIR /app
 COPY app ./app

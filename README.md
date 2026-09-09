@@ -30,7 +30,7 @@ LangChain、LlamaIndex、Dify 等高层编排框架。
 |----|------|---------|
 | 后端框架 | FastAPI | Python 3.13，端口 **8090** |
 | RAG Core | 自研（`backend-py/app/ragcore`） | 解析 → 切块（V3 结构感知）→ 索引 → 混合检索 → 生成，全流程自建 |
-| 多模态解析 | 进程内本地模块 | deepdoc（OCR/版面分析/表格结构识别，移植自 RAGFlow deepdoc，Apache 2.0）+ faster-whisper（ASR）；原独立 `parser-gateway` 微服务已合并进程内并删除 |
+| 多模态解析 | 进程内本地模块 | deepdoc（OCR/版面分析/表格结构识别，移植自 RAGFlow deepdoc，Apache 2.0）；原独立 `parser-gateway` 微服务已合并进程内并删除；音视频（ASR）支持已于 2026-09 移除 |
 | 业务数据库 | PostgreSQL 16 | SQLAlchemy（async, asyncpg 驱动）；schema 由历史 Flyway 迁移固化，当前无在用的迁移工具（见 [已知待办事项](#已知待办事项)） |
 | 缓存 | Redis 7 | JWT 黑名单、临时文档、会话记忆各用独立逻辑 DB |
 | 会话记忆存储 | MongoDB 7 | 多轮对话短期/长期记忆 |
@@ -80,7 +80,7 @@ rag-kb/
 │       ├── services/                # 业务编排层
 │       ├── routers/                 # REST 路由（auth/documents/query/... 九个模块）
 │       └── ragcore/                 # 自研 RAG 核心
-│           ├── parser/              # 文档解析器 + deepdoc（OCR/版面/表格）+ asr（ASR）
+│           ├── parser/              # 文档解析器 + deepdoc（OCR/版面/表格）
 │           ├── chunk/                # TechnicalChunker V3（结构感知切块）
 │           ├── embedding/ rerank/ generation/  # 模型客户端（OpenAI 兼容协议）
 │           ├── retrieval/           # 混合检索（BM25/kNN/RRF/Milvus 候选源）
@@ -198,7 +198,7 @@ RAG_GENERATION_API_KEY=<你的 DeepSeek key>
 RAG_GENERATION_MODEL=deepseek-chat
 
 RAG_INGESTION_WORKER_ENABLED=true
-RAG_MULTIMODAL_PARSER_ENABLED=true   # 本地 OCR/ASR，首次调用会懒加载模型
+RAG_MULTIMODAL_PARSER_ENABLED=true   # 本地 OCR，首次调用会懒加载模型
 ```
 
 ```bash
@@ -352,9 +352,9 @@ cd backend-py
 ```
 
 覆盖：认证、多租户隔离、文档上传（含直传两阶段校验）、摄取任务状态机与 Worker 租约/心跳、
-文档解析（Markdown/代码/JSON-YAML-XML/DOCX/PPTX/PDF/字幕）、本地多模态解析（deepdoc OCR +
-faster-whisper ASR）、切块（TechnicalChunker V3）、混合检索（BM25/kNN/RRF）、生成（事实
-核验闸门 + 生成后自检）、会话记忆、临时文档问答、查询审计等。
+文档解析（Markdown/代码/JSON-YAML-XML/DOCX/PPTX/PDF/字幕）、本地多模态解析（deepdoc OCR）、
+切块（TechnicalChunker V3）、混合检索（BM25/kNN/RRF）、生成（事实核验闸门 + 生成后自检）、
+会话记忆、临时文档问答、查询审计等。
 
 ### 前端测试
 

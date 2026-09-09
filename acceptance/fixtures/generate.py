@@ -1,15 +1,18 @@
 #!/usr/bin/env python3
-"""生成可重复的脱敏多模态验收样本，包含真实音轨和三种视频容器。"""
+"""生成可重复的脱敏多模态验收样本。
+
+2026-09:已移除音视频（ASR）样本生成——当前业务不再需要音视频文档解析，原
+espeak-ng/ffmpeg 生成的 wav/mp3/mp4/mov/mkv 五个 fixture 一并删除，对应权重
+（100）转移给 markdown/code 两个既有类别，保持总数 5000 不变。
+"""
 
 from __future__ import annotations
 
 import json
-import subprocess
 import sys
 from pathlib import Path
 
 import fitz
-import imageio_ffmpeg
 from PIL import Image, ImageDraw, ImageFont
 from docx import Document
 from docx.enum.style import WD_STYLE_TYPE
@@ -19,11 +22,6 @@ from pptx.util import Inches
 
 
 EXPECTED = "RAG PRODUCTION ACCEPTANCE 2026"
-FFMPEG = imageio_ffmpeg.get_ffmpeg_exe()
-
-
-def command(*args: str) -> None:
-    subprocess.run(args, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
 def make_image(path: Path) -> None:
@@ -104,18 +102,9 @@ def main(output: Path) -> None:
     (output / "captions.vtt").write_text(
         f"WEBVTT\n\n00:00:00.000 --> 00:00:04.000\n{EXPECTED}\n", encoding="utf-8")
 
-    speech = "Production document ingestion accepts audio and video subtitles with timestamps."
-    command("espeak-ng", "-v", "en-us", "-s", "135", "-w", str(output / "speech.wav"), speech)
-    command(FFMPEG, "-y", "-i", str(output / "speech.wav"), "-codec:a", "libmp3lame",
-            str(output / "speech.mp3"))
-    for extension in ("mp4", "mov", "mkv"):
-        command(FFMPEG, "-y", "-f", "lavfi", "-i", "color=c=navy:s=640x360:r=25",
-                "-i", str(output / "speech.wav"), "-shortest", "-c:v", "mpeg4", "-q:v", "5",
-                "-c:a", "aac", str(output / f"speech.{extension}"))
-
     fixtures = [
-        {"name": "guide.md", "kind": "markdown", "expected": EXPECTED, "weight": 1300},
-        {"name": "service.java", "kind": "code", "expected": EXPECTED, "weight": 900},
+        {"name": "guide.md", "kind": "markdown", "expected": EXPECTED, "weight": 1350},
+        {"name": "service.java", "kind": "code", "expected": EXPECTED, "weight": 950},
         {"name": "config.json", "kind": "structured", "expected": EXPECTED, "weight": 500},
         {"name": "technical.docx", "kind": "docx", "expected": EXPECTED, "weight": 850},
         {"name": "word-image-only.docx", "kind": "docx-ocr", "expected": "RAG PRODUCTION", "weight": 50},
@@ -128,11 +117,6 @@ def main(output: Path) -> None:
         {"name": "ocr.tiff", "kind": "image-tiff", "expected": "RAG PRODUCTION", "weight": 50},
         {"name": "captions.srt", "kind": "subtitle-srt", "expected": EXPECTED, "weight": 50},
         {"name": "captions.vtt", "kind": "subtitle-vtt", "expected": EXPECTED, "weight": 50},
-        {"name": "speech.wav", "kind": "audio-wav", "expected": "production document", "weight": 30},
-        {"name": "speech.mp3", "kind": "audio-mp3", "expected": "production document", "weight": 25},
-        {"name": "speech.mp4", "kind": "video-mp4", "expected": "production document", "weight": 20},
-        {"name": "speech.mov", "kind": "video-mov", "expected": "production document", "weight": 15},
-        {"name": "speech.mkv", "kind": "video-mkv", "expected": "production document", "weight": 10},
     ]
     assert sum(item["weight"] for item in fixtures) == 5000
     (output / "fixtures.json").write_text(json.dumps(fixtures, ensure_ascii=False, indent=2), encoding="utf-8")

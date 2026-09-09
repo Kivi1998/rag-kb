@@ -1,5 +1,5 @@
 """会话内临时文档(长上下文直接塞入模式):不写入知识库、不切块不索引,只在当前会话有效。
-上传接口同步阻塞——解析(含 OCR/ASR 网关降级)完成才返回,不走异步任务状态机。
+上传接口同步阻塞——解析(含 OCR 网关降级)完成才返回,不走异步任务状态机。
 对应 Java 版 controller/QuickDocumentController.java。
 
 装配入口:`_quick_document_service` 把 6 个本地解析器 + Redis 临时文档存储串起来;

@@ -5,7 +5,7 @@
     工厂: DocumentParserFactory, UnsupportedDocumentTypeException
     具体实现: MarkdownParser, CodeParser, DocxParser, PdfParser, PptxParser,
              TextParser, SubtitleParser, StructuredDataParser,
-             LocalMultimodalDocumentParser(本地 OCR/ASR 兜底,由 base 之外的
+             LocalMultimodalDocumentParser(本地 OCR 兜底,由 base 之外的
              其他模块按需导入)
 
 历史说明: `MultimodalDocumentParser` 这个签名不一致的历史 ABC(为已下线的

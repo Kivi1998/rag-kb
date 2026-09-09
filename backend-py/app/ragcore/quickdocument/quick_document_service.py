@@ -1,7 +1,7 @@
 """会话内临时文档的解析、额度校验与存取编排。
 
 对应 Java 版 `ragcore/quickdocument/QuickDocumentService.java`。
-复用 `DocumentParserFactory`(含 OCR/ASR 网关自动降级),不新写解析逻辑;
+复用 `DocumentParserFactory`(含 OCR 网关自动降级),不新写解析逻辑;
 不切块、不向量化、不写入知识库索引。
 
 字符预算超出会话已用额度时抛 `QuotaExceededException`,不写入任何数据

@@ -1,7 +1,8 @@
 """所有上传入口共享的文件名、扩展名和大小策略。
 
 对应 Java 版 `ragcore/upload/DocumentUploadPolicy.java`。
-文件名长度上限 500,扩展名白名单覆盖 md/txt/pdf/docx/pptx/常见图像/音视频/代码/配置。
+文件名长度上限 500,扩展名白名单覆盖 md/txt/pdf/docx/pptx/常见图像/代码/配置。
+2026-09 已移除音视频(mp3/wav/mp4/mov/mkv)扩展名,当前业务不再需要音视频解析。
 """
 
 from __future__ import annotations
@@ -16,7 +17,7 @@ ALLOWED_EXTENSIONS: Final[frozenset[str]] = frozenset(
     {
         "md", "markdown", "txt", "pdf", "docx", "pptx", "srt", "vtt", "json",
         "yaml", "yml", "xml",
-        "png", "jpg", "jpeg", "tif", "tiff", "mp3", "wav", "mp4", "mov", "mkv",
+        "png", "jpg", "jpeg", "tif", "tiff",
         "java", "py", "js", "ts", "tsx", "jsx", "go", "rs", "sql", "sh", "bash",
         "properties", "conf", "ini", "gradle", "pom",
     }
@@ -51,11 +52,6 @@ def _expected_content_type(extension: str) -> str:
         "jpeg": "image/jpeg",
         "tif": "image/tiff",
         "tiff": "image/tiff",
-        "mp3": "audio/mpeg",
-        "wav": "audio/wav",
-        "mp4": "video/mp4",
-        "mov": "video/quicktime",
-        "mkv": "video/x-matroska",
     }
     return table.get(extension, "text/plain")
 
